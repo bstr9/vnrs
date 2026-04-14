@@ -82,167 +82,251 @@ impl OmsEngine {
 
     /// Process tick event
     pub fn process_tick(&self, tick: TickData) {
-        if let Ok(mut data) = self.data.write() {
-            data.ticks.insert(tick.vt_symbol(), tick);
-        }
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.ticks.insert(tick.vt_symbol(), tick);
     }
 
     /// Process order event
     pub fn process_order(&self, order: OrderData) {
-        if let Ok(mut data) = self.data.write() {
-            let vt_orderid = order.vt_orderid();
-            
-            // If order is active, update data in dict
-            if order.is_active() {
-                data.active_orders.insert(vt_orderid.clone(), order.clone());
-            } else {
-                // Otherwise, pop inactive order from dict
-                data.active_orders.remove(&vt_orderid);
-            }
-            
-            data.orders.insert(vt_orderid, order);
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        let vt_orderid = order.vt_orderid();
+        
+        // If order is active, update data in dict
+        if order.is_active() {
+            data.active_orders.insert(vt_orderid.clone(), order.clone());
+        } else {
+            // Otherwise, pop inactive order from dict
+            data.active_orders.remove(&vt_orderid);
         }
+        
+        data.orders.insert(vt_orderid, order);
     }
 
     /// Process trade event
     pub fn process_trade(&self, trade: TradeData) {
-        if let Ok(mut data) = self.data.write() {
-            data.trades.insert(trade.vt_tradeid(), trade);
-        }
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.trades.insert(trade.vt_tradeid(), trade);
     }
 
     /// Process position event
     pub fn process_position(&self, position: PositionData) {
-        if let Ok(mut data) = self.data.write() {
-            data.positions.insert(position.vt_positionid(), position);
-        }
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.positions.insert(position.vt_positionid(), position);
     }
 
     /// Process account event
     pub fn process_account(&self, account: AccountData) {
-        if let Ok(mut data) = self.data.write() {
-            data.accounts.insert(account.vt_accountid(), account);
-        }
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.accounts.insert(account.vt_accountid(), account);
     }
 
     /// Process contract event
     pub fn process_contract(&self, contract: ContractData) {
-        if let Ok(mut data) = self.data.write() {
-            data.contracts.insert(contract.vt_symbol(), contract);
-        }
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.contracts.insert(contract.vt_symbol(), contract);
     }
 
     /// Process quote event
     pub fn process_quote(&self, quote: QuoteData) {
-        if let Ok(mut data) = self.data.write() {
-            let vt_quoteid = quote.vt_quoteid();
-            
-            // If quote is active, update data in dict
-            if quote.is_active() {
-                data.active_quotes.insert(vt_quoteid.clone(), quote.clone());
-            } else {
-                // Otherwise, pop inactive quote from dict
-                data.active_quotes.remove(&vt_quoteid);
-            }
-            
-            data.quotes.insert(vt_quoteid, quote);
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        let vt_quoteid = quote.vt_quoteid();
+        
+        // If quote is active, update data in dict
+        if quote.is_active() {
+            data.active_quotes.insert(vt_quoteid.clone(), quote.clone());
+        } else {
+            // Otherwise, pop inactive quote from dict
+            data.active_quotes.remove(&vt_quoteid);
         }
+        
+        data.quotes.insert(vt_quoteid, quote);
     }
 
     /// Get latest tick data by vt_symbol
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
-        self.data.read().ok()?.ticks.get(vt_symbol).cloned()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.ticks.get(vt_symbol).cloned()
     }
 
     /// Get latest order data by vt_orderid
     pub fn get_order(&self, vt_orderid: &str) -> Option<OrderData> {
-        self.data.read().ok()?.orders.get(vt_orderid).cloned()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.orders.get(vt_orderid).cloned()
     }
 
     /// Get trade data by vt_tradeid
     pub fn get_trade(&self, vt_tradeid: &str) -> Option<TradeData> {
-        self.data.read().ok()?.trades.get(vt_tradeid).cloned()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.trades.get(vt_tradeid).cloned()
     }
 
     /// Get latest position data by vt_positionid
     pub fn get_position(&self, vt_positionid: &str) -> Option<PositionData> {
-        self.data.read().ok()?.positions.get(vt_positionid).cloned()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.positions.get(vt_positionid).cloned()
     }
 
     /// Get latest account data by vt_accountid
     pub fn get_account(&self, vt_accountid: &str) -> Option<AccountData> {
-        self.data.read().ok()?.accounts.get(vt_accountid).cloned()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.accounts.get(vt_accountid).cloned()
     }
 
     /// Get contract data by vt_symbol
     pub fn get_contract(&self, vt_symbol: &str) -> Option<ContractData> {
-        self.data.read().ok()?.contracts.get(vt_symbol).cloned()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.contracts.get(vt_symbol).cloned()
     }
 
     /// Get latest quote data by vt_quoteid
     pub fn get_quote(&self, vt_quoteid: &str) -> Option<QuoteData> {
-        self.data.read().ok()?.quotes.get(vt_quoteid).cloned()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.quotes.get(vt_quoteid).cloned()
     }
 
     /// Get all tick data
     pub fn get_all_ticks(&self) -> Vec<TickData> {
-        self.data.read().map(|d| d.ticks.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.ticks.values().cloned().collect()
     }
 
     /// Get all order data
     pub fn get_all_orders(&self) -> Vec<OrderData> {
-        self.data.read().map(|d| d.orders.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.orders.values().cloned().collect()
     }
 
     /// Get all trade data
     pub fn get_all_trades(&self) -> Vec<TradeData> {
-        self.data.read().map(|d| d.trades.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.trades.values().cloned().collect()
     }
 
     /// Get all position data
     pub fn get_all_positions(&self) -> Vec<PositionData> {
-        self.data.read().map(|d| d.positions.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.positions.values().cloned().collect()
     }
 
     /// Get all account data
     pub fn get_all_accounts(&self) -> Vec<AccountData> {
-        self.data.read().map(|d| d.accounts.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.accounts.values().cloned().collect()
     }
 
     /// Get all contract data
     pub fn get_all_contracts(&self) -> Vec<ContractData> {
-        self.data.read().map(|d| d.contracts.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.contracts.values().cloned().collect()
     }
 
     /// Get all quote data
     pub fn get_all_quotes(&self) -> Vec<QuoteData> {
-        self.data.read().map(|d| d.quotes.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.quotes.values().cloned().collect()
     }
 
     /// Get all active orders
     pub fn get_all_active_orders(&self) -> Vec<OrderData> {
-        self.data.read().map(|d| d.active_orders.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.active_orders.values().cloned().collect()
     }
 
     /// Get all active quotes
     pub fn get_all_active_quotes(&self) -> Vec<QuoteData> {
-        self.data.read().map(|d| d.active_quotes.values().cloned().collect()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.active_quotes.values().cloned().collect()
     }
 
     /// Process log event
     pub fn process_log(&self, log: LogData) {
-        if let Ok(mut data) = self.data.write() {
-            data.logs.insert(0, log);
-            // Keep only last 1000 logs
-            if data.logs.len() > 1000 {
-                data.logs.truncate(1000);
-            }
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.logs.insert(0, log);
+        // Keep only last 1000 logs
+        if data.logs.len() > 1000 {
+            data.logs.truncate(1000);
         }
     }
 
     /// Get all log data
     pub fn get_all_logs(&self) -> Vec<LogData> {
-        self.data.read().map(|d| d.logs.clone()).unwrap_or_default()
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.logs.clone()
     }
 }
 
@@ -342,7 +426,8 @@ impl MainEngine {
         };
         
         // Register OMS engine
-        if let Ok(mut engines) = engine.engines.write() {
+        {
+            let mut engines = engine.engines.write().unwrap_or_else(|e| e.into_inner());
             engines.insert("oms".to_string(), engine.oms_engine.clone());
             engines.insert("log".to_string(), engine.log_engine.clone());
         }
@@ -352,24 +437,28 @@ impl MainEngine {
 
     /// Start the main engine event loop
     pub async fn start(&self) {
-        if let Ok(mut running) = self.running.write() {
-            *running = true;
-        }
+        let mut running = self.running.write().unwrap_or_else(|e| e.into_inner());
+        *running = true;
+        drop(running);
 
         // Take the receiver from the RwLock
         let rx = {
-            let mut rx_lock = self.event_rx.write().unwrap();
+            let mut rx_lock = self.event_rx.write().unwrap_or_else(|e| e.into_inner());
             rx_lock.take()
         };
 
         if let Some(mut rx) = rx {
-            while *self.running.read().unwrap() {
+            loop {
+                let is_running = *self.running.read().unwrap_or_else(|e| e.into_inner());
+                if !is_running {
+                    break;
+                }
                 tokio::select! {
                     Some((event_type, event)) = rx.recv() => {
                         self.process_event(&event_type, &event);
                     }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-                        // Timer tick
+                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(1)) => {
+                        // Timer tick — short sleep to check running flag
                     }
                 }
             }
@@ -394,20 +483,19 @@ impl MainEngine {
         }
 
         // Call registered handlers
-        if let Ok(handlers) = self.handlers.read() {
-            if let Some(handler_list) = handlers.get(event_type) {
+        let handlers = self.handlers.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(handler_list) = handlers.get(event_type) {
+            for handler in handler_list {
+                handler(event);
+            }
+        }
+        
+        // Also call handlers for base event type (without suffix)
+        let base_type = event_type.split('.').next().unwrap_or(event_type);
+        if base_type != event_type {
+            if let Some(handler_list) = handlers.get(base_type) {
                 for handler in handler_list {
                     handler(event);
-                }
-            }
-            
-            // Also call handlers for base event type (without suffix)
-            let base_type = event_type.split('.').next().unwrap_or(event_type);
-            if base_type != event_type {
-                if let Some(handler_list) = handlers.get(base_type) {
-                    for handler in handler_list {
-                        handler(event);
-                    }
                 }
             }
         }
@@ -417,26 +505,28 @@ impl MainEngine {
     pub fn add_gateway(&self, gateway: Arc<dyn BaseGateway>) -> Arc<dyn BaseGateway> {
         let gateway_name = gateway.gateway_name().to_string();
         
-        if let Ok(mut gateways) = self.gateways.write() {
-            gateways.insert(gateway_name, gateway.clone());
-        }
+        let mut gateways = self.gateways.write().unwrap_or_else(|e| e.into_inner());
+        gateways.insert(gateway_name, gateway.clone());
         
         gateway
     }
 
     /// Get a gateway by name
     pub fn get_gateway(&self, gateway_name: &str) -> Option<Arc<dyn BaseGateway>> {
-        self.gateways.read().ok()?.get(gateway_name).cloned()
+        let gateways = self.gateways.read().unwrap_or_else(|e| e.into_inner());
+        gateways.get(gateway_name).cloned()
     }
 
     /// Get all gateway names
     pub fn get_all_gateway_names(&self) -> Vec<String> {
-        self.gateways.read().map(|g| g.keys().cloned().collect()).unwrap_or_default()
+        let gateways = self.gateways.read().unwrap_or_else(|e| e.into_inner());
+        gateways.keys().cloned().collect()
     }
 
     /// Get all exchanges
     pub fn get_all_exchanges(&self) -> Vec<Exchange> {
-        self.exchanges.read().map(|e| e.clone()).unwrap_or_default()
+        let exchanges = self.exchanges.read().unwrap_or_else(|e| e.into_inner());
+        exchanges.clone()
     }
 
     /// Write a log message
@@ -607,11 +697,10 @@ impl MainEngine {
 
     /// Register an event handler
     pub fn register_handler(&self, event_type: &str, handler: EventHandler) {
-        if let Ok(mut handlers) = self.handlers.write() {
-            handlers.entry(event_type.to_string())
-                .or_insert_with(Vec::new)
-                .push(handler);
-        }
+        let mut handlers = self.handlers.write().unwrap_or_else(|e| e.into_inner());
+        handlers.entry(event_type.to_string())
+            .or_insert_with(Vec::new)
+            .push(handler);
     }
 
     /// Get event sender for gateways
@@ -620,27 +709,29 @@ impl MainEngine {
     }
 
     /// Close the main engine
-    #[allow(clippy::await_holding_lock)]
     pub async fn close(&self) {
         // Stop event loop
-        if let Ok(mut running) = self.running.write() {
+        {
+            let mut running = self.running.write().unwrap_or_else(|e| e.into_inner());
             *running = false;
         }
 
         // Close all engines
-        if let Ok(engines) = self.engines.read() {
+        {
+            let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
             for engine in engines.values() {
                 engine.close();
             }
         }
 
-        // Close all gateways
-        // Note: We hold the read lock across await points because close() borrows &self.
-        // This is intentional - gateways must not be modified while closing.
-        if let Ok(gateways) = self.gateways.read() {
-                for gateway in gateways.values() {
-                    gateway.close().await;
-            }
+        // Close all gateways — clone Arc refs out of the lock first to avoid holding lock across await
+        let gateways: Vec<Arc<dyn BaseGateway>> = self.gateways.read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for gateway in gateways {
+            gateway.close().await;
         }
     }
 }

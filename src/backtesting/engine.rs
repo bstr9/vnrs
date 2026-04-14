@@ -72,6 +72,10 @@ pub struct BacktestingEngine {
     
     // Logging
     logs: Vec<String>,
+    
+    // Statistics parameters
+    risk_free: f64,
+    annual_days: u32,
 }
 
 impl BacktestingEngine {
@@ -107,6 +111,8 @@ impl BacktestingEngine {
             daily_results: HashMap::new(),
             daily_result: None,
             logs: Vec::new(),
+            risk_free: 0.0,
+            annual_days: 252,
         }
     }
 
@@ -318,7 +324,24 @@ impl BacktestingEngine {
         
         for tick in self.tick_data.clone() {
             self.current_dt = tick.datetime;
-            
+
+            let synthetic_bar = BarData {
+                gateway_name: "BACKTESTING".to_string(),
+                symbol: tick.symbol.clone(),
+                exchange: tick.exchange,
+                datetime: tick.datetime,
+                interval: Some(Interval::Tick),
+                open_price: tick.last_price,
+                high_price: tick.last_price,
+                low_price: tick.last_price,
+                close_price: tick.last_price,
+                volume: tick.volume,
+                turnover: tick.turnover,
+                open_interest: tick.open_interest,
+                extra: None,
+            };
+            self.new_day(&synthetic_bar);
+
             // Cross limit orders with tick data
             self.cross_limit_order_tick(&tick);
             
@@ -434,8 +457,12 @@ impl BacktestingEngine {
             };
 
             if should_cross {
-                // Trade price is order price
-                let trade_price = order.price;
+                // Trade price is order price with slippage
+                let trade_price = match order.direction {
+                    Some(Direction::Long) => order.price + self.slippage,
+                    Some(Direction::Short) => order.price - self.slippage,
+                    _ => order.price,
+                };
                 
                 // Create trade
                 self.trade_count += 1;
@@ -498,27 +525,45 @@ impl BacktestingEngine {
             }
         }
 
-        // Trigger stop orders
         for (stop_orderid, mut stop_order) in to_trigger {
-            // Update stop order status
             stop_order.status = StopOrderStatus::Triggered;
-            
-            // Send limit order
-            let order_req = OrderRequest {
-                symbol: stop_order.vt_symbol.split('.').next().unwrap().to_string(),
-                exchange: self.exchange,
-                direction: stop_order.direction,
-                order_type: stop_order.order_type,
-                volume: stop_order.volume,
-                price: stop_order.price,
-                offset: stop_order.offset.unwrap_or(Offset::Open),
-                reference: format!("STOP_{}", stop_order.strategy_name),
+
+            let trade_price = match stop_order.direction {
+                Direction::Long => stop_order.price + self.slippage,
+                Direction::Short => stop_order.price - self.slippage,
+                _ => stop_order.price,
             };
 
-            let vt_orderid = self.send_limit_order(order_req);
-            stop_order.vt_orderid = Some(vt_orderid);
-            
-            // Update stop order
+            self.trade_count += 1;
+            let symbol = stop_order.vt_symbol.split('.').next().unwrap().to_string();
+            let trade = TradeData {
+                gateway_name: "BACKTESTING".to_string(),
+                symbol,
+                exchange: self.exchange,
+                orderid: stop_orderid.clone(),
+                tradeid: format!("{}", self.trade_count),
+                direction: Some(stop_order.direction),
+                offset: stop_order.offset.unwrap_or(Offset::Open),
+                price: trade_price,
+                volume: stop_order.volume,
+                datetime: Some(bar.datetime),
+                extra: None,
+            };
+
+            let vt_tradeid = trade.vt_tradeid();
+            self.trades.insert(vt_tradeid.clone(), trade.clone());
+            self.update_position(&trade);
+
+            if let Some(result) = &mut self.daily_result {
+                result.trades.push(trade.clone());
+                result.trade_count += 1;
+            }
+
+            if let Some(strategy) = &mut self.strategy {
+                strategy.on_trade(&trade);
+            }
+
+            stop_order.vt_orderid = Some(stop_orderid.clone());
             self.stop_orders.insert(stop_orderid.clone(), stop_order);
             self.active_stop_orders.remove(&stop_orderid);
         }
@@ -609,27 +654,45 @@ impl BacktestingEngine {
             }
         }
 
-        // Trigger stop orders
         for (stop_orderid, mut stop_order) in to_trigger {
-            // Update stop order status
             stop_order.status = StopOrderStatus::Triggered;
-            
-            // Send limit order
-            let order_req = OrderRequest {
-                symbol: stop_order.vt_symbol.split('.').next().unwrap().to_string(),
-                exchange: self.exchange,
-                direction: stop_order.direction,
-                order_type: stop_order.order_type,
-                volume: stop_order.volume,
-                price: stop_order.price,
-                offset: stop_order.offset.unwrap_or(Offset::Open),
-                reference: format!("STOP_{}", stop_order.strategy_name),
+
+            let trade_price = match stop_order.direction {
+                Direction::Long => stop_order.price + self.slippage,
+                Direction::Short => stop_order.price - self.slippage,
+                _ => stop_order.price,
             };
 
-            let vt_orderid = self.send_limit_order(order_req);
-            stop_order.vt_orderid = Some(vt_orderid);
-            
-            // Update stop order
+            self.trade_count += 1;
+            let symbol = stop_order.vt_symbol.split('.').next().unwrap().to_string();
+            let trade = TradeData {
+                gateway_name: "BACKTESTING".to_string(),
+                symbol,
+                exchange: self.exchange,
+                orderid: stop_orderid.clone(),
+                tradeid: format!("{}", self.trade_count),
+                direction: Some(stop_order.direction),
+                offset: stop_order.offset.unwrap_or(Offset::Open),
+                price: trade_price,
+                volume: stop_order.volume,
+                datetime: Some(tick.datetime),
+                extra: None,
+            };
+
+            let vt_tradeid = trade.vt_tradeid();
+            self.trades.insert(vt_tradeid.clone(), trade.clone());
+            self.update_position(&trade);
+
+            if let Some(result) = &mut self.daily_result {
+                result.trades.push(trade.clone());
+                result.trade_count += 1;
+            }
+
+            if let Some(strategy) = &mut self.strategy {
+                strategy.on_trade(&trade);
+            }
+
+            stop_order.vt_orderid = Some(stop_orderid.clone());
             self.stop_orders.insert(stop_orderid.clone(), stop_order);
             self.active_stop_orders.remove(&stop_orderid);
         }
@@ -714,6 +777,8 @@ impl BacktestingEngine {
     pub fn cancel_order(&mut self, vt_orderid: &str) {
         if self.active_limit_orders.contains_key(vt_orderid) {
             self.active_limit_orders.remove(vt_orderid);
+        } else if self.active_stop_orders.contains_key(vt_orderid) {
+            self.active_stop_orders.remove(vt_orderid);
         }
     }
 
@@ -734,8 +799,8 @@ impl BacktestingEngine {
         let stats = calculate_statistics(
             &self.daily_results,
             self.capital,
-            0.0, // risk_free
-            252, // annual_days
+            self.risk_free,
+            self.annual_days,
         );
 
         if output {
@@ -783,6 +848,16 @@ impl BacktestingEngine {
     /// Get vt_symbol
     pub fn get_vt_symbol(&self) -> &str {
         &self.vt_symbol
+    }
+
+    /// Set risk-free rate for Sharpe ratio calculation
+    pub fn set_risk_free(&mut self, risk_free: f64) {
+        self.risk_free = risk_free;
+    }
+
+    /// Set annual trading days for Sharpe ratio calculation
+    pub fn set_annual_days(&mut self, annual_days: u32) {
+        self.annual_days = annual_days;
     }
 }
 

@@ -89,6 +89,9 @@ pub static ORDERTYPE_VT2BINANCE: Lazy<HashMap<OrderType, &'static str>> = Lazy::
     let mut m = HashMap::new();
     m.insert(OrderType::Limit, "LIMIT");
     m.insert(OrderType::Market, "MARKET");
+    m.insert(OrderType::Stop, "STOP_LOSS");
+    m.insert(OrderType::Fak, "LIMIT");
+    m.insert(OrderType::Fok, "LIMIT");
     m
 });
 
@@ -97,6 +100,8 @@ pub static ORDERTYPE_BINANCE2VT: Lazy<HashMap<&'static str, OrderType>> = Lazy::
     let mut m = HashMap::new();
     m.insert("LIMIT", OrderType::Limit);
     m.insert("MARKET", OrderType::Market);
+    m.insert("STOP_LOSS", OrderType::Stop);
+    m.insert("STOP", OrderType::Stop);
     m
 });
 
@@ -106,6 +111,7 @@ pub static ORDERTYPE_VT2BINANCE_FUTURES: Lazy<HashMap<OrderType, (&'static str, 
         let mut m = HashMap::new();
         m.insert(OrderType::Limit, ("LIMIT", "GTC"));
         m.insert(OrderType::Market, ("MARKET", "GTC"));
+        m.insert(OrderType::Stop, ("STOP", "GTC"));
         m.insert(OrderType::Fak, ("LIMIT", "IOC"));
         m.insert(OrderType::Fok, ("LIMIT", "FOK"));
         m
@@ -117,6 +123,7 @@ pub static ORDERTYPE_BINANCE2VT_FUTURES: Lazy<HashMap<(&'static str, &'static st
         let mut m = HashMap::new();
         m.insert(("LIMIT", "GTC"), OrderType::Limit);
         m.insert(("MARKET", "GTC"), OrderType::Market);
+        m.insert(("STOP", "GTC"), OrderType::Stop);
         m.insert(("LIMIT", "IOC"), OrderType::Fak);
         m.insert(("LIMIT", "FOK"), OrderType::Fok);
         m

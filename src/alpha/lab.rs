@@ -148,6 +148,8 @@ impl AlphaLab {
             }
         }
 
+        bars.sort_by_key(|b| b.datetime);
+
         self.logger
             .info(&format!("Loaded {} bars from {}", bars.len(), file_path));
         Ok(bars)

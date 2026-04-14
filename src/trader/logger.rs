@@ -6,12 +6,7 @@ use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use tracing::Level;
-use tracing_subscriber::{
-    fmt,
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-    EnvFilter,
-};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use super::setting::SETTINGS;
 use super::utility::get_folder_path;
@@ -51,8 +46,7 @@ pub fn init_logger() {
     let log_file = SETTINGS.get_bool("log.file").unwrap_or(true);
 
     let level = level_from_int(log_level);
-    let filter = EnvFilter::from_default_env()
-        .add_directive(level.into());
+    let filter = EnvFilter::from_default_env().add_directive(level.into());
 
     let subscriber = tracing_subscriber::registry().with(filter);
 
@@ -65,47 +59,57 @@ pub fn init_logger() {
 
         if log_file {
             let log_path = get_log_file_path();
-            
+
             // Create log file if needed
             if let Some(parent) = log_path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
 
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .expect("Failed to open log file");
+            let file = OpenOptions::new().create(true).append(true).open(&log_path);
 
-            let file_layer = fmt::layer()
-                .with_writer(std::sync::Mutex::new(file))
-                .with_ansi(false);
-
-            subscriber
-                .with(fmt_layer)
-                .with(file_layer)
-                .init();
+            match file {
+                Ok(f) => {
+                    let file_layer = fmt::layer()
+                        .with_writer(std::sync::Mutex::new(f))
+                        .with_ansi(false);
+                    subscriber.with(fmt_layer).with(file_layer).init();
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
+                        log_path, e
+                    );
+                    subscriber.with(fmt_layer).init();
+                }
+            }
         } else {
             subscriber.with(fmt_layer).init();
         }
     } else if log_file {
         let log_path = get_log_file_path();
-        
+
         if let Some(parent) = log_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-            .expect("Failed to open log file");
+        let file = OpenOptions::new().create(true).append(true).open(&log_path);
 
-        let file_layer = fmt::layer()
-            .with_writer(std::sync::Mutex::new(file))
-            .with_ansi(false);
-
-        subscriber.with(file_layer).init();
+        match file {
+            Ok(f) => {
+                let file_layer = fmt::layer()
+                    .with_writer(std::sync::Mutex::new(f))
+                    .with_ansi(false);
+                subscriber.with(file_layer).init();
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
+                    log_path, e
+                );
+                let console_layer = fmt::layer();
+                subscriber.with(console_layer).init();
+            }
+        }
     }
 }
 

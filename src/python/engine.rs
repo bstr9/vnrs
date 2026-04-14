@@ -28,16 +28,16 @@ impl PythonEngine {
 
     pub fn add_strategy(
         &mut self,
-        py: Python,
+        _py: Python,
         strategy: Bound<'_, PythonStrategy>,
+        engine_ref: Py<PyAny>,
     ) -> PyResult<()> {
         let strategy_ref = strategy.borrow();
         let strategy_name = strategy_ref.strategy_name.clone();
         let vt_symbols = strategy_ref.vt_symbols.clone();
         drop(strategy_ref);
 
-        // Set the engine reference in the strategy
-        strategy.borrow_mut().engine = Some(py.None());
+        strategy.borrow_mut().engine = Some(engine_ref);
 
         // Store the strategy
         self.strategies
@@ -242,10 +242,11 @@ impl PythonEngine {
 
     pub fn add_strategy_py(
         &mut self,
-        py: Python,
+        _py: Python,
         strategy: Bound<'_, PythonStrategy>,
+        engine_ref: Py<PyAny>,
     ) -> PyResult<()> {
-        self.add_strategy(py, strategy)
+        self.add_strategy(_py, strategy, engine_ref)
     }
 
     pub fn init_strategy_py(&self, py: Python, strategy_name: &str) -> PyResult<()> {

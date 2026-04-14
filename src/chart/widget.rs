@@ -1089,7 +1089,12 @@ impl ChartWidget {
                                 + (ix - min_ix) as f32 * bar_pixel_width
                                 + bar_pixel_width * 0.5;
 
-                            let normalized = (value - price_min) / (price_max - price_min);
+                            let price_range = price_max - price_min;
+                            let normalized = if price_range.abs() > 1e-10 {
+                                (value - price_min) / price_range
+                            } else {
+                                0.5
+                            };
                             let y = chart_rect.bottom() - (normalized as f32 * chart_rect.height());
 
                             points.push(Pos2::new(x, y));

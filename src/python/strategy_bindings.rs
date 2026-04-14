@@ -153,56 +153,61 @@ impl PyStrategy {
     }
 
     /// Buy order (spot or futures long)
+    // TODO: implement actual order routing through engine
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn buy(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> String {
+    fn buy(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
         tracing::info!(
             "[{}] BUY {} @ {} x{}",
             self.strategy_name, vt_symbol, price, volume
         );
-        format!("BUY_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis())
+        Vec::new()
     }
 
     /// Sell order (spot or futures close long)
+    // TODO: implement actual order routing through engine
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn sell(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> String {
+    fn sell(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
         tracing::info!(
             "[{}] SELL {} @ {} x{}",
             self.strategy_name, vt_symbol, price, volume
         );
-        format!("SELL_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis())
+        Vec::new()
     }
 
     /// Short order (futures only)
+    // TODO: implement actual order routing through engine
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn short(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> String {
+    fn short(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
         if self.strategy_type == "spot" {
             tracing::warn!("[{}] Short not supported for spot trading", self.strategy_name);
-            return String::new();
+            return Vec::new();
         }
         
         tracing::info!(
             "[{}] SHORT {} @ {} x{}",
             self.strategy_name, vt_symbol, price, volume
         );
-        format!("SHORT_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis())
+        Vec::new()
     }
 
     /// Cover order (futures only)
+    // TODO: implement actual order routing through engine
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn cover(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> String {
+    fn cover(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
         if self.strategy_type == "spot" {
             tracing::warn!("[{}] Cover not supported for spot trading", self.strategy_name);
-            return String::new();
+            return Vec::new();
         }
         
         tracing::info!(
             "[{}] COVER {} @ {} x{}",
             self.strategy_name, vt_symbol, price, volume
         );
-        format!("COVER_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis())
+        Vec::new()
     }
 
     /// Cancel order
+    // TODO: implement
     fn cancel_order(&self, vt_orderid: &str) {
         tracing::info!("[{}] Cancel order: {}", self.strategy_name, vt_orderid);
     }
@@ -218,6 +223,7 @@ impl PyStrategy {
 pub struct PyStrategyEngine {
     engine: Arc<StrategyEngine>,
     rt: Runtime,
+    strategies: HashMap<String, Py<PyStrategy>>,
 }
 
 #[pymethods]
@@ -237,6 +243,7 @@ impl PyStrategyEngine {
         Ok(Self {
             engine: Arc::new(StrategyEngine::new(main_engine, event_engine)),
             rt,
+            strategies: HashMap::new(),
         })
     }
 
@@ -250,7 +257,9 @@ impl PyStrategyEngine {
             }
         }
 
-        tracing::info!("Adding Python strategy: {}", py_strategy.borrow().strategy_name);
+        let strategy_name = py_strategy.borrow().strategy_name.clone();
+        tracing::info!("Adding Python strategy: {}", strategy_name);
+        self.strategies.insert(strategy_name, py_strategy.clone().unbind());
         
         Ok(())
     }

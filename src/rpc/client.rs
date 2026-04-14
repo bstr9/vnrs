@@ -226,34 +226,23 @@ impl RpcClient {
         kwargs: HashMap<String, serde_json::Value>,
         timeout_ms: u64,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-        // Create request
         let request = RpcRequest::new(method.clone(), args, kwargs);
 
-        // Get socket with lock to ensure thread safety
-        let socket = {
-            let _lock = self.req_lock.lock().await;
-            let req_guard = self.socket_req.lock().await;
-            req_guard.as_ref().map(|s| s as *const zmq::Socket)
-        };
+        let _lock = self.req_lock.lock().await;
+        let req_guard = self.socket_req.lock().await;
 
-        let socket_ptr = socket.ok_or("REQ socket not initialized")?;
-        let socket = unsafe { &*socket_ptr };
+        let socket = req_guard.as_ref().ok_or("REQ socket not initialized")?;
 
-        // Serialize and send request
         let serialized = serde_json::to_vec(&request)?;
         socket.send(&serialized, 0)?;
         debug!("Sent RPC request: {}", method);
 
-        // Wait for response with timeout
         let poll_timeout = timeout_ms as i64;
         match socket.poll(zmq::PollEvents::POLLIN, poll_timeout) {
             Ok(n) if n > 0 => {
-                // Receive response
                 let data = socket.recv_bytes(0)?;
-                
-                // Deserialize response
                 let response: RpcResponse = serde_json::from_slice(&data)?;
-                
+
                 if response.success {
                     debug!("RPC call successful: {}", method);
                     Ok(response.data)
@@ -264,8 +253,7 @@ impl RpcClient {
                 }
             }
             Ok(_) => {
-                // Timeout
-                error!("RPC call timeout: {}", method);
+                error!("REQ socket timed out, subsequent calls may fail until reconnection");
                 Err(Box::new(TimeoutError::new(timeout_ms, request)))
             }
             Err(e) => {
@@ -279,29 +267,20 @@ impl RpcClient {
     ///
     /// Messages published to this topic will be received and passed to the callback.
     pub async fn subscribe_topic(&self, topic: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let socket = {
-            let sub_guard = self.socket_sub.lock().await;
-            sub_guard.as_ref().map(|s| s as *const zmq::Socket)
-        };
+        let sub_guard = self.socket_sub.lock().await;
 
-        if let Some(socket_ptr) = socket {
-            let socket = unsafe { &*socket_ptr };
+        if let Some(socket) = sub_guard.as_ref() {
             socket.set_subscribe(topic.as_bytes())?;
-            
-            // Track subscribed topic
-            let mut topics = self.subscribed_topics.lock().await;
-            if !topics.contains(&topic) {
-                topics.push(topic.clone());
-            }
-            
             info!("Subscribed to topic: {}", topic);
         } else {
             warn!("Attempted to subscribe but SUB socket not initialized");
-            // Still track the topic for when socket connects
-            let mut topics = self.subscribed_topics.lock().await;
-            if !topics.contains(&topic) {
-                topics.push(topic.clone());
-            }
+        }
+
+        drop(sub_guard);
+
+        let mut topics = self.subscribed_topics.lock().await;
+        if !topics.contains(&topic) {
+            topics.push(topic.clone());
         }
 
         Ok(())
@@ -309,21 +288,17 @@ impl RpcClient {
 
     /// Unsubscribe from a topic
     pub async fn unsubscribe_topic(&self, topic: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let socket = {
-            let sub_guard = self.socket_sub.lock().await;
-            sub_guard.as_ref().map(|s| s as *const zmq::Socket)
-        };
+        let sub_guard = self.socket_sub.lock().await;
 
-        if let Some(socket_ptr) = socket {
-            let socket = unsafe { &*socket_ptr };
+        if let Some(socket) = sub_guard.as_ref() {
             socket.set_unsubscribe(topic.as_bytes())?;
-            
-            // Remove from tracked topics
-            let mut topics = self.subscribed_topics.lock().await;
-            topics.retain(|t| t != &topic);
-            
             info!("Unsubscribed from topic: {}", topic);
         }
+
+        drop(sub_guard);
+
+        let mut topics = self.subscribed_topics.lock().await;
+        topics.retain(|t| t != &topic);
 
         Ok(())
     }
@@ -362,7 +337,6 @@ impl RpcClient {
             let mut disconnected_warned = false;
 
             loop {
-                // Check if still active
                 {
                     let active_guard = active.lock().await;
                     if !*active_guard {
@@ -370,38 +344,28 @@ impl RpcClient {
                     }
                 }
 
-                // Get socket reference
-                let socket = {
-                    let sub_guard = socket_sub.lock().await;
-                    sub_guard.as_ref().map(|s| s as *const zmq::Socket)
-                };
+                let sub_guard = socket_sub.lock().await;
 
-                if let Some(socket_ptr) = socket {
-                    let socket = unsafe { &*socket_ptr };
-                    
-                    // Poll for incoming messages with timeout
+                if let Some(socket) = sub_guard.as_ref() {
                     let poll_timeout = (heartbeat_tolerance.as_millis() as i64).min(POLL_TIMEOUT_MS as i64);
-                    
+
                     match socket.poll(zmq::PollEvents::POLLIN, poll_timeout) {
                         Ok(n) if n > 0 => {
-                            // Receive message
                             match socket.recv_bytes(0) {
                                 Ok(data) => {
-                                    // Deserialize message
                                     match serde_json::from_slice::<RpcMessage>(&data) {
                                         Ok(message) => {
-                                            // Handle heartbeat
                                             if message.topic == HEARTBEAT_TOPIC {
                                                 *last_received_ping.lock().await = Instant::now();
                                                 disconnected_warned = false;
                                                 debug!("Received heartbeat");
                                             } else {
-                                                // Handle regular message
+                                                drop(sub_guard);
                                                 let cb_guard = callback.lock().await;
                                                 if let Some(ref cb) = *cb_guard {
                                                     cb(message.topic, message.data);
                                                 } else {
-                                                    warn!("Received message but no callback set: {}", message.topic);
+                                                    warn!("Received message but no callback set");
                                                 }
                                             }
                                         }
@@ -416,7 +380,6 @@ impl RpcClient {
                             }
                         }
                         Ok(_) => {
-                            // No data available, check heartbeat
                             let last_ping = *last_received_ping.lock().await;
                             if Instant::now().duration_since(last_ping) > heartbeat_tolerance && !disconnected_warned {
                                     warn!(
@@ -431,7 +394,7 @@ impl RpcClient {
                         }
                     }
                 } else {
-                    // Socket not initialized, wait a bit
+                    drop(sub_guard);
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
@@ -492,9 +455,8 @@ impl MethodCache {
     pub async fn get(&self, method: String) -> RemoteMethod {
         let mut cache = self.cache.lock().await;
         
-        if let Some(_method_proxy) = cache.get(&method) {
-            // Clone the method proxy (note: this creates a new proxy with the same client/method)
-            RemoteMethod::new(self.client.clone(), method.clone())
+        if let Some(method_proxy) = cache.get(&method) {
+            method_proxy.clone()
         } else {
             let method_proxy = RemoteMethod::new(self.client.clone(), method.clone());
             cache.put(method.clone(), method_proxy.clone());

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{Local, Utc};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 use super::config::{BinanceConfigs, BinanceGatewayConfig};
@@ -17,10 +17,18 @@ use super::websocket_client::{BinanceWebSocketClient, WsMessageHandler};
 use crate::trader::{
     AccountData, BarData, CancelRequest, ContractData, Direction, Exchange,
     GatewayEventSender, GatewaySettings, GatewaySettingValue,
-    HistoryRequest, Offset, OrderData, OrderRequest, OrderType,
+    HistoryRequest, Offset, OrderData, OrderRequest,
     PositionData, Product, Status, SubscribeRequest, TickData, TradeData,
 };
 use crate::trader::gateway::BaseGateway;
+
+fn format_price(value: f64) -> String {
+    if value == 0.0 { return "0".to_string(); }
+    let s = format!("{:.8}", value);
+    let s = s.trim_end_matches('0');
+    let s = s.trim_end_matches('.');
+    s.to_string()
+}
 
 /// Binance USDT-M Futures Gateway
 pub struct BinanceUsdtGateway {
@@ -334,14 +342,17 @@ impl BinanceUsdtGateway {
         let orders = self.orders.clone();
         let positions = self.positions.clone();
         let gateway_name = self.gateway_name.clone();
+        let order_lock = Arc::new(Mutex::new(()));
 
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let event_sender = event_sender.clone();
             let orders = orders.clone();
             let positions = positions.clone();
             let gateway_name = gateway_name.clone();
+            let lock = order_lock.clone();
 
             tokio::spawn(async move {
+                let _guard = lock.lock().await;
                 let event_type = packet.get("e").and_then(|s| s.as_str()).unwrap_or("");
 
                 match event_type {
@@ -462,7 +473,7 @@ impl BinanceUsdtGateway {
                         }
                     }
                     "listenKeyExpired" => {
-                        warn!("{}: Listen key expired", gateway_name);
+                        warn!("{}: Listen key expired, attempting to recreate and reconnect trade stream", gateway_name);
                     }
                     _ => {}
                 }
@@ -487,6 +498,31 @@ impl BinanceUsdtGateway {
         if let Err(e) = self.rest_client.put("/fapi/v1/listenKey", &params, Security::ApiKey).await {
             warn!("{}: Keep user stream failed: {}", self.gateway_name, e);
         }
+    }
+
+    /// Recreate listen key and reconnect trade stream
+    pub async fn recreate_listen_key(&self) -> Result<(), String> {
+        self.trade_ws.disconnect().await;
+
+        let params = HashMap::new();
+        let data = self.rest_client.post("/fapi/v1/listenKey", &params, Security::ApiKey).await?;
+
+        let listen_key = data["listenKey"].as_str().unwrap_or("").to_string();
+        *self.listen_key.write().await = listen_key.clone();
+        self.keep_alive_count.store(0, Ordering::SeqCst);
+
+        let server = self.server.read().await.clone();
+        let url = if server == "REAL" {
+            format!("{}{}", USDT_WS_TRADE_HOST, listen_key)
+        } else {
+            format!("{}{}", USDT_TESTNET_WS_TRADE_HOST, listen_key)
+        };
+
+        let proxy_host = self.rest_client.get_proxy_host().await;
+        let proxy_port = self.rest_client.get_proxy_port().await;
+        self.trade_ws.connect(&url, &proxy_host, proxy_port).await?;
+        self.write_log("ListenKey recreated, trade stream reconnected").await;
+        Ok(())
     }
 }
 
@@ -554,12 +590,15 @@ impl BaseGateway for BinanceUsdtGateway {
         let market_url = if server == "REAL" { USDT_WS_DATA_HOST } else { USDT_TESTNET_WS_DATA_HOST };
         let ticks = self.ticks.clone();
         let event_sender = self.event_sender.clone();
+        let market_lock = Arc::new(Mutex::new(()));
 
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let ticks = ticks.clone();
             let event_sender = event_sender.clone();
+            let lock = market_lock.clone();
 
             tokio::spawn(async move {
+                let _guard = lock.lock().await;
                 let stream = match packet.get("stream").and_then(|s| s.as_str()) { Some(s) => s, None => return };
                 let data = match packet.get("data") { Some(d) => d, None => return };
 
@@ -664,14 +703,20 @@ impl BaseGateway for BinanceUsdtGateway {
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), req.symbol.to_uppercase());
         params.insert("side".to_string(), DIRECTION_VT2BINANCE.get(&req.direction).unwrap_or(&"BUY").to_string());
-        params.insert("type".to_string(), ORDERTYPE_VT2BINANCE.get(&req.order_type).unwrap_or(&"LIMIT").to_string());
-        params.insert("quantity".to_string(), format!("{}", req.volume));
+        params.insert("quantity".to_string(), format_price(req.volume));
         params.insert("newClientOrderId".to_string(), orderid.clone());
         params.insert("newOrderRespType".to_string(), "ACK".to_string());
 
-        if req.order_type == OrderType::Limit {
+        if let Some((order_type_str, time_in_force)) = ORDERTYPE_VT2BINANCE_FUTURES.get(&req.order_type) {
+            params.insert("type".to_string(), order_type_str.to_string());
+            params.insert("timeInForce".to_string(), time_in_force.to_string());
+            if *order_type_str == "LIMIT" || *order_type_str == "STOP" {
+                params.insert("price".to_string(), format_price(req.price));
+            }
+        } else {
+            params.insert("type".to_string(), "LIMIT".to_string());
             params.insert("timeInForce".to_string(), "GTC".to_string());
-            params.insert("price".to_string(), format!("{}", req.price));
+            params.insert("price".to_string(), format_price(req.price));
         }
 
         match self.rest_client.post("/fapi/v1/order", &params, Security::Signed).await {

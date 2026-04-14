@@ -35,10 +35,14 @@ impl Parameter {
     /// Get all possible values for this parameter
     pub fn get_values(&self) -> Vec<f64> {
         let mut values = Vec::new();
-        let mut current = self.start;
-        while current <= self.end {
-            values.push(current);
-            current += self.step;
+        let mut i = 0;
+        loop {
+            let value = self.start + i as f64 * self.step;
+            if value > self.end + 1e-10 {
+                break;
+            }
+            values.push(value);
+            i += 1;
         }
         values
     }
@@ -205,11 +209,13 @@ impl OptimizationEngine {
             // Crossover and mutation
             let offspring = self.crossover_and_mutate(&parents);
 
-            // Create new population
+            let offspring_fitness = self.evaluate_population(&offspring, &factory, &target);
+
             population = self.select_next_generation(
                 &population,
                 &offspring,
                 &fitness_scores,
+                &offspring_fitness,
                 population_size,
             );
 
@@ -392,6 +398,7 @@ impl OptimizationEngine {
         population: &[ParameterSet],
         offspring: &[ParameterSet],
         fitness: &[f64],
+        offspring_fitness: &[f64],
         size: usize,
     ) -> Vec<ParameterSet> {
         let mut combined: Vec<_> = population
@@ -400,20 +407,10 @@ impl OptimizationEngine {
             .map(|(p, f)| (p.clone(), *f))
             .collect();
 
-        // Evaluate offspring
-        let offspring_fitness: Vec<_> = offspring
-            .iter()
-            .map(|_params| {
-                // Quick estimate, could be parallelized
-                0.0 // Placeholder
-            })
-            .collect();
-
-        for (params, fitness) in offspring.iter().zip(offspring_fitness.iter()) {
-            combined.push((params.clone(), *fitness));
+        for (params, fit) in offspring.iter().zip(offspring_fitness.iter()) {
+            combined.push((params.clone(), *fit));
         }
 
-        // Sort by fitness
         combined.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
 
         // Take top N
@@ -476,11 +473,17 @@ pub enum OptimizationTarget {
 /// Extract target value from statistics
 fn extract_target_value(stats: &BacktestingStatistics, target: &OptimizationTarget) -> f64 {
     match target {
-        OptimizationTarget::TotalReturn => stats.total_net_pnl / stats.end_balance,
+        OptimizationTarget::TotalReturn => {
+            if stats.end_balance.abs() > 1e-10 {
+                stats.total_net_pnl / stats.end_balance
+            } else {
+                0.0
+            }
+        }
         OptimizationTarget::SharpeRatio => stats.sharpe_ratio,
         OptimizationTarget::MaxDrawdown => -stats.max_drawdown_percent, // Minimize drawdown
-        OptimizationTarget::AnnualReturn => stats.return_mean * 252.0,  // Approx annual
-        OptimizationTarget::Custom(_) => 0.0,                           // Placeholder
+        OptimizationTarget::AnnualReturn => stats.return_mean,
+        OptimizationTarget::Custom(_) => 0.0, // Placeholder
     }
 }
 

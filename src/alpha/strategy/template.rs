@@ -53,13 +53,16 @@ impl AlphaStrategy {
     /// Update trade data
     pub fn update_trade(&mut self, trade: &crate::trader::TradeData) {
         {
-            let mut pos_data = self.pos_data.lock().unwrap();
+            let mut pos_data = self.pos_data.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(direction) = trade.direction {
-                if direction == crate::trader::Direction::Long {
-                    *pos_data.entry(trade.vt_symbol().clone()).or_insert(0.0) += trade.volume;
-                } else {
-                    *pos_data.entry(trade.vt_symbol().clone()).or_insert(0.0) -= trade.volume;
-                }
+                let delta = match (direction, trade.offset) {
+                    (crate::trader::Direction::Long, crate::trader::Offset::Open) => trade.volume,
+                    (crate::trader::Direction::Long, _) => -trade.volume,
+                    (crate::trader::Direction::Short, crate::trader::Offset::Open) => -trade.volume,
+                    (crate::trader::Direction::Short, _) => trade.volume,
+                    _ => 0.0,
+                };
+                *pos_data.entry(trade.vt_symbol().clone()).or_insert(0.0) += delta;
             }
         }
 
@@ -222,9 +225,8 @@ impl AlphaStrategy {
             let diff = target - pos;
 
             if diff > 0.0 {
-                // Long position
                 let order_price = bar.last_price * (1.0 + price_add);
-                let cover_volume = (0.0_f64).min(diff.abs() - pos.min(0.0).abs());
+                let cover_volume = (0.0_f64).max(diff.abs() - pos.min(0.0).abs());
                 let buy_volume = (diff - cover_volume).max(0.0);
 
                 if cover_volume > 0.0 {
@@ -234,9 +236,8 @@ impl AlphaStrategy {
                     self.buy(vt_symbol, order_price, buy_volume, engine)?;
                 }
             } else if diff < 0.0 {
-                // Short position
                 let order_price = bar.last_price * (1.0 - price_add);
-                let sell_volume = (0.0_f64).min(diff.abs() - pos.max(0.0).abs());
+                let sell_volume = (0.0_f64).max(diff.abs() - pos.max(0.0).abs());
                 let short_volume = (diff.abs() - sell_volume).max(0.0);
 
                 if sell_volume > 0.0 {

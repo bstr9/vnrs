@@ -202,13 +202,8 @@ impl RpcServer {
     ///
     /// Messages are sent with a topic for filtering on the client side.
     pub async fn publish(&self, topic: String, data: serde_json::Value) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let socket_pub = {
-            let pub_guard = self.socket_pub.lock().await;
-            pub_guard.as_ref().map(|s| s as *const zmq::Socket)
-        };
-
-        if let Some(socket_ptr) = socket_pub {
-            let socket = unsafe { &*socket_ptr };
+        let pub_guard = self.socket_pub.lock().await;
+        if let Some(socket) = pub_guard.as_ref() {
             let message = RpcMessage::new(topic, data);
             let serialized = serde_json::to_vec(&message)?;
             socket.send(&serialized, 0)?;
@@ -228,7 +223,6 @@ impl RpcServer {
 
         tokio::spawn(async move {
             loop {
-                // Check if still active
                 {
                     let active_guard = active.lock().await;
                     if !*active_guard {
@@ -236,92 +230,90 @@ impl RpcServer {
                     }
                 }
 
-                // Get socket reference
-                let socket_ptr = {
+                // Poll and recv inside the lock, then release before async work
+                let request_data = {
                     let rep_guard = socket_rep.lock().await;
-                    rep_guard.as_ref().map(|s| s as *const zmq::Socket)
-                };
-
-                if let Some(socket_ptr) = socket_ptr {
-                    // Use unsafe to get reference - this is safe because we hold the lock
-                    let socket = unsafe { &*socket_ptr };
-                    
-                    // Poll for incoming requests with timeout
-                    match socket.poll(zmq::PollEvents::POLLIN, POLL_TIMEOUT_MS as i64) {
-                        Ok(n) if n > 0 => {
-                            // Receive request
-                            let data = match socket.recv_bytes(0) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    error!("Failed to receive request: {}", e);
-                                    continue;
-                                }
-                            };
-
-                            // Deserialize request
-                            let req = match serde_json::from_slice::<RpcRequest>(&data) {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    error!("Failed to deserialize request: {}", e);
-                                    let error_response = RpcResponse::failure(format!(
-                                        "Invalid request format: {}",
-                                        e
-                                    ));
-                                    if let Ok(resp_data) = serde_json::to_vec(&error_response) {
-                                        let _ = socket.send(&resp_data, 0);
-                                    }
-                                    continue;
-                                }
-                            };
-
-                            debug!("Received RPC request: {}", req.method);
-
-                            // Execute function (this is the async part)
-                            let response = {
-                                let func_map = functions.read().await;
-                                if let Some(func) = func_map.get(&req.method) {
-                                    match func(req.args.clone(), req.kwargs.clone()) {
-                                        Ok(result) => RpcResponse::success(result),
-                                        Err(e) => RpcResponse::failure(e),
-                                    }
-                                } else {
-                                    RpcResponse::failure(format!(
-                                        "Function '{}' not found",
-                                        req.method
-                                    ))
-                                }
-                            };
-
-                            // Send response (need to get socket again after await)
-                            let socket_ptr = {
-                                let rep_guard = socket_rep.lock().await;
-                                rep_guard.as_ref().map(|s| s as *const zmq::Socket)
-                            };
-
-                            if let Some(socket_ptr) = socket_ptr {
-                                let socket = unsafe { &*socket_ptr };
-                                match serde_json::to_vec(&response) {
-                                    Ok(resp_data) => {
-                                        if let Err(e) = socket.send(&resp_data, 0) {
-                                            error!("Failed to send response: {}", e);
-                                        }
-                                    }
+                    if let Some(socket) = rep_guard.as_ref() {
+                        match socket.poll(zmq::PollEvents::POLLIN, POLL_TIMEOUT_MS as i64) {
+                            Ok(n) if n > 0 => {
+                                match socket.recv_bytes(0) {
+                                    Ok(data) => Some(data),
                                     Err(e) => {
-                                        error!("Failed to serialize response: {}", e);
+                                        error!("Failed to receive request: {}", e);
+                                        None
                                     }
                                 }
                             }
+                            Ok(_) => None,
+                            Err(e) => {
+                                error!("Socket poll error: {}", e);
+                                None
+                            }
                         }
-                        Ok(_) => {
-                            // No data available, continue polling
-                        }
+                    } else {
+                        None
+                    }
+                };
+                // rep_guard is dropped here — socket is not held across await
+
+                if let Some(data) = request_data {
+                    let req = match serde_json::from_slice::<RpcRequest>(&data) {
+                        Ok(r) => r,
                         Err(e) => {
-                            error!("Socket poll error: {}", e);
+                            error!("Failed to deserialize request: {}", e);
+                            let error_response = RpcResponse::failure(format!(
+                                "Invalid request format: {}",
+                                e
+                            ));
+                            if let Ok(resp_data) = serde_json::to_vec(&error_response) {
+                                let rep_guard = socket_rep.lock().await;
+                                if let Some(socket) = rep_guard.as_ref() {
+                                    let _ = socket.send(&resp_data, 0);
+                                }
+                            }
+                            continue;
+                        }
+                    };
+
+                    debug!("Received RPC request: {}", req.method);
+
+                    let response = {
+                        let func_map = functions.read().await;
+                        if let Some(func) = func_map.get(&req.method) {
+                            match func(req.args.clone(), req.kwargs.clone()) {
+                                Ok(result) => RpcResponse::success(result),
+                                Err(e) => RpcResponse::failure(e),
+                            }
+                        } else {
+                            RpcResponse::failure(format!(
+                                "Function '{}' not found",
+                                req.method
+                            ))
+                        }
+                    };
+
+                    // Re-acquire lock to send response
+                    let rep_guard = socket_rep.lock().await;
+                    if let Some(socket) = rep_guard.as_ref() {
+                        match serde_json::to_vec(&response) {
+                            Ok(resp_data) => {
+                                if let Err(e) = socket.send(&resp_data, 0) {
+                                    error!("Failed to send response: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to serialize response: {}", e);
+                            }
                         }
                     }
                 } else {
-                    // Socket not initialized, wait a bit
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    // No data or socket not initialized — if socket is None, sleep
+                    let rep_guard = socket_rep.lock().await;
+                    let needs_sleep = rep_guard.is_none();
+                    drop(rep_guard);
+                    if needs_sleep {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
                 }
             }
         });
@@ -358,14 +350,9 @@ impl RpcServer {
                         *last = Instant::now() + heartbeat_interval;
                     }
 
-                    // Send heartbeat
-                    let socket = {
-                        let pub_guard = socket_pub.lock().await;
-                        pub_guard.as_ref().map(|s| s as *const zmq::Socket)
-                    };
-
-                    if let Some(socket_ptr) = socket {
-                        let socket = unsafe { &*socket_ptr };
+                    // Send heartbeat — hold lock while using socket
+                    let pub_guard = socket_pub.lock().await;
+                    if let Some(socket) = pub_guard.as_ref() {
                         let timestamp = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
                         let message = RpcMessage {
                             topic: heartbeat_topic.clone(),

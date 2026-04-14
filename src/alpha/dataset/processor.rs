@@ -19,18 +19,13 @@ pub fn drop_na(_df: &(), _col_name: &str) -> Result<(), Box<dyn std::error::Erro
     Err("Alpha feature not enabled".into())
 }
 
-/// Fill NA values with zero
+/// Fill NA values using forward fill (more appropriate for financial time series)
 #[cfg(feature = "alpha")]
 pub fn fill_na(df: &DataFrame, col_name: &str) -> PolarsResult<DataFrame> {
-    let series = df.column(col_name)?;
-    let values: Vec<f64> = series
-        .f64()?
-        .into_iter()
-        .map(|v| v.unwrap_or(0.0))
-        .collect();
-
-    let fill_series = Column::new(col_name.into(), values);
-    df.hstack(&[fill_series])
+    df.clone()
+        .lazy()
+        .with_column(col(col_name).forward_fill(None))
+        .collect()
 }
 
 /// Cross-sectional normalization (Z-score)
@@ -54,14 +49,24 @@ pub fn normalize_zscore(df: &DataFrame, col_name: &str) -> PolarsResult<DataFram
 #[cfg(feature = "alpha")]
 pub fn normalize_rank(df: &DataFrame, col_name: &str) -> PolarsResult<DataFrame> {
     let series = df.column(col_name)?;
-    let values: Vec<f64> = series.f64()?.into_iter().flatten().collect();
+    let ca = series.f64()?;
+    let height = ca.len();
 
-    let mut indexed: Vec<(usize, f64)> = values.iter().enumerate().map(|(i, &v)| (i, v)).collect();
-    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    let mut indexed: Vec<(usize, f64)> = ca
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.map(|val| (i, val)))
+        .collect();
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    let mut ranks = vec![0.0; values.len()];
-    for (rank, (idx, _)) in indexed.iter().enumerate() {
-        ranks[*idx] = rank as f64;
+    let mut ranks = vec![f64::NAN; height];
+    let n = indexed.len() as f64;
+    for (rank_pos, (idx, _)) in indexed.iter().enumerate() {
+        ranks[*idx] = if n > 1.0 {
+            rank_pos as f64 / (n - 1.0)
+        } else {
+            0.5
+        };
     }
 
     let rank_series = Series::new(col_name.into(), ranks);
@@ -72,15 +77,29 @@ pub fn normalize_rank(df: &DataFrame, col_name: &str) -> PolarsResult<DataFrame>
 #[cfg(feature = "alpha")]
 pub fn log_transform(df: &DataFrame, col_name: &str) -> PolarsResult<DataFrame> {
     let series = df.column(col_name)?;
-    let values: Vec<f64> = series.f64()?.into_iter().flatten().collect();
+    let values: Vec<f64> = series
+        .f64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(f64::NAN))
+        .collect();
 
     let log_values: Vec<f64> = values
         .iter()
-        .map(|&v| if v > 0.0 { v.ln() } else { 0.0 })
+        .map(|&v| if v > 0.0 { v.ln() } else { f64::NAN })
         .collect();
     let log_series = Series::new(col_name.into(), log_values);
 
-    df.hstack(&[log_series.into()])
+    let mut result = df.hstack(&[log_series.into()])?;
+    result = result
+        .lazy()
+        .with_column(
+            when(col(col_name).is_null().or(col(col_name).is_nan()))
+                .then(lit(f64::NAN))
+                .otherwise(col(col_name))
+                .alias(col_name),
+        )
+        .collect()?;
+    Ok(result)
 }
 
 /// Type alias for processor function

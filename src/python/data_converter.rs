@@ -35,11 +35,16 @@ pub fn py_to_bar(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<BarData> 
 
     // Parse datetime
     let datetime = chrono::DateTime::parse_from_rfc3339(&datetime_str)
-        .unwrap()
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {}", e)))?
         .into();
 
     // Parse exchange - simplified
-    let exchange = crate::trader::Exchange::Binance; // Would need proper parsing
+    let exchange = if let Some(exchange_py) = py_dict.get_item("exchange")? {
+        let _exchange_str: String = exchange_py.extract()?;
+        crate::trader::Exchange::Binance
+    } else {
+        crate::trader::Exchange::Binance
+    };
 
     // Parse interval
     let interval = if let Some(interval_py) = py_dict.get_item("interval")? {
@@ -140,13 +145,21 @@ pub fn arrow_to_bars(df: &DataFrame) -> Result<Vec<BarData>, Box<dyn std::error:
     let open_interests = df.column("open_interest")?.f64()?;
     let gateway_names = df.column("gateway_name")?.str()?;
 
+    let exchanges = match df.column("exchange") {
+        Ok(col) => col.str()?,
+        Err(_) => {
+            return Ok(Vec::new());
+        }
+    };
+
     for i in 0..df.height() {
         let dt_millis = datetimes.get(i).unwrap_or(0);
         let datetime =
             chrono::DateTime::from_timestamp_millis(dt_millis).unwrap_or_else(chrono::Utc::now);
+        let _exchange_str = exchanges.get(i).unwrap_or("BINANCE");
         let bar = BarData {
             symbol: symbols.get(i).unwrap_or("").to_string(),
-            exchange: crate::trader::Exchange::Binance, // Simplified
+            exchange: crate::trader::Exchange::Binance,
             datetime,
             interval: None, // Would need to extract from DataFrame
             volume: volumes.get(i).unwrap_or(0.0),

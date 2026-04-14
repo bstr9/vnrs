@@ -52,9 +52,12 @@ impl PythonStrategyAdapter {
 
             // Compile and execute module
             use std::ffi::CString;
-            let code_c = CString::new(code.as_str()).unwrap();
-            let file_c = CString::new(file_path).unwrap();
-            let name_c = CString::new("strategy_module").unwrap();
+            let code_c = CString::new(code.as_str())
+                .map_err(|e| format!("Invalid code string (contains NUL): {}", e))?;
+            let file_c = CString::new(file_path)
+                .map_err(|e| format!("Invalid file path (contains NUL): {}", e))?;
+            let name_c = CString::new("strategy_module")
+                .map_err(|e| format!("Invalid module name (contains NUL): {}", e))?;
             let module =
                 PyModule::from_code(py, code_c.as_c_str(), file_c.as_c_str(), name_c.as_c_str())
                     .map_err(|e| format!("Failed to load Python module: {}", e))?;
@@ -125,7 +128,7 @@ impl PythonStrategyAdapter {
         py: Python,
         arg_dict: &Bound<PyDict>,
     ) -> Result<Py<PyAny>, String> {
-        let strategy = self.py_strategy.lock().unwrap();
+        let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
         strategy
             .call_method1(py, method_name, (arg_dict,))
             .map_err(|e| format!("Failed to call '{}': {}", method_name, e))
@@ -138,7 +141,7 @@ impl PythonStrategyAdapter {
         py: Python,
         arg: &str,
     ) -> Result<Py<PyAny>, String> {
-        let strategy = self.py_strategy.lock().unwrap();
+        let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
         strategy
             .call_method1(py, method_name, (arg,))
             .map_err(|e| format!("Failed to call '{}': {}", method_name, e))
@@ -147,7 +150,7 @@ impl PythonStrategyAdapter {
     /// Call Python method without arguments
     fn call_py_method_no_args(&self, method_name: &str) -> Result<(), String> {
         Python::attach(|py| {
-            let strategy = self.py_strategy.lock().unwrap();
+            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
             strategy
                 .call_method0(py, method_name)
                 .map_err(|e| format!("Failed to call '{}': {}", method_name, e))?;
@@ -162,7 +165,7 @@ impl PythonStrategyAdapter {
         py: Python,
         arg: Py<PyAny>,
     ) -> Result<Py<PyAny>, String> {
-        let strategy = self.py_strategy.lock().unwrap();
+        let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
         strategy
             .call_method1(py, method_name, (arg,))
             .map_err(|e| format!("Failed to call '{}': {}", method_name, e))
@@ -187,11 +190,17 @@ impl StrategyTemplate for PythonStrategyAdapter {
     }
 
     fn parameters(&self) -> HashMap<String, String> {
-        self.parameters.lock().unwrap().clone()
+        self.parameters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn variables(&self) -> HashMap<String, String> {
-        self.variables.lock().unwrap().clone()
+        self.variables
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn on_init(&mut self, _context: &StrategyContext) {
@@ -266,8 +275,20 @@ impl StrategyTemplate for PythonStrategyAdapter {
                     return;
                 }
             };
-            let exchange_enum = constant_module.getattr("Exchange").unwrap();
-            let interval_enum = constant_module.getattr("Interval").unwrap();
+            let exchange_enum = match constant_module.getattr("Exchange") {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("Exchange enum not found: {}", e);
+                    return;
+                }
+            };
+            let interval_enum = match constant_module.getattr("Interval") {
+                Ok(i) => i,
+                Err(e) => {
+                    eprintln!("Interval enum not found: {}", e);
+                    return;
+                }
+            };
 
             // Convert Exchange
             // Assuming exchange.value() (e.g. "BINANCE") is valid for Exchange constuctor or lookup
@@ -296,7 +317,13 @@ impl StrategyTemplate for PythonStrategyAdapter {
                 .value();
             let py_interval = match interval_enum.call1((interval_val,)) {
                 Ok(i) => i,
-                Err(_) => interval_enum.getattr("MINUTE").unwrap(),
+                Err(_) => match interval_enum.getattr("MINUTE") {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("Interval.MINUTE not found: {}", e);
+                        return;
+                    }
+                },
             };
 
             // Convert DateTime
@@ -306,11 +333,19 @@ impl StrategyTemplate for PythonStrategyAdapter {
             // Rust to_rfc3339 uses +00:00 usually.
             let dt_str = bar.datetime.to_rfc3339();
             // datetime.datetime.fromisoformat(dt_str)
-            let py_datetime = datetime_module
-                .getattr("datetime")
-                .unwrap()
-                .call_method1("fromisoformat", (dt_str,))
-                .unwrap();
+            let py_datetime = match datetime_module.getattr("datetime") {
+                Ok(dt_cls) => match dt_cls.call_method1("fromisoformat", (dt_str.as_str(),)) {
+                    Ok(dt) => dt,
+                    Err(e) => {
+                        eprintln!("Failed to parse datetime '{}': {}", dt_str, e);
+                        return;
+                    }
+                },
+                Err(e) => {
+                    eprintln!("datetime.datetime not found: {}", e);
+                    return;
+                }
+            };
 
             // Create kwargs
             let kwargs = PyDict::new(py);
@@ -398,14 +433,14 @@ impl StrategyTemplate for PythonStrategyAdapter {
     fn update_position(&mut self, vt_symbol: &str, position: f64) {
         self.positions
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(vt_symbol.to_string(), position);
     }
 
     fn get_position(&self, vt_symbol: &str) -> f64 {
         self.positions
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(vt_symbol)
             .copied()
             .unwrap_or(0.0)

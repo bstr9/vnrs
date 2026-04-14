@@ -28,6 +28,7 @@
 pub mod event;
 pub mod trader;
 pub mod rpc;
+#[cfg(feature = "alpha")]
 pub mod alpha;
 pub mod gateway;
 pub mod strategy;
@@ -36,13 +37,12 @@ pub mod backtesting;
 #[cfg(feature = "gui")]
 pub mod chart;
 
-// 条件性导入python模块
 #[cfg(feature = "python")]
 pub mod python;
 
-// Re-export commonly used types
 pub use event::{Event, EventEngine, EVENT_TIMER};
 pub use rpc::{client::RpcClient as RpcClient, server::RpcServer as RpcServer};
+#[cfg(feature = "alpha")]
 pub use alpha::{AlphaLab, AlphaDataset, AlphaModel, AlphaStrategy, Segment, logger as alpha_logger, AlphaBarData};
 pub use strategy::{StrategyEngine, StrategyTemplate, StrategyContext, StrategyType, StrategyState};
 pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode, DailyResult, BacktestingResult};

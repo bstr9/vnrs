@@ -322,7 +322,7 @@ impl Indicator for BOLL {
                 .iter()
                 .map(|b| (b.close_price - mean).powi(2))
                 .sum::<f64>()
-                / self.period as f64;
+                / (self.period - 1) as f64;
             let std = variance.sqrt();
 
             self.middle[i] = Some(mean);
@@ -960,8 +960,8 @@ impl Indicator for TRIX {
 
 /// SuperTrend Indicator
 pub struct SUPER {
-    trend_values: Vec<Option<f64>>,    // SuperTrend line values
-    trend_direction: Vec<Option<i32>>, // 1 for uptrend, -1 for downtrend
+    trend_values: Vec<Option<f64>>,
+    trend_direction: Vec<Option<i32>>,
     config_up: IndicatorLineConfig,
     config_down: IndicatorLineConfig,
     location: IndicatorLocation,
@@ -1087,35 +1087,225 @@ impl Indicator for SUPER {
         }
 
         // Determine trend and SuperTrend values
+        // Direction: 1 = uptrend (bullish, use lower band), -1 = downtrend (bearish, use upper band)
         for i in (self.period - 1)..bars.len() {
             if i == self.period - 1 {
                 // Initial trend
                 if let (Some(fu), Some(fl)) = (final_upper[i], final_lower[i]) {
-                    if bars[i].close_price <= fu {
+                    if bars[i].close_price > fu {
                         self.trend_direction[i] = Some(1);
-                        self.trend_values[i] = Some(fu);
+                        self.trend_values[i] = Some(fl);
                     } else {
                         self.trend_direction[i] = Some(-1);
-                        self.trend_values[i] = Some(fl);
+                        self.trend_values[i] = Some(fu);
                     }
                 }
-            } else if let (Some(prev_dir), Some(fu), Some(fl)) =
-                (self.trend_direction[i - 1], final_upper[i], final_lower[i])
-            {
+            } else if let (Some(prev_dir), Some(prev_st), Some(fu), Some(fl)) = (
+                self.trend_direction[i - 1],
+                self.trend_values[i - 1],
+                final_upper[i],
+                final_lower[i],
+            ) {
                 if prev_dir == 1 {
-                    if bars[i].close_price <= fu {
-                        self.trend_direction[i] = Some(1);
+                    // Was uptrend: flip to downtrend if close < previous SuperTrend
+                    if bars[i].close_price < prev_st {
+                        self.trend_direction[i] = Some(-1);
                         self.trend_values[i] = Some(fu);
                     } else {
-                        self.trend_direction[i] = Some(-1);
+                        self.trend_direction[i] = Some(1);
                         self.trend_values[i] = Some(fl);
                     }
-                } else if bars[i].close_price >= fl {
-                    self.trend_direction[i] = Some(-1);
-                    self.trend_values[i] = Some(fl);
                 } else {
-                    self.trend_direction[i] = Some(1);
-                    self.trend_values[i] = Some(fu);
+                    // Was downtrend: flip to uptrend if close > previous SuperTrend
+                    if bars[i].close_price > prev_st {
+                        self.trend_direction[i] = Some(1);
+                        self.trend_values[i] = Some(fl);
+                    } else {
+                        self.trend_direction[i] = Some(-1);
+                        self.trend_values[i] = Some(fu);
+                    }
+                }
+            }
+        }
+    }
+
+    fn series_count(&self) -> usize {
+        2 // Series 0: uptrend, Series 1: downtrend
+    }
+
+    fn get_value(&self, bar_index: usize, series_index: usize) -> Option<f64> {
+        let dir = self.trend_direction.get(bar_index).and_then(|v| *v);
+        match (series_index, dir) {
+            (0, Some(1)) => self.trend_values.get(bar_index).and_then(|v| *v),
+            (1, Some(-1)) => self.trend_values.get(bar_index).and_then(|v| *v),
+            _ => None,
+        }
+    }
+
+    fn get_line_config(&self, series_index: usize) -> Option<&IndicatorLineConfig> {
+        match series_index {
+            0 => Some(&self.config_up),
+            1 => Some(&self.config_down),
+            _ => None,
+        }
+    }
+}
+
+impl SUPER {
+    pub fn new(
+        period: usize,
+        multiplier: f64,
+        up_color: Color32,
+        down_color: Color32,
+        location: IndicatorLocation,
+    ) -> Self {
+        Self {
+            trend_values: Vec::new(),
+            trend_direction: Vec::new(),
+            config_up: IndicatorLineConfig {
+                name: "SUPER_UP".to_string(),
+                color: up_color,
+                style: LineStyle::Solid,
+                width: 2.0,
+            },
+            config_down: IndicatorLineConfig {
+                name: "SUPER_DOWN".to_string(),
+                color: down_color,
+                style: LineStyle::Solid,
+                width: 2.0,
+            },
+            location,
+            period,
+            multiplier,
+        }
+    }
+}
+
+impl Indicator for SUPER {
+    fn name(&self) -> &str {
+        "SUPER"
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.trend_values.clear();
+        self.trend_values.resize(bars.len(), None);
+        self.trend_direction.clear();
+        self.trend_direction.resize(bars.len(), None);
+
+        if bars.is_empty() || bars.len() < self.period || self.period == 0 {
+            return;
+        }
+
+        // Calculate ATR (Average True Range)
+        let mut atr_values = vec![None; bars.len()];
+        let mut tr_values = vec![0.0; bars.len()];
+
+        for i in 0..bars.len() {
+            if i == 0 {
+                tr_values[i] = bars[i].high_price - bars[i].low_price;
+            } else {
+                let high_low = bars[i].high_price - bars[i].low_price;
+                let high_close = (bars[i].high_price - bars[i - 1].close_price).abs();
+                let low_close = (bars[i].low_price - bars[i - 1].close_price).abs();
+                tr_values[i] = high_low.max(high_close).max(low_close);
+            }
+        }
+
+        // Calculate ATR using SMA
+        for i in (self.period - 1)..bars.len() {
+            let start_ix = i.saturating_sub(self.period - 1);
+            let sum: f64 = tr_values[start_ix..=i].iter().sum();
+            atr_values[i] = Some(sum / self.period as f64);
+        }
+
+        // Calculate basic bands
+        let mut basic_upper = vec![None; bars.len()];
+        let mut basic_lower = vec![None; bars.len()];
+
+        for i in (self.period - 1)..bars.len() {
+            if let Some(atr) = atr_values[i] {
+                let hl_avg = (bars[i].high_price + bars[i].low_price) / 2.0;
+                basic_upper[i] = Some(hl_avg + self.multiplier * atr);
+                basic_lower[i] = Some(hl_avg - self.multiplier * atr);
+            }
+        }
+
+        // Calculate final bands
+        let mut final_upper = vec![None; bars.len()];
+        let mut final_lower = vec![None; bars.len()];
+
+        for i in (self.period - 1)..bars.len() {
+            if let Some(bu) = basic_upper[i] {
+                if i == self.period - 1 {
+                    final_upper[i] = Some(bu);
+                } else if let Some(prev_fu) = final_upper[i - 1] {
+                    final_upper[i] = Some(if bu < prev_fu || bars[i - 1].close_price > prev_fu {
+                        bu
+                    } else {
+                        prev_fu
+                    });
+                } else {
+                    final_upper[i] = Some(bu);
+                }
+            }
+
+            if let Some(bl) = basic_lower[i] {
+                if i == self.period - 1 {
+                    final_lower[i] = Some(bl);
+                } else if let Some(prev_fl) = final_lower[i - 1] {
+                    final_lower[i] = Some(if bl > prev_fl || bars[i - 1].close_price < prev_fl {
+                        bl
+                    } else {
+                        prev_fl
+                    });
+                } else {
+                    final_lower[i] = Some(bl);
+                }
+            }
+        }
+
+        // Determine trend and SuperTrend values
+        // Direction: 1 = uptrend (bullish, use lower band), -1 = downtrend (bearish, use upper band)
+        for i in (self.period - 1)..bars.len() {
+            if i == self.period - 1 {
+                // Initial trend
+                if let (Some(fu), Some(fl)) = (final_upper[i], final_lower[i]) {
+                    if bars[i].close_price > fu {
+                        self.trend_direction[i] = Some(1);
+                        self.trend_values[i] = Some(fl);
+                    } else {
+                        self.trend_direction[i] = Some(-1);
+                        self.trend_values[i] = Some(fu);
+                    }
+                }
+            } else if let (Some(prev_dir), Some(prev_st), Some(fu), Some(fl)) = (
+                self.trend_direction[i - 1],
+                self.trend_values[i - 1],
+                final_upper[i],
+                final_lower[i],
+            ) {
+                if prev_dir == 1 {
+                    // Was uptrend: flip to downtrend if close < previous SuperTrend
+                    if bars[i].close_price < prev_st {
+                        self.trend_direction[i] = Some(-1);
+                        self.trend_values[i] = Some(fu);
+                    } else {
+                        self.trend_direction[i] = Some(1);
+                        self.trend_values[i] = Some(fl);
+                    }
+                } else {
+                    // Was downtrend: flip to uptrend if close > previous SuperTrend
+                    if bars[i].close_price > prev_st {
+                        self.trend_direction[i] = Some(1);
+                        self.trend_values[i] = Some(fl);
+                    } else {
+                        self.trend_direction[i] = Some(-1);
+                        self.trend_values[i] = Some(fu);
+                    }
                 }
             }
         }

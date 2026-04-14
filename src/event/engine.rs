@@ -73,14 +73,17 @@ impl EventEngine {
 
     /// Generate a new unique handler ID
     fn generate_handler_id(&self) -> HandlerId {
-        let mut counter = self.handler_counter.lock().unwrap();
+        let mut counter = self
+            .handler_counter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         *counter += 1;
         HandlerId(*counter)
     }
 
     /// Start the event engine
     pub fn start(&mut self) {
-        let mut active = self.active.lock().unwrap();
+        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
         *active = true;
         drop(active);
 
@@ -90,7 +93,7 @@ impl EventEngine {
         let interval = self.interval;
 
         self.timer_handle = Some(thread::spawn(move || {
-            while *active_clone.lock().unwrap() {
+            while *active_clone.lock().unwrap_or_else(|e| e.into_inner()) {
                 thread::sleep(Duration::from_secs(interval));
 
                 let timer_event = Event::new(EVENT_TIMER.to_string(), None);
@@ -102,7 +105,11 @@ impl EventEngine {
         let active_clone = Arc::clone(&self.active);
         let handlers_clone = Arc::clone(&self.handlers);
         let general_handlers_clone = Arc::clone(&self.general_handlers);
-        let receiver_opt = self.receiver.lock().unwrap().take();
+        let receiver_opt = self
+            .receiver
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         if let Some(event_receiver) = receiver_opt {
             self.processing_handle = Some(thread::spawn(move || {
                 // Process events in a loop with timeout to check active status periodically
@@ -118,7 +125,7 @@ impl EventEngine {
                         }
                         Err(sync_mpsc::RecvTimeoutError::Timeout) => {
                             // Check if the engine is still active
-                            if !*active_clone.lock().unwrap() {
+                            if !*active_clone.lock().unwrap_or_else(|e| e.into_inner()) {
                                 break; // Exit loop if engine is not active
                             }
                             // Continue to next iteration to check again
@@ -135,7 +142,7 @@ impl EventEngine {
 
     /// Stop the event engine
     pub fn stop(&mut self) {
-        let mut active = self.active.lock().unwrap();
+        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
         *active = false;
         drop(active);
 
@@ -161,7 +168,7 @@ impl EventEngine {
     /// Register a handler for a specific event type
     pub fn register(&self, event_type: &str, handler: EventHandler) -> HandlerId {
         let handler_id = self.generate_handler_id();
-        let mut handlers = self.handlers.lock().unwrap();
+        let mut handlers = self.handlers.lock().unwrap_or_else(|e| e.into_inner());
         let handler_list = handlers.entry(event_type.to_string()).or_default();
 
         // Add handler with its ID to the list
@@ -171,7 +178,7 @@ impl EventEngine {
 
     /// Unregister a handler for a specific event type
     pub fn unregister(&self, event_type: &str, handler_id: HandlerId) {
-        let mut handlers = self.handlers.lock().unwrap();
+        let mut handlers = self.handlers.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(handler_list) = handlers.get_mut(event_type) {
             // Filter out the handler based on its ID
             handler_list.retain(|(id, _)| *id != handler_id);
@@ -186,14 +193,20 @@ impl EventEngine {
     /// Register a general handler that receives all events
     pub fn register_general(&self, handler: EventHandler) -> HandlerId {
         let handler_id = self.generate_handler_id();
-        let mut general_handlers = self.general_handlers.lock().unwrap();
+        let mut general_handlers = self
+            .general_handlers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         general_handlers.push((handler_id, handler));
         handler_id
     }
 
     /// Unregister a general handler
     pub fn unregister_general(&self, handler_id: HandlerId) {
-        let mut general_handlers = self.general_handlers.lock().unwrap();
+        let mut general_handlers = self
+            .general_handlers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         general_handlers.retain(|(id, _)| *id != handler_id);
     }
 
@@ -206,7 +219,7 @@ impl EventEngine {
     ) {
         // Call type-specific handlers
         {
-            let handlers_map = handlers.lock().unwrap();
+            let handlers_map = handlers.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(handler_list) = handlers_map.get(&event.event_type) {
                 for (_, handler) in handler_list {
                     handler(event);
@@ -216,7 +229,7 @@ impl EventEngine {
 
         // Call general handlers
         {
-            let general_handlers_list = general_handlers.lock().unwrap();
+            let general_handlers_list = general_handlers.lock().unwrap_or_else(|e| e.into_inner());
             for (_, handler) in &*general_handlers_list {
                 handler(event);
             }

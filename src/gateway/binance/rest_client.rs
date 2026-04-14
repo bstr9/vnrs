@@ -34,6 +34,8 @@ pub struct BinanceRestClient {
     time_offset: AtomicI64,
     /// Receive window in milliseconds
     recv_window: i64,
+    /// Maximum retry count for rate-limited requests
+    max_retries: u8,
 }
 
 impl BinanceRestClient {
@@ -53,6 +55,7 @@ impl BinanceRestClient {
             proxy_port: Arc::new(RwLock::new(0)),
             time_offset: AtomicI64::new(0),
             recv_window: 5000,
+            max_retries: 3,
         }
     }
 
@@ -135,6 +138,16 @@ impl BinanceRestClient {
         self.time_offset.store(offset, Ordering::Relaxed);
     }
 
+    /// Get proxy host
+    pub async fn get_proxy_host(&self) -> String {
+        self.proxy_host.read().await.clone()
+    }
+
+    /// Get proxy port
+    pub async fn get_proxy_port(&self) -> u16 {
+        *self.proxy_port.read().await
+    }
+
     /// Generate signature for request
     async fn sign(&self, query: &str) -> String {
         let secret = self.secret.read().await;
@@ -167,7 +180,11 @@ impl BinanceRestClient {
 
             let query_string: String = sorted_params
                 .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
+                .map(|(k, v)| {
+                    let encoded_k: String = url::form_urlencoded::byte_serialize(k.as_bytes()).collect();
+                    let encoded_v: String = url::form_urlencoded::byte_serialize(v.as_bytes()).collect();
+                    format!("{}={}", encoded_k, encoded_v)
+                })
                 .collect::<Vec<_>>()
                 .join("&");
 
@@ -176,7 +193,11 @@ impl BinanceRestClient {
         } else if !query_params.is_empty() {
             let query_string: String = query_params
                 .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
+                .map(|(k, v)| {
+                    let encoded_k: String = url::form_urlencoded::byte_serialize(k.as_bytes()).collect();
+                    let encoded_v: String = url::form_urlencoded::byte_serialize(v.as_bytes()).collect();
+                    format!("{}={}", encoded_k, encoded_v)
+                })
                 .collect::<Vec<_>>()
                 .join("&");
             url = format!("{}?{}", url, query_string);
@@ -208,7 +229,7 @@ impl BinanceRestClient {
         headers
     }
 
-    /// Send a request to the API
+    /// Send a request to the API with retry support for rate limits
     pub async fn request(
         &self,
         method: Method,
@@ -216,44 +237,59 @@ impl BinanceRestClient {
         params: &HashMap<String, String>,
         security: Security,
     ) -> Result<Value, String> {
-        let url = self.build_url(path, params, security).await;
-        let headers = self.build_headers(security).await;
+        let mut retry_count: u8 = 0;
 
-        debug!("Binance API request: {} {}", method, url);
+        loop {
+            let url = self.build_url(path, params, security).await;
+            let headers = self.build_headers(security).await;
 
-        let client = self.client.read().await;
-        let request = match method {
-            Method::GET => client.get(&url),
-            Method::POST => client.post(&url),
-            Method::PUT => client.put(&url),
-            Method::DELETE => client.delete(&url),
-            _ => return Err(format!("Unsupported method: {}", method)),
-        };
+            debug!("Binance API request: {} {}", method, url);
 
-        let response = request
-            .headers(headers)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+            let client = self.client.read().await;
+            let request = match method {
+                Method::GET => client.get(&url),
+                Method::POST => client.post(&url),
+                Method::PUT => client.put(&url),
+                Method::DELETE => client.delete(&url),
+                _ => return Err(format!("Unsupported method: {}", method)),
+            };
 
-        let status = response.status();
-        let text = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
+            let response = request
+                .headers(headers)
+                .send()
+                .await
+                .map_err(|e| format!("Request failed: {}", e))?;
 
-        if !status.is_success() {
-            // Handle rate limit
-            if status.as_u16() == 429 {
-                warn!("Binance API rate limit hit: {}", text);
-                return Err(format!("Rate limit: {}", text));
+            let status = response.status();
+            let resp_headers = response.headers().clone();
+            let text = response
+                .text()
+                .await
+                .map_err(|e| format!("Failed to read response: {}", e))?;
+
+            if !status.is_success() {
+                if status.as_u16() == 429 {
+                    retry_count += 1;
+                    if retry_count > self.max_retries {
+                        error!("Binance API rate limit exceeded after {} retries: {}", self.max_retries, text);
+                        return Err(format!("Rate limit exceeded after {} retries: {}", self.max_retries, text));
+                    }
+                    let retry_after = resp_headers
+                        .get("retry-after")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .unwrap_or(2);
+                    warn!("Binance API rate limit hit, retrying after {}s (attempt {}/{})", retry_after, retry_count, self.max_retries);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(retry_after)).await;
+                    continue;
+                }
+                error!("Binance API error {}: {}", status, text);
+                return Err(format!("API error {}: {}", status, text));
             }
-            error!("Binance API error {}: {}", status, text);
-            return Err(format!("API error {}: {}", status, text));
-        }
 
-        serde_json::from_str(&text)
-            .map_err(|e| format!("Failed to parse JSON: {} - {}", e, text))
+            return serde_json::from_str(&text)
+                .map_err(|e| format!("Failed to parse JSON: {} - {}", e, text));
+        }
     }
 
     /// GET request

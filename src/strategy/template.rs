@@ -68,7 +68,9 @@ impl StrategyContext {
 
         // Update historical bars
         let mut historical = self.historical_bars.lock().unwrap();
-        historical.entry(vt_symbol).or_default().push(bar);
+        let bars = historical.entry(vt_symbol).or_default();
+        bars.push(bar);
+        bars.truncate(10000);
     }
 }
 

@@ -295,10 +295,11 @@ impl BinanceWebSocketClient {
                 || proxy_host.starts_with("socks5://")
             {
                 // If proxy_host already contains scheme, use it directly
-                if proxy_host.contains(':') && !proxy_host.ends_with(&proxy_port.to_string()) {
-                    format!("{}:{}", proxy_host, proxy_port)
-                } else {
+                if proxy_host.contains(':') {
+                    // Host already has a port or full URL with scheme
                     proxy_host.to_string()
+                } else {
+                    format!("{}:{}", proxy_host, proxy_port)
                 }
             } else {
                 // Default to socks5 if no scheme specified
@@ -360,6 +361,7 @@ impl BinanceWebSocketClient {
 
         // Spawn write task
         let write_active = self.active.clone();
+        let write_tx = self.tx.clone();
         tokio::spawn(async move {
             let mut write = write;
             let mut rx = rx;
@@ -370,6 +372,8 @@ impl BinanceWebSocketClient {
                 }
             }
             *write_active.write().await = false;
+            // Clear tx so subsequent send() calls fail immediately
+            *write_tx.write().await = None;
         });
 
         // Spawn read task
@@ -381,10 +385,15 @@ impl BinanceWebSocketClient {
             while let Some(result) = read.next().await {
                 match result {
                     Ok(Message::Text(text)) => {
-                        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                            if let Some(h) = handler.read().await.as_ref() {
-                                h(value);
+                        let value: Value = match serde_json::from_str(&text) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                warn!("Failed to parse WebSocket message: {}. Text preview: {:.100}", e, &text[..text.len().min(100)]);
+                                continue;
                             }
+                        };
+                        if let Some(h) = handler.read().await.as_ref() {
+                            h(value);
                         }
                     }
                     Ok(Message::Ping(_)) => {

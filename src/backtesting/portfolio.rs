@@ -229,9 +229,34 @@ impl PortfolioBacktestingEngine {
     }
 
     /// Calculate portfolio statistics
-    pub fn calculate_statistics(&self) -> Result<PortfolioStatistics, String> {
+    pub fn calculate_statistics(&mut self) -> Result<PortfolioStatistics, String> {
         if self.trades.is_empty() {
             return Err("没有交易记录".to_string());
+        }
+
+        // Update positions from trades
+        for trade in &self.trades {
+            let key = self.symbols.iter()
+                .find(|c| c.symbol == trade.symbol)
+                .map(|c| &c.vt_symbol);
+            if let Some(vt_sym) = key {
+                let pos = self.positions.entry(vt_sym.clone()).or_insert(0.0);
+                match trade.direction {
+                    Some(Direction::Long) => {
+                        match trade.offset {
+                            Offset::Open | Offset::None => *pos += trade.volume,
+                            Offset::Close | Offset::CloseToday | Offset::CloseYesterday => *pos -= trade.volume,
+                        }
+                    }
+                    Some(Direction::Short) => {
+                        match trade.offset {
+                            Offset::Open | Offset::None => *pos -= trade.volume,
+                            Offset::Close | Offset::CloseToday | Offset::CloseYesterday => *pos += trade.volume,
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // Calculate per-symbol statistics
@@ -247,19 +272,20 @@ impl PortfolioBacktestingEngine {
                 // Calculate individual symbol performance
                 let pnl: f64 = symbol_trades.iter()
                     .map(|t| {
+                        let size = config.size;
                         match t.direction {
                             Some(Direction::Long) => {
                                 if t.offset == Offset::Close {
-                                    t.price * t.volume
+                                    t.price * t.volume * size
                                 } else {
-                                    -t.price * t.volume
+                                    -t.price * t.volume * size
                                 }
                             }
                             Some(Direction::Short) => {
                                 if t.offset == Offset::Close {
-                                    -t.price * t.volume
+                                    -t.price * t.volume * size
                                 } else {
-                                    t.price * t.volume
+                                    t.price * t.volume * size
                                 }
                             }
                             _ => 0.0,

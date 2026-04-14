@@ -9,29 +9,28 @@ use pyo3::types::PyDict;
 use crate::backtesting::{BacktestingEngine, BacktestingMode, BacktestingStatistics};
 use crate::trader::{BarData, Direction, Exchange, Interval, Offset, OrderRequest, OrderType};
 
-use std::cell::UnsafeCell;
+use std::sync::Mutex;
 
 /// Python wrapper for BacktestingEngine
 #[pyclass]
 pub struct PyBacktestingEngine {
-    engine: UnsafeCell<BacktestingEngine>,
+    engine: Mutex<BacktestingEngine>,
+    runtime: tokio::runtime::Runtime,
 }
-
-unsafe impl Send for PyBacktestingEngine {}
-unsafe impl Sync for PyBacktestingEngine {}
 
 #[pymethods]
 impl PyBacktestingEngine {
     #[new]
     fn new() -> Self {
         Self {
-            engine: UnsafeCell::new(BacktestingEngine::new()),
+            engine: Mutex::new(BacktestingEngine::new()),
+            runtime: tokio::runtime::Runtime::new().expect("Failed to create tokio runtime"),
         }
     }
 
     /// Clear all backtesting data
     fn clear_data(&self) {
-        unsafe { (*self.engine.get()).clear_data() };
+        self.engine.lock().unwrap_or_else(|e| e.into_inner()).clear_data();
     }
 
     /// Set backtesting parameters
@@ -61,9 +60,9 @@ impl PyBacktestingEngine {
         capital: f64,
         mode: Option<&str>,
     ) -> PyResult<()> {
-        let engine = unsafe { &mut *self.engine.get() };
+        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
 
-        // Parse interval
+        // Parse datetime
         let interval_enum = match interval.as_str() {
             "1m" => Interval::Minute,
             "15m" => Interval::Minute15,
@@ -111,7 +110,7 @@ impl PyBacktestingEngine {
 
     /// Set history data from Python list of bars
     fn set_history_data(&self, bars: Vec<PyBarData>) -> PyResult<()> {
-        let engine = unsafe { &mut *self.engine.get() };
+        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
         let rust_bars: Vec<BarData> = bars
             .into_iter()
             .map(|b| b.to_rust())
@@ -128,12 +127,12 @@ impl PyBacktestingEngine {
 
     /// Get current position
     fn get_position(&self) -> f64 {
-        unsafe { (*self.engine.get()).get_position() }
+        self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_position()
     }
 
     /// Calculate backtesting result
     fn calculate_result(&self, py: Python) -> PyResult<Py<PyDict>> {
-        let engine = unsafe { &mut *self.engine.get() };
+        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
         let result = engine.calculate_result();
         let dict = PyDict::new(py);
 
@@ -152,7 +151,7 @@ impl PyBacktestingEngine {
     /// Calculate statistics
     #[pyo3(signature = (output=true))]
     fn calculate_statistics(&self, output: Option<bool>) -> PyResult<PyBacktestingStatistics> {
-        let engine = unsafe { &mut *self.engine.get() };
+        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
         let stats = engine.calculate_statistics(output.unwrap_or(true));
         Ok(PyBacktestingStatistics { inner: stats })
     }
@@ -171,25 +170,15 @@ impl PyBacktestingEngine {
         let adapter =
             PythonStrategyAdapter::from_py_object(strategy_class, strategy_name, vt_symbols);
 
-        unsafe { (*self.engine.get()).add_strategy(Box::new(adapter)) };
+        self.engine.lock().unwrap_or_else(|e| e.into_inner()).add_strategy(Box::new(adapter));
         Ok(())
     }
 
     /// Run backtesting
     fn run_backtesting(&self, _py: Python) -> PyResult<()> {
-        // We need to run async code in sync context for Python
-        // This is a simplified approach; proper async support would be better
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let engine_ptr = self.engine.get();
-        // unsafe block usually within async/await boundaries is tricky,
-        // but here block_on is synchronous.
-        // We need to pass the raw pointer or reference ref?
-        // Since we are blocking, self is alive.
-
-        rt.block_on(async {
-            // DANGER: We are creating &mut from UnsafeCell
-            let engine = unsafe { &mut *engine_ptr };
-            engine
+        let mut engine_guard = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        self.runtime.block_on(async {
+            engine_guard
                 .run_backtesting()
                 .await
                 .map_err(pyo3::exceptions::PyRuntimeError::new_err)
@@ -211,7 +200,7 @@ impl PyBacktestingEngine {
         _lock: bool,
         _net: bool,
     ) -> PyResult<Vec<String>> {
-        let engine = unsafe { &mut *self.engine.get() };
+        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
 
         // Parse direction
         let direction_str = direction
@@ -267,7 +256,7 @@ impl PyBacktestingEngine {
 
     /// Cancel order
     fn cancel_order(&self, _strategy: Py<PyAny>, vt_orderid: String) {
-        unsafe { (*self.engine.get()).cancel_order(&vt_orderid) };
+        self.engine.lock().unwrap_or_else(|e| e.into_inner()).cancel_order(&vt_orderid);
     }
 
     /// Write log

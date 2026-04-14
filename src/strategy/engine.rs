@@ -90,30 +90,131 @@ impl StrategyEngine {
         let strategies = Arc::clone(&self.strategies);
         let contexts = Arc::clone(&self.contexts);
         let symbol_strategy_map = Arc::clone(&self.symbol_strategy_map);
+        let orderid_strategy_map = Arc::clone(&self.orderid_strategy_map);
+        let processed_tradeids = Arc::clone(&self.processed_tradeids);
 
         // Register tick event - listen to all ticks
-        let _tick_strategies = Arc::clone(&strategies);
-        let _tick_contexts = Arc::clone(&contexts);
-        let _tick_symbol_map = Arc::clone(&symbol_strategy_map);
+        let tick_strategies = Arc::clone(&strategies);
+        let tick_contexts = Arc::clone(&contexts);
+        let tick_symbol_map = Arc::clone(&symbol_strategy_map);
+        let tick_stop_orders = Arc::clone(&self.stop_orders);
         
-        self.event_engine.register(EVENT_TICK, Arc::new(move |_event| {
-            // Extract tick from event data
-            // Note: This is a simplified version - in production you'd need proper type extraction
+        self.event_engine.register(EVENT_TICK, Arc::new(move |event| {
             tracing::debug!("Tick event received");
+            // TODO: Wire event data extraction - once Event.data properly carries TickData,
+            // downcast and call process_tick_event. For now, the event_type contains the symbol suffix.
+            // The actual tick processing is triggered through GatewayEventSender -> MainEngine -> StrategyEngine
+            let _ = (&tick_strategies, &tick_contexts, &tick_symbol_map, &tick_stop_orders);
+            if let Some(ref data) = event.data {
+                if let Some(tick) = data.clone().downcast::<TickData>().ok() {
+                    let strategies = tick_strategies.clone();
+                    let contexts = tick_contexts.clone();
+                    let symbol_map = tick_symbol_map.clone();
+                    let stop_orders = tick_stop_orders.clone();
+                    
+                    let vt_symbol = tick.vt_symbol();
+                    let strategy_names: Vec<String> = symbol_map.blocking_read()
+                        .get(&vt_symbol)
+                        .map(|names| names.clone())
+                        .unwrap_or_default();
+                    
+                    for strategy_name in &strategy_names {
+                        let contexts_guard = contexts.blocking_read();
+                        if let Some(context) = contexts_guard.get(strategy_name) {
+                            context.update_tick((*tick).clone());
+                        }
+                        let strategies_guard = strategies.blocking_write();
+                        if let Some(_strategy) = strategies_guard.get(strategy_name) {
+                            // strategy.on_tick(&tick, context);
+                        }
+                    }
+                    
+                    {
+                        let stop_orders_guard = stop_orders.blocking_read();
+                        for (_, stop_order) in stop_orders_guard.iter() {
+                            if stop_order.vt_symbol != vt_symbol { continue; }
+                            if stop_order.status != StopOrderStatus::Waiting { continue; }
+                            let _should_trigger = match stop_order.direction {
+                                Direction::Long => tick.last_price >= stop_order.price,
+                                Direction::Short => tick.last_price <= stop_order.price,
+                                Direction::Net => false,
+                            };
+                        }
+                    }
+                }
+            }
         }));
 
         // Register order event
-        let _order_strategies = Arc::clone(&strategies);
+        let order_strategies = Arc::clone(&strategies);
+        let order_orderid_map = Arc::clone(&orderid_strategy_map);
         
-        self.event_engine.register(EVENT_ORDER, Arc::new(move |_event| {
+        self.event_engine.register(EVENT_ORDER, Arc::new(move |event| {
             tracing::debug!("Order event received");
+            if let Some(ref data) = event.data {
+                if let Some(order) = data.clone().downcast::<OrderData>().ok() {
+                    let orderid_map = order_orderid_map.clone();
+                    let strategies = order_strategies.clone();
+                    
+                    let strategy_name = orderid_map.blocking_read()
+                        .get(&order.vt_orderid())
+                        .cloned();
+                    
+                    if let Some(strategy_name) = strategy_name {
+                        let mut strategies_guard = strategies.blocking_write();
+                        if let Some(strategy) = strategies_guard.get_mut(&strategy_name) {
+                            strategy.on_order(&order);
+                        }
+                    }
+                }
+            }
         }));
 
         // Register trade event
-        let _trade_strategies = Arc::clone(&strategies);
+        let trade_strategies = Arc::clone(&strategies);
+        let trade_orderid_map = Arc::clone(&orderid_strategy_map);
+        let trade_processed = Arc::clone(&processed_tradeids);
         
-        self.event_engine.register(EVENT_TRADE, Arc::new(move |_event| {
+        self.event_engine.register(EVENT_TRADE, Arc::new(move |event| {
             tracing::debug!("Trade event received");
+            if let Some(ref data) = event.data {
+                if let Some(trade) = data.clone().downcast::<TradeData>().ok() {
+                    let processed = trade_processed.clone();
+                    let orderid_map = trade_orderid_map.clone();
+                    let strategies = trade_strategies.clone();
+                    
+                    let vt_tradeid = trade.vt_tradeid();
+                    {
+                        let mut processed_guard = processed.blocking_write();
+                        if processed_guard.contains(&vt_tradeid) {
+                            return;
+                        }
+                        processed_guard.insert(vt_tradeid);
+                        if processed_guard.len() > 10000 {
+                            processed_guard.clear();
+                        }
+                    }
+                    
+                    let strategy_name = orderid_map.blocking_read()
+                        .get(&trade.vt_orderid())
+                        .cloned();
+                    
+                    if let Some(strategy_name) = strategy_name {
+                        let mut strategies_guard = strategies.blocking_write();
+                        if let Some(strategy) = strategies_guard.get_mut(&strategy_name) {
+                            let volume_change = match trade.direction {
+                                Some(Direction::Long) => trade.volume,
+                                Some(Direction::Short) => -trade.volume,
+                                Some(Direction::Net) => 0.0,
+                                None => 0.0,
+                            };
+                            let current_pos = strategy.get_position(&trade.vt_symbol());
+                            strategy.update_position(&trade.vt_symbol(), current_pos + volume_change);
+                            strategy.on_trade(&trade);
+                        }
+                    }
+                }
+            }
         }));
     }
 
@@ -221,26 +322,27 @@ impl StrategyEngine {
 
     /// Stop a strategy
     pub async fn stop_strategy(&self, strategy_name: &str) -> Result<(), String> {
-        let mut strategies = self.strategies.write().await;
+        {
+            let mut strategies = self.strategies.write().await;
 
-        if let Some(strategy) = strategies.get_mut(strategy_name) {
-            if strategy.state() != StrategyState::Trading {
-                return Err(format!(
-                    "Strategy {} not trading, current state: {:?}",
-                    strategy_name, strategy.state()
-                ));
+            if let Some(strategy) = strategies.get_mut(strategy_name) {
+                if strategy.state() != StrategyState::Trading {
+                    return Err(format!(
+                        "Strategy {} not trading, current state: {:?}",
+                        strategy_name, strategy.state()
+                    ));
+                }
+
+                strategy.on_stop();
+            } else {
+                return Err(format!("Strategy {} not found", strategy_name));
             }
-
-            strategy.on_stop();
-            
-            // Cancel all active orders
-            self.cancel_all_orders(strategy_name).await;
-
-            tracing::info!("Strategy {} stopped", strategy_name);
-            Ok(())
-        } else {
-            Err(format!("Strategy {} not found", strategy_name))
         }
+
+        self.cancel_all_orders(strategy_name).await;
+
+        tracing::info!("Strategy {} stopped", strategy_name);
+        Ok(())
     }
 
     /// Load historical data for strategy initialization
@@ -339,6 +441,9 @@ impl StrategyEngine {
                 return;
             }
             processed.insert(vt_tradeid);
+            if processed.len() > 10000 {
+                processed.clear();
+            }
         }
 
         let orderid_map = self.orderid_strategy_map.read().await;

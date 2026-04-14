@@ -47,12 +47,15 @@ impl OptimizationSetting {
                     return Err("参数优化步进必须大于0".to_string());
                 }
 
-                let mut value = start;
                 let mut value_list = Vec::new();
-
-                while value <= end_val {
+                let mut i = 0;
+                loop {
+                    let value = start + i as f64 * step_val;
+                    if value > end_val + 1e-10 {
+                        break;
+                    }
                     value_list.push(value);
-                    value += step_val;
+                    i += 1;
                 }
 
                 let count = value_list.len();
@@ -158,9 +161,14 @@ where
 
     // Sort by key function
     results.sort_by(|a, b| {
-        key_func(b)
-            .partial_cmp(&key_func(a))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        let va = key_func(a);
+        let vb = key_func(b);
+        match (va.partial_cmp(&vb), vb.is_nan(), va.is_nan()) {
+            (Some(ord), _, _) => ord,
+            (_, true, false) => std::cmp::Ordering::Less,
+            (_, false, true) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        }
     });
 
     let cost = start.elapsed().as_secs();
@@ -264,12 +272,18 @@ where
 
         // Sort by fitness
         population.sort_by(|a, b| {
-            b.fitness
-                .partial_cmp(&a.fitness)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            match (
+                a.fitness.partial_cmp(&b.fitness),
+                b.fitness.is_nan(),
+                a.fitness.is_nan(),
+            ) {
+                (Some(ord), _, _) => ord,
+                (_, true, false) => std::cmp::Ordering::Less,
+                (_, false, true) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            }
         });
 
-        // Select top individuals
         let mut new_population: Vec<Individual> = population[..mu].to_vec();
 
         // Generate offspring through crossover and mutation
@@ -314,9 +328,16 @@ where
     }
 
     population.sort_by(|a, b| {
-        b.fitness
-            .partial_cmp(&a.fitness)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        match (
+            a.fitness.partial_cmp(&b.fitness),
+            b.fitness.is_nan(),
+            a.fitness.is_nan(),
+        ) {
+            (Some(ord), _, _) => ord,
+            (_, true, false) => std::cmp::Ordering::Less,
+            (_, false, true) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        }
     });
 
     let cost = start.elapsed().as_secs();

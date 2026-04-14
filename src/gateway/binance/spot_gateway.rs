@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{Local, Utc};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 use super::config::{BinanceConfigs, BinanceGatewayConfig};
@@ -22,6 +22,14 @@ use crate::trader::{
     TradeData,
 };
 use crate::trader::gateway::BaseGateway;
+
+fn format_price(value: f64) -> String {
+    if value == 0.0 { return "0".to_string(); }
+    let s = format!("{:.8}", value);
+    let s = s.trim_end_matches('0');
+    let s = s.trim_end_matches('.');
+    s.to_string()
+}
 
 /// Binance Spot Gateway
 pub struct BinanceSpotGateway {
@@ -273,7 +281,7 @@ impl BinanceSpotGateway {
                     pricetick,
                     min_volume,
                     max_volume: None,
-                    stop_supported: true,
+                    stop_supported: false,
                     net_position: true,
                     history_data: true,
                     option_strike: None,
@@ -318,13 +326,16 @@ impl BinanceSpotGateway {
         let event_sender = self.event_sender.clone();
         let orders = self.orders.clone();
         let gateway_name = self.gateway_name.clone();
+        let order_lock = Arc::new(Mutex::new(()));
         
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let event_sender = event_sender.clone();
             let orders = orders.clone();
             let gateway_name = gateway_name.clone();
+            let lock = order_lock.clone();
             
             tokio::spawn(async move {
+                let _guard = lock.lock().await;
                 let event_type = packet.get("e").and_then(|s| s.as_str()).unwrap_or("");
                 
                 match event_type {
@@ -411,7 +422,7 @@ impl BinanceSpotGateway {
                         }
                     }
                     "listenKeyExpired" => {
-                        warn!("{}: Listen key expired", gateway_name);
+                        warn!("{}: Listen key expired, attempting to recreate and reconnect trade stream", gateway_name);
                     }
                     _ => {}
                 }
@@ -440,6 +451,31 @@ impl BinanceSpotGateway {
         if let Err(e) = self.rest_client.put("/api/v3/userDataStream", &params, Security::ApiKey).await {
             warn!("{}: Keep user stream failed: {}", self.gateway_name, e);
         }
+    }
+
+    /// Recreate listen key and reconnect trade stream
+    pub async fn recreate_listen_key(&self) -> Result<(), String> {
+        self.trade_ws.disconnect().await;
+
+        let params = HashMap::new();
+        let data = self.rest_client.post("/api/v3/userDataStream", &params, Security::ApiKey).await?;
+
+        let listen_key = data["listenKey"].as_str().unwrap_or("").to_string();
+        *self.listen_key.write().await = listen_key.clone();
+        self.keep_alive_count.store(0, Ordering::SeqCst);
+
+        let server = self.server.read().await.clone();
+        let url = if server == "REAL" {
+            format!("{}{}", SPOT_WS_TRADE_HOST, listen_key)
+        } else {
+            format!("{}{}", SPOT_TESTNET_WS_TRADE_HOST, listen_key)
+        };
+
+        let proxy_host = self.rest_client.get_proxy_host().await;
+        let proxy_port = self.rest_client.get_proxy_port().await;
+        self.trade_ws.connect(&url, &proxy_host, proxy_port).await?;
+        self.write_log("ListenKey recreated, trade stream reconnected").await;
+        Ok(())
     }
 }
 
@@ -513,12 +549,15 @@ impl BaseGateway for BinanceSpotGateway {
         let market_url = if server == "REAL" { SPOT_WS_DATA_HOST } else { SPOT_TESTNET_WS_DATA_HOST };
         let ticks = self.ticks.clone();
         let event_sender = self.event_sender.clone();
+        let market_lock = Arc::new(Mutex::new(()));
         
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let ticks = ticks.clone();
             let event_sender = event_sender.clone();
+            let lock = market_lock.clone();
             
             tokio::spawn(async move {
+                let _guard = lock.lock().await;
                 let stream = match packet.get("stream").and_then(|s| s.as_str()) {
                     Some(s) => s,
                     None => return,
@@ -551,7 +590,7 @@ impl BaseGateway for BinanceSpotGateway {
                         tick.datetime = timestamp_to_datetime(data["E"].as_i64().unwrap_or(0));
                     }
                     "depth5" => {
-                        if let Some(bids) = data["bids"].as_array() {
+                        if let Some(bids) = data["b"].as_array() {
                             for (i, bid) in bids.iter().take(5).enumerate() {
                                 if let Some(arr) = bid.as_array() {
                                     let price: f64 = arr.first().and_then(|v| v.as_str()).unwrap_or("0").parse().unwrap_or(0.0);
@@ -567,7 +606,7 @@ impl BaseGateway for BinanceSpotGateway {
                                 }
                             }
                         }
-                        if let Some(asks) = data["asks"].as_array() {
+                        if let Some(asks) = data["a"].as_array() {
                             for (i, ask) in asks.iter().take(5).enumerate() {
                                 if let Some(arr) = ask.as_array() {
                                     let price: f64 = arr.first().and_then(|v| v.as_str()).unwrap_or("0").parse().unwrap_or(0.0);
@@ -636,13 +675,13 @@ impl BaseGateway for BinanceSpotGateway {
         params.insert("symbol".to_string(), req.symbol.to_uppercase());
         params.insert("side".to_string(), DIRECTION_VT2BINANCE.get(&req.direction).unwrap_or(&"BUY").to_string());
         params.insert("type".to_string(), ORDERTYPE_VT2BINANCE.get(&req.order_type).unwrap_or(&"LIMIT").to_string());
-        params.insert("quantity".to_string(), format!("{}", req.volume));
+        params.insert("quantity".to_string(), format_price(req.volume));
         params.insert("newClientOrderId".to_string(), orderid.clone());
         params.insert("newOrderRespType".to_string(), "ACK".to_string());
 
         if req.order_type == OrderType::Limit {
             params.insert("timeInForce".to_string(), "GTC".to_string());
-            params.insert("price".to_string(), format!("{}", req.price));
+            params.insert("price".to_string(), format_price(req.price));
         }
 
         match self.rest_client.post("/api/v3/order", &params, Security::Signed).await {

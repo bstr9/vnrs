@@ -54,14 +54,29 @@ impl PositionHolding {
 
     /// Update position data
     pub fn update_position(&mut self, position: &PositionData) {
-        if position.direction == Direction::Long {
-            self.long_pos = position.volume;
-            self.long_yd = position.yd_volume;
-            self.long_td = self.long_pos - self.long_yd;
-        } else {
-            self.short_pos = position.volume;
-            self.short_yd = position.yd_volume;
-            self.short_td = self.short_pos - self.short_yd;
+        match position.direction {
+            Direction::Long => {
+                self.long_pos = position.volume;
+                self.long_yd = position.yd_volume;
+                self.long_td = self.long_pos - self.long_yd;
+            }
+            Direction::Short => {
+                self.short_pos = position.volume;
+                self.short_yd = position.yd_volume;
+                self.short_td = self.short_pos - self.short_yd;
+            }
+            Direction::Net => {
+                let pos_change = position.volume - self.long_pos + self.short_pos;
+                if pos_change >= 0.0 {
+                    self.long_pos += pos_change;
+                    self.long_yd += pos_change;
+                    self.long_td = self.long_pos - self.long_yd;
+                } else {
+                    self.short_pos += pos_change.abs();
+                    self.short_yd += pos_change.abs();
+                    self.short_td = self.short_pos - self.short_yd;
+                }
+            }
         }
     }
 

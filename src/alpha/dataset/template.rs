@@ -127,8 +127,9 @@ impl AlphaDataset {
         // Calculate label if expression is set
         if !self.label_expression.is_empty() {
             logger::logger().debug(&format!("Calculating label: {}", self.label_expression));
-            // In a real implementation, this would evaluate the label expression
-            let series = Series::new("label".into(), vec![0.0; result_df.height()]);
+            // TODO: Evaluate the label expression against the dataframe
+            // For now, initialize with NaN to indicate uncomputed labels
+            let series = Series::new("label".into(), vec![f64::NAN; result_df.height()]);
             result_df.with_column(series)?;
         }
 

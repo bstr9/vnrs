@@ -39,28 +39,37 @@ impl PythonEngineWrapper {
         })
     }
 
-    fn add_strategy(&self, py: Python, strategy: Bound<'_, PythonStrategy>) -> PyResult<()> {
-        self.inner.lock().unwrap().add_strategy_py(py, strategy)
+    fn add_strategy(
+        slf: &Bound<'_, Self>,
+        py: Python,
+        strategy: Bound<'_, PythonStrategy>,
+    ) -> PyResult<()> {
+        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
+        slf.borrow()
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .add_strategy_py(py, strategy, engine_ref)
     }
 
     fn init_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .init_strategy_py(py, &strategy_name)
     }
 
     fn start_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .start_strategy_py(py, &strategy_name)
     }
 
     fn stop_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .stop_strategy_py(py, &strategy_name)
     }
 
@@ -91,48 +100,76 @@ impl PythonEngineWrapper {
 
     // Order management methods
     fn buy(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let result = self.inner.lock().unwrap().buy(&vt_symbol, price, volume);
+        let result = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .buy(&vt_symbol, price, volume);
         Ok(result)
     }
 
     fn sell(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let result = self.inner.lock().unwrap().sell(&vt_symbol, price, volume);
+        let result = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .sell(&vt_symbol, price, volume);
         Ok(result)
     }
 
     fn short(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let result = self.inner.lock().unwrap().short(&vt_symbol, price, volume);
+        let result = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .short(&vt_symbol, price, volume);
         Ok(result)
     }
 
     fn cover(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let result = self.inner.lock().unwrap().cover(&vt_symbol, price, volume);
+        let result = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cover(&vt_symbol, price, volume);
         Ok(result)
     }
 
     fn cancel_order(&self, vt_orderid: String) {
-        self.inner.lock().unwrap().cancel_order(&vt_orderid);
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cancel_order(&vt_orderid);
     }
 
     fn get_pos(&self, vt_symbol: String) -> PyResult<f64> {
-        Ok(self.inner.lock().unwrap().get_pos(&vt_symbol))
+        Ok(self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_pos(&vt_symbol))
     }
 
     fn write_log(&self, msg: String) {
-        self.inner.lock().unwrap().write_log(&msg);
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .write_log(&msg);
     }
 
     fn send_email(&self, msg: String) {
-        self.inner.lock().unwrap().send_email(&msg);
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send_email(&msg);
     }
 }
 
 /// Create main engine from Python
 #[pyfunction]
 fn create_main_engine(py: Python) -> PyResult<Py<PyAny>> {
-    // In a real implementation, we would create and return a Python-wrapped Rust MainEngine
-    // For now, we'll just return None
-    Ok(py.None())
+    let wrapper = PythonEngineWrapper::new()?;
+    Ok(Py::new(py, wrapper)?.into_any())
 }
 
 /// Run the event loop

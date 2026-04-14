@@ -1,10 +1,10 @@
 //! Backtesting Statistics Calculation
-//! 
+//!
 //! Calculate performance metrics from backtesting results
 
-use std::collections::HashMap;
+use super::base::{BacktestingStatistics, DailyResult};
 use chrono::NaiveDate;
-use super::base::{DailyResult, BacktestingStatistics};
+use std::collections::HashMap;
 
 /// Calculate comprehensive backtesting statistics
 pub fn calculate_statistics(
@@ -20,7 +20,7 @@ pub fn calculate_statistics(
     // Get sorted dates
     let mut dates: Vec<&NaiveDate> = daily_results.keys().collect();
     dates.sort();
-    
+
     let start_date = dates.first().unwrap().format("%Y-%m-%d").to_string();
     let end_date = dates.last().unwrap().format("%Y-%m-%d").to_string();
 
@@ -53,8 +53,9 @@ pub fn calculate_statistics(
             balance += result.net_pnl;
 
             // Calculate return
-            let daily_return = if balance > 0.0 {
-                result.net_pnl / (balance - result.net_pnl)
+            let prev_balance = balance - result.net_pnl;
+            let daily_return = if prev_balance.abs() > 1e-10 {
+                result.net_pnl / prev_balance
             } else {
                 0.0
             };
@@ -75,7 +76,11 @@ pub fn calculate_statistics(
             let drawdown = max_balance - balance;
             if drawdown > max_drawdown {
                 max_drawdown = drawdown;
-                max_drawdown_percent = (drawdown / max_balance) * 100.0;
+                max_drawdown_percent = if max_balance > 0.0 {
+                    (drawdown / max_balance) * 100.0
+                } else {
+                    0.0
+                };
             }
         }
     }
@@ -128,7 +133,8 @@ pub fn calculate_statistics(
                 let diff = r - daily_return_mean;
                 diff * diff
             })
-            .sum::<f64>() / (daily_returns.len() - 1) as f64;
+            .sum::<f64>()
+            / (daily_returns.len() - 1) as f64;
         variance.sqrt()
     } else {
         0.0
@@ -173,11 +179,19 @@ pub fn calculate_statistics(
 
 /// Calculate maximum drawdown from a series of balance values
 pub fn calculate_max_drawdown(balances: &[f64]) -> (f64, f64) {
-    let mut max_balance = 0.0;
+    if balances.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let mut max_balance = balances.first().copied().unwrap_or(0.0);
     let mut max_drawdown = 0.0;
     let mut max_drawdown_percent = 0.0;
 
-    for &balance in balances {
+    if balances.len() <= 1 {
+        return (0.0, 0.0);
+    }
+
+    for &balance in &balances[1..] {
         if balance > max_balance {
             max_balance = balance;
         }
@@ -185,9 +199,11 @@ pub fn calculate_max_drawdown(balances: &[f64]) -> (f64, f64) {
         let drawdown = max_balance - balance;
         if drawdown > max_drawdown {
             max_drawdown = drawdown;
-            if max_balance > 0.0 {
-                max_drawdown_percent = (drawdown / max_balance) * 100.0;
-            }
+            max_drawdown_percent = if max_balance > 0.0 {
+                (drawdown / max_balance) * 100.0
+            } else {
+                0.0
+            };
         }
     }
 
@@ -211,11 +227,7 @@ pub fn calculate_returns(balances: &[f64]) -> Vec<f64> {
 }
 
 /// Calculate Sharpe ratio from returns
-pub fn calculate_sharpe_ratio(
-    returns: &[f64],
-    risk_free: f64,
-    annual_days: u32,
-) -> f64 {
+pub fn calculate_sharpe_ratio(returns: &[f64], risk_free: f64, annual_days: u32) -> f64 {
     if returns.is_empty() {
         return 0.0;
     }
@@ -232,7 +244,8 @@ pub fn calculate_sharpe_ratio(
             let diff = r - mean_return;
             diff * diff
         })
-        .sum::<f64>() / (returns.len() - 1) as f64;
+        .sum::<f64>()
+        / (returns.len() - 1) as f64;
 
     let std_return = variance.sqrt();
 
