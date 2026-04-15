@@ -703,11 +703,25 @@ impl MainWindow {
                     end: Some(chrono::Utc::now()),
                     interval: Some(interval),
                 };
+                
+                // Find appropriate gateway based on exchange
+                let gateway_name = if exchange == crate::trader::Exchange::Binance {
+                    if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
+                        "BINANCE_SPOT".to_string()
+                    } else if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
+                        "BINANCE_USDT".to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+                
                 let engine_clone = engine.clone();
                 let pending_data = self.pending_history_data.clone();
                 let vt_sym = vt_symbol.clone();
                 tokio::spawn(async move {
-                    match engine_clone.query_history(req, "").await {
+                    match engine_clone.query_history(req, &gateway_name).await {
                         Ok(bars) => {
                             tracing::info!("周期切换查询到历史数据: {} 条, symbol: {}", bars.len(), vt_sym);
                             let mut data = pending_data.lock().await;
