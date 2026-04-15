@@ -224,14 +224,12 @@ impl ChartWidget {
         }
 
         if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
-            // Zoom in
-            self.bar_count = (self.bar_count as f32 / 1.2) as usize;
+            self.bar_count = (self.bar_count as f64 / 1.2) as usize;
             self.bar_count = self.bar_count.max(MIN_BAR_COUNT);
         }
 
         if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
-            // Zoom out
-            self.bar_count = (self.bar_count as f32 * 1.2) as usize;
+            self.bar_count = (self.bar_count as f64 * 1.2) as usize;
             self.bar_count = self.bar_count.min(count);
         }
 
@@ -250,12 +248,10 @@ impl ChartWidget {
         if scroll_delta.y != 0.0 {
             let count = self.manager.get_count();
             if scroll_delta.y > 0.0 {
-                // Scroll up: zoom out (show more bars, longer time span)
-                self.bar_count = (self.bar_count as f32 * 1.1) as usize;
+                self.bar_count = (self.bar_count as f64 * 1.1) as usize;
                 self.bar_count = self.bar_count.min(count);
             } else {
-                // Scroll down: zoom in (show fewer bars, shorter time span)
-                self.bar_count = (self.bar_count as f32 / 1.1) as usize;
+                self.bar_count = (self.bar_count as f64 / 1.1) as usize;
                 self.bar_count = self.bar_count.max(MIN_BAR_COUNT);
             }
         }
@@ -267,13 +263,10 @@ impl ChartWidget {
             let delta = response.drag_delta();
             if delta.x != 0.0 {
                 let bar_pixel_width = candle_rect.width() / self.bar_count as f32;
-                // Negative delta.x means dragging left (time goes forward)
-                // Positive delta.x means dragging right (time goes backward)
-                let bar_delta = (-delta.x / bar_pixel_width) as i32;
+                let bar_delta = (-delta.x / bar_pixel_width) as isize;
 
                 let count = self.manager.get_count();
-                let new_right = (self.right_ix as i32 + bar_delta) as usize;
-                // Clamp: cannot go beyond the rightmost bar (latest data)
+                let new_right = (self.right_ix as isize + bar_delta).max(0) as usize;
                 self.right_ix = new_right.clamp(self.bar_count, count);
             }
         }

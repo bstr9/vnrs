@@ -115,15 +115,15 @@ impl StrategyEngine {
                         .unwrap_or_default();
                     
                     for strategy_name in &strategy_names {
-                        let contexts_guard = contexts.blocking_read();
-                        if let Some(context) = contexts_guard.get(strategy_name) {
-                            context.update_tick((*tick).clone());
-                        }
-                        let strategies_guard = strategies.blocking_write();
-                        if let Some(_strategy) = strategies_guard.get(strategy_name) {
-                            // strategy.on_tick(&tick, context);
-                        }
-                    }
+                         let contexts_guard = contexts.blocking_read();
+                         if let Some(context) = contexts_guard.get(strategy_name) {
+                             context.update_tick((*tick).clone());
+                             let mut strategies_guard = strategies.blocking_write();
+                             if let Some(strategy) = strategies_guard.get_mut(strategy_name) {
+                                 strategy.on_tick(&tick, context);
+                             }
+                         }
+                     }
                     
                     {
                         let mut stop_orders_guard = stop_orders.blocking_write();
@@ -231,21 +231,26 @@ impl StrategyEngine {
     ) -> Result<(), String> {
         let strategy_name = strategy.strategy_name().to_string();
         
-        // Check if strategy already exists
-        if self.strategies.read().await.contains_key(&strategy_name) {
-            return Err(format!("Strategy {} already exists", strategy_name));
+        // Check and insert atomically under write lock to prevent TOCTOU race
+        {
+            let mut strategies = self.strategies.write().await;
+            if strategies.contains_key(&strategy_name) {
+                return Err(format!("Strategy {} already exists", strategy_name));
+            }
+            strategies.insert(strategy_name.clone(), strategy);
         }
 
         // Create context for this strategy
         let context = StrategyContext::new();
         
         // Subscribe to symbols
-        for vt_symbol in strategy.vt_symbols() {
+        for vt_symbol in self.strategies.read().await.get(&strategy_name)
+            .map(|s| s.vt_symbols())
+            .unwrap_or_default()
+        {
             self.subscribe_symbol(&strategy_name, vt_symbol).await;
         }
 
-        // Store strategy
-        self.strategies.write().await.insert(strategy_name.clone(), strategy);
         self.strategy_settings.write().await.insert(strategy_name.clone(), setting);
         self.contexts.write().await.insert(strategy_name.clone(), context);
 

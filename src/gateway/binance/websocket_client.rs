@@ -247,7 +247,7 @@ pub struct BinanceWebSocketClient {
     /// Message handler
     handler: Arc<RwLock<Option<WsMessageHandler>>>,
     /// Message sender for sending to WebSocket
-    tx: Arc<RwLock<Option<mpsc::UnboundedSender<Message>>>>,
+    tx: Arc<RwLock<Option<mpsc::Sender<Message>>>>,
     /// Active flag
     active: Arc<RwLock<bool>>,
     /// Request ID counter
@@ -354,7 +354,7 @@ impl BinanceWebSocketClient {
     {
 
         let (write, read) = ws_stream.split();
-        let (tx, rx) = mpsc::unbounded_channel::<Message>();
+        let (tx, rx) = mpsc::channel::<Message>(1024);
 
         *self.tx.write().await = Some(tx);
         *self.active.write().await = true;
@@ -426,7 +426,7 @@ impl BinanceWebSocketClient {
     pub async fn disconnect(&self) {
         *self.active.write().await = false;
         if let Some(tx) = self.tx.write().await.take() {
-            let _ = tx.send(Message::Close(None));
+            let _ = tx.send(Message::Close(None)).await;
         }
         info!("{}: WebSocket disconnected", self.gateway_name);
     }
@@ -443,7 +443,7 @@ impl BinanceWebSocketClient {
             .map_err(|e| format!("Failed to serialize message: {}", e))?;
 
         if let Some(tx) = self.tx.read().await.as_ref() {
-            tx.send(Message::Text(text.into()))
+            tx.send(Message::Text(text.into())).await
                 .map_err(|e| format!("Failed to send message: {}", e))?;
         } else {
             return Err("WebSocket not connected".to_string());
