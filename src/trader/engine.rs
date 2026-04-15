@@ -271,13 +271,35 @@ impl OmsEngine {
         data.accounts.values().cloned().collect()
     }
 
-    /// Get all contract data
+    /// Get all contract data, sorted by symbol with popular pairs first
     pub fn get_all_contracts(&self) -> Vec<ContractData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
             e.into_inner()
         });
-        data.contracts.values().cloned().collect()
+        let mut contracts: Vec<ContractData> = data.contracts.values().cloned().collect();
+        
+        // Popular trading pairs to prioritize (USDT pairs)
+        let popular_pairs = [
+            "btcusdt", "ethusdt", "bnbusdt", "solusdt", "xrpusdt",
+            "dogeusdt", "adausdt", "avaxusdt", "dotusdt", "maticusdt",
+            "btcusdc", "ethusdc",
+        ];
+        
+        // Sort: popular pairs first, then alphabetically
+        contracts.sort_by(|a, b| {
+            let a_lower = a.symbol.to_lowercase();
+            let b_lower = b.symbol.to_lowercase();
+            let a_popular = popular_pairs.iter().position(|p| &a_lower == p).unwrap_or(999);
+            let b_popular = popular_pairs.iter().position(|p| &b_lower == p).unwrap_or(999);
+            
+            match (a_popular, b_popular) {
+                (ap, bp) if ap != bp => ap.cmp(&bp),
+                _ => a.symbol.cmp(&b.symbol),
+            }
+        });
+        
+        contracts
     }
 
     /// Get all quote data

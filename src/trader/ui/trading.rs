@@ -94,9 +94,12 @@ pub struct TradingWidget {
     pub price_digits: usize,
     pub contract: Option<ContractData>,
 
-    // Available contracts for dropdown selection
+    // Available contracts for autocomplete
     pub contracts: Vec<ContractData>,
-    pub contract_index: usize,
+    /// Filtered contracts based on user input
+    pub contract_filter: String,
+    /// Whether the dropdown is open
+    pub show_dropdown: bool,
 
     // Order parameters
     pub direction_index: usize,
@@ -145,7 +148,8 @@ impl TradingWidget {
             price_digits: 2,
             contract: None,
             contracts: Vec::new(),
-            contract_index: 0,
+            contract_filter: String::new(),
+            show_dropdown: false,
             direction_index: 0,
             offset_index: 0,
             order_type_index: 0,
@@ -281,80 +285,108 @@ impl TradingWidget {
                         });
                     ui.end_row();
 
-                    // Symbol - Dropdown selection from available contracts
+                    // Symbol - Text input with autocomplete dropdown
                     ui.label("代码");
-                    if self.contracts.is_empty() {
-                        // No contracts loaded yet - show text input as fallback
-                        let response = ui.text_edit_singleline(&mut self.symbol);
-                        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            self.update_vt_symbol();
-                        }
+
+                    // Text input for symbol
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.symbol).hint_text("输入合约代码..."),
+                    );
+
+                    // Check if user is typing (filter contracts)
+                    let input_lower = self.symbol.to_lowercase();
+                    let filtered_contracts: Vec<_> = if input_lower.is_empty() {
+                        // Show first 20 popular contracts when empty
+                        self.contracts.iter().take(20).collect()
                     } else {
-                        // Show dropdown with available contracts
-                        let selected_text = if self.contract_index < self.contracts.len() {
-                            let c = &self.contracts[self.contract_index];
-                            format!("{} ({})", c.symbol.to_uppercase(), c.name)
-                        } else {
-                            "选择合约...".to_string()
-                        };
+                        // Filter contracts that match input (case-insensitive prefix match)
+                        self.contracts
+                            .iter()
+                            .filter(|c| c.symbol.to_lowercase().starts_with(&input_lower))
+                            .take(20)
+                            .collect()
+                    };
 
-                        ComboBox::from_id_salt("contract_combo")
-                            .selected_text(&selected_text)
-                            .width(180.0)
-                            .show_ui(ui, |ui| {
-                                for (i, contract) in self.contracts.iter().enumerate() {
-                                    let label = format!(
-                                        "{} ({})",
-                                        contract.symbol.to_uppercase(),
-                                        contract.name
-                                    );
-                                    if ui
-                                        .selectable_label(i == self.contract_index, label)
-                                        .clicked()
-                                    {
-                                        self.contract_index = i;
-                                        self.symbol = contract.symbol.clone();
-                                        self.name = contract.name.clone();
-                                        self.price_digits = get_digits(contract.pricetick);
+                    // Show autocomplete dropdown below the text edit
+                    if response.has_focus() && !filtered_contracts.is_empty() {
+                        let popup_id = egui::Id::new("contract_autocomplete");
 
-                                        // Find matching exchange index
-                                        if let Some(idx) = self
-                                            .exchanges
-                                            .iter()
-                                            .position(|e| *e == contract.exchange)
-                                        {
-                                            self.exchange_index = idx;
-                                        }
+                        egui::Area::new(popup_id)
+                            .pivot(egui::Align2::LEFT_TOP.into())
+                            .fixed_pos(response.rect.left_bottom())
+                            .order(egui::Order::Foreground)
+                            .show(ui.ctx(), |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                    ui.set_max_width(220.0);
+                                    ui.set_max_height(200.0);
 
-                                        // Find matching gateway index
-                                        if let Some(idx) = self
-                                            .gateways
-                                            .iter()
-                                            .position(|g| g == &contract.gateway_name)
-                                        {
-                                            self.gateway_index = idx;
-                                        }
+                                    egui::ScrollArea::vertical()
+                                        .max_height(180.0)
+                                        .show(ui, |ui| {
+                                            for contract in filtered_contracts {
+                                                let label = format!(
+                                                    "{} ({})",
+                                                    contract.symbol.to_uppercase(),
+                                                    contract.name
+                                                );
 
-                                        self.contract = Some(contract.clone());
+                                                // Highlight if exact match
+                                                let is_exact =
+                                                    contract.symbol.to_lowercase() == input_lower;
 
-                                        // Update vt_symbol and request subscription
-                                        let new_vt_symbol = contract.vt_symbol();
-                                        if new_vt_symbol != self.vt_symbol {
-                                            self.vt_symbol = new_vt_symbol;
-                                            self.depth = MarketDepth::default();
-                                            self.price.clear();
-                                            self.volume.clear();
+                                                if ui.selectable_label(is_exact, label).clicked() {
+                                                    // User selected this contract
+                                                    self.symbol = contract.symbol.clone();
+                                                    self.name = contract.name.clone();
+                                                    self.price_digits =
+                                                        get_digits(contract.pricetick);
 
-                                            // Request subscription
-                                            self.pending_subscribe = Some(SubscribeRequest {
-                                                symbol: contract.symbol.clone(),
-                                                exchange: contract.exchange,
-                                            });
-                                        }
-                                    }
-                                }
+                                                    // Find matching exchange index
+                                                    if let Some(idx) = self
+                                                        .exchanges
+                                                        .iter()
+                                                        .position(|e| *e == contract.exchange)
+                                                    {
+                                                        self.exchange_index = idx;
+                                                    }
+
+                                                    // Find matching gateway index
+                                                    if let Some(idx) = self
+                                                        .gateways
+                                                        .iter()
+                                                        .position(|g| g == &contract.gateway_name)
+                                                    {
+                                                        self.gateway_index = idx;
+                                                    }
+
+                                                    self.contract = Some(contract.clone());
+
+                                                    // Update vt_symbol and request subscription
+                                                    let new_vt_symbol = contract.vt_symbol();
+                                                    if new_vt_symbol != self.vt_symbol {
+                                                        self.vt_symbol = new_vt_symbol;
+                                                        self.depth = MarketDepth::default();
+                                                        self.price.clear();
+                                                        self.volume.clear();
+
+                                                        self.pending_subscribe =
+                                                            Some(SubscribeRequest {
+                                                                symbol: contract.symbol.clone(),
+                                                                exchange: contract.exchange,
+                                                            });
+                                                    }
+                                                }
+                                            }
+                                        });
+                                });
                             });
                     }
+
+                    // Subscribe on Enter key
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        self.update_vt_symbol();
+                    }
+
                     ui.end_row();
 
                     // Name
