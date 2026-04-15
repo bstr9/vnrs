@@ -231,7 +231,10 @@ impl TradingWidget {
             .get(self.exchange_index)
             .cloned()
             .unwrap_or(Exchange::Binance);
-        let new_vt_symbol = format!("{}.{}", self.symbol, exchange);
+
+        // Normalize symbol to lowercase for consistent matching with tick data
+        let normalized_symbol = self.symbol.to_lowercase();
+        let new_vt_symbol = format!("{}.{}", normalized_symbol, exchange);
 
         if new_vt_symbol != self.vt_symbol {
             self.vt_symbol = new_vt_symbol;
@@ -242,7 +245,7 @@ impl TradingWidget {
 
             // Request subscription
             self.pending_subscribe = Some(SubscribeRequest {
-                symbol: self.symbol.clone(),
+                symbol: normalized_symbol,
                 exchange,
             });
         }
