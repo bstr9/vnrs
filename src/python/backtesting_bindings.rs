@@ -21,11 +21,13 @@ pub struct PyBacktestingEngine {
 #[pymethods]
 impl PyBacktestingEngine {
     #[new]
-    fn new() -> Self {
-        Self {
+    fn new() -> PyResult<Self> {
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e)))?;
+        Ok(Self {
             engine: Mutex::new(BacktestingEngine::new()),
-            runtime: tokio::runtime::Runtime::new().expect("Failed to create tokio runtime"),
-        }
+            runtime: rt,
+        })
     }
 
     /// Clear all backtesting data
@@ -119,10 +121,14 @@ impl PyBacktestingEngine {
         Ok(())
     }
 
-    /// Load historical data (placeholder - in production would load from database)
-    fn load_data(&self) -> PyResult<()> {
-        // In real implementation, this would load from database
-        Ok(())
+    /// Load historical data from CSV or database
+    fn load_data(&self, py: Python) -> PyResult<()> {
+        py.detach(|| {
+            let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(engine.load_data())
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)
+        })
     }
 
     /// Get current position

@@ -9,8 +9,8 @@ use chrono::{Utc, Duration};
 
 use crate::trader::{
     MainEngine, TickData, OrderData, TradeData,
-    SubscribeRequest, OrderRequest, HistoryRequest,
-    Direction, Offset, Interval, Exchange,
+    SubscribeRequest, CancelRequest, HistoryRequest,
+    Direction, Interval, Exchange,
     EVENT_TICK, EVENT_ORDER, EVENT_TRADE,
 };
 use crate::event::EventEngine;
@@ -101,12 +101,9 @@ impl StrategyEngine {
         
         self.event_engine.register(EVENT_TICK, Arc::new(move |event| {
             tracing::debug!("Tick event received");
-            // TODO: Wire event data extraction - once Event.data properly carries TickData,
-            // downcast and call process_tick_event. For now, the event_type contains the symbol suffix.
-            // The actual tick processing is triggered through GatewayEventSender -> MainEngine -> StrategyEngine
             let _ = (&tick_strategies, &tick_contexts, &tick_symbol_map, &tick_stop_orders);
             if let Some(ref data) = event.data {
-                if let Some(tick) = data.clone().downcast::<TickData>().ok() {
+                if let Ok(tick) = data.clone().downcast::<TickData>() {
                     let strategies = tick_strategies.clone();
                     let contexts = tick_contexts.clone();
                     let symbol_map = tick_symbol_map.clone();
@@ -114,8 +111,7 @@ impl StrategyEngine {
                     
                     let vt_symbol = tick.vt_symbol();
                     let strategy_names: Vec<String> = symbol_map.blocking_read()
-                        .get(&vt_symbol)
-                        .map(|names| names.clone())
+                        .get(&vt_symbol).cloned()
                         .unwrap_or_default();
                     
                     for strategy_name in &strategy_names {
@@ -130,15 +126,24 @@ impl StrategyEngine {
                     }
                     
                     {
-                        let stop_orders_guard = stop_orders.blocking_read();
-                        for (_, stop_order) in stop_orders_guard.iter() {
+                        let mut stop_orders_guard = stop_orders.blocking_write();
+                        let mut triggered = Vec::new();
+                        for (stop_orderid, stop_order) in stop_orders_guard.iter() {
                             if stop_order.vt_symbol != vt_symbol { continue; }
                             if stop_order.status != StopOrderStatus::Waiting { continue; }
-                            let _should_trigger = match stop_order.direction {
+                            let should_trigger = match stop_order.direction {
                                 Direction::Long => tick.last_price >= stop_order.price,
                                 Direction::Short => tick.last_price <= stop_order.price,
                                 Direction::Net => false,
                             };
+                            if should_trigger {
+                                triggered.push(stop_orderid.clone());
+                            }
+                        }
+                        for stop_orderid in triggered {
+                            if let Some(stop_order) = stop_orders_guard.get_mut(&stop_orderid) {
+                                stop_order.status = StopOrderStatus::Triggered;
+                            }
                         }
                     }
                 }
@@ -152,7 +157,7 @@ impl StrategyEngine {
         self.event_engine.register(EVENT_ORDER, Arc::new(move |event| {
             tracing::debug!("Order event received");
             if let Some(ref data) = event.data {
-                if let Some(order) = data.clone().downcast::<OrderData>().ok() {
+                if let Ok(order) = data.clone().downcast::<OrderData>() {
                     let orderid_map = order_orderid_map.clone();
                     let strategies = order_strategies.clone();
                     
@@ -178,7 +183,7 @@ impl StrategyEngine {
         self.event_engine.register(EVENT_TRADE, Arc::new(move |event| {
             tracing::debug!("Trade event received");
             if let Some(ref data) = event.data {
-                if let Some(trade) = data.clone().downcast::<TradeData>().ok() {
+                if let Ok(trade) = data.clone().downcast::<TradeData>() {
                     let processed = trade_processed.clone();
                     let orderid_map = trade_orderid_map.clone();
                     let strategies = trade_strategies.clone();
@@ -267,8 +272,14 @@ impl StrategyEngine {
         };
 
         // Subscribe through main engine
-        let _req = SubscribeRequest { symbol, exchange };
-        // self.main_engine.subscribe(req, gateway_name).await;
+        let req = SubscribeRequest { symbol, exchange };
+        if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+            if let Err(e) = self.main_engine.subscribe(req, &gw_name).await {
+                tracing::error!("Failed to subscribe {}: {}", vt_symbol, e);
+            }
+        } else {
+            tracing::error!("No gateway found for exchange {:?}, cannot subscribe {}", exchange, vt_symbol);
+        }
 
         // Update symbol-strategy mapping
         let mut map = self.symbol_strategy_map.write().await;
@@ -355,20 +366,20 @@ impl StrategyEngine {
         
         if let Some(strategy) = strategies.get(strategy_name) {
             for vt_symbol in strategy.vt_symbols() {
-                // Parse symbol
                 let parts: Vec<&str> = vt_symbol.split('.').collect();
                 if parts.len() != 2 {
                     continue;
                 }
 
                 let symbol = parts[0].to_string();
-                let exchange = Exchange::Binance; // Simplified
+                let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
+                    .map(|(_, e)| e)
+                    .unwrap_or(Exchange::Binance);
 
-                // Query historical data (last 30 days)
                 let end = Utc::now();
                 let start = end - Duration::days(30);
 
-                let _req = HistoryRequest {
+                let req = HistoryRequest {
                     symbol,
                     exchange,
                     start,
@@ -376,166 +387,20 @@ impl StrategyEngine {
                     interval: Some(Interval::Minute),
                 };
 
-                // TODO: Query from main engine
-                // let bars = self.main_engine.query_history(req, gateway_name).await;
-                
-                // Update context with historical bars
-                // for bar in bars {
-                //     context.update_bar(bar);
-                // }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Process tick event
-    #[allow(dead_code)]
-    async fn process_tick_event(&self, tick: TickData) {
-        let vt_symbol = tick.vt_symbol();
-        
-        // Update context
-        if let Some(strategy_names) = self.symbol_strategy_map.read().await.get(&vt_symbol) {
-            let strategies = self.strategies.write().await;
-            let contexts = self.contexts.read().await;
-
-            for strategy_name in strategy_names {
-                if let Some(context) = contexts.get(strategy_name) {
-                    // Update tick in context
-                    context.update_tick(tick.clone());
-
-                    // Call strategy callback
-                    if let Some(_strategy) = strategies.get(strategy_name) {
-                        // strategy.on_tick(&tick, context);
+                if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+                    match self.main_engine.query_history(req, &gw_name).await {
+                        Ok(bars) => {
+                            tracing::info!("Loaded {} historical bars for {}", bars.len(), vt_symbol);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to load history for {}: {}", vt_symbol, e);
+                        }
                     }
                 }
             }
         }
 
-        // Check stop orders
-        self.check_stop_orders(&tick).await;
-    }
-
-    /// Process order event
-    #[allow(dead_code)]
-    async fn process_order_event(&self, order: OrderData) {
-        let orderid_map = self.orderid_strategy_map.read().await;
-        
-        if let Some(strategy_name) = orderid_map.get(&order.vt_orderid()) {
-            let mut strategies = self.strategies.write().await;
-            
-            if let Some(strategy) = strategies.get_mut(strategy_name) {
-                strategy.on_order(&order);
-            }
-        }
-    }
-
-    /// Process trade event
-    #[allow(dead_code)]
-    async fn process_trade_event(&self, trade: TradeData) {
-        // Check for duplicate trades
-        let vt_tradeid = trade.vt_tradeid();
-        {
-            let mut processed = self.processed_tradeids.write().await;
-            if processed.contains(&vt_tradeid) {
-                return;
-            }
-            processed.insert(vt_tradeid);
-            if processed.len() > 10000 {
-                processed.clear();
-            }
-        }
-
-        let orderid_map = self.orderid_strategy_map.read().await;
-        
-        if let Some(strategy_name) = orderid_map.get(&trade.vt_orderid()) {
-            let mut strategies = self.strategies.write().await;
-            
-            if let Some(strategy) = strategies.get_mut(strategy_name) {
-                // Update position
-                let volume_change = match trade.direction {
-                    Some(Direction::Long) => trade.volume,
-                    Some(Direction::Short) => -trade.volume,
-                    Some(Direction::Net) => 0.0, // Net position doesn't affect total position
-                    None => 0.0,
-                };
-                
-                let current_pos = strategy.get_position(&trade.vt_symbol());
-                strategy.update_position(&trade.vt_symbol(), current_pos + volume_change);
-
-                // Call strategy callback
-                strategy.on_trade(&trade);
-            }
-        }
-    }
-
-    /// Check and trigger stop orders
-    #[allow(dead_code)]
-    async fn check_stop_orders(&self, tick: &TickData) {
-        let mut triggered_orders = Vec::new();
-        
-        {
-            let stop_orders = self.stop_orders.read().await;
-            
-            for (stop_orderid, stop_order) in stop_orders.iter() {
-                if stop_order.vt_symbol != tick.vt_symbol() {
-                    continue;
-                }
-
-                if stop_order.status != StopOrderStatus::Waiting {
-                    continue;
-                }
-
-                // Check if should trigger
-                let should_trigger = match stop_order.direction {
-                    Direction::Long => tick.last_price >= stop_order.price,
-                    Direction::Short => tick.last_price <= stop_order.price,
-                    Direction::Net => false, // Net direction doesn't trigger
-                };
-
-                if should_trigger {
-                    triggered_orders.push(stop_orderid.clone());
-                }
-            }
-        }
-
-        // Trigger orders
-        for stop_orderid in triggered_orders {
-            self.trigger_stop_order(&stop_orderid).await;
-        }
-    }
-
-    /// Trigger a stop order
-    #[allow(dead_code)]
-    async fn trigger_stop_order(&self, stop_orderid: &str) {
-        let mut stop_orders = self.stop_orders.write().await;
-        
-        if let Some(stop_order) = stop_orders.get_mut(stop_orderid) {
-            // Create order request
-            let _req = OrderRequest {
-                symbol: stop_order.vt_symbol.split('.').next().unwrap().to_string(),
-                exchange: Exchange::Binance, // Simplified
-                direction: stop_order.direction,
-                order_type: stop_order.order_type,
-                volume: stop_order.volume,
-                price: stop_order.price,
-                offset: stop_order.offset.unwrap_or(Offset::Open), // Default to Open for spot
-                reference: format!("STOP_{}", stop_order.strategy_name),
-            };
-
-            // Send order through main engine
-            // let vt_orderid = self.main_engine.send_order(req, gateway_name).await;
-
-            // Update stop order
-            // stop_order.vt_orderid = Some(vt_orderid.clone());
-            stop_order.status = StopOrderStatus::Triggered;
-
-            // Notify strategy
-            let strategies = self.strategies.read().await;
-            if let Some(_strategy) = strategies.get(&stop_order.strategy_name) {
-                // strategy.on_stop_order(stop_orderid);
-            }
-        }
+        Ok(())
     }
 
     /// Cancel all orders for a strategy
@@ -543,23 +408,83 @@ impl StrategyEngine {
         let orderid_map = self.strategy_orderid_map.read().await;
         
         if let Some(orderids) = orderid_map.get(strategy_name) {
-            for _vt_orderid in orderids {
-                // Send cancel request
-                // self.main_engine.cancel_order(req, gateway_name).await;
+            for vt_orderid in orderids {
+                if let Some(order) = self.main_engine.get_order(vt_orderid) {
+                    let req = CancelRequest::new(
+                        order.orderid.clone(),
+                        order.symbol.clone(),
+                        order.exchange,
+                    );
+                    if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(order.exchange) {
+                        if let Err(e) = self.main_engine.cancel_order(req, &gw_name).await {
+                            tracing::warn!("Failed to cancel order {}: {}", vt_orderid, e);
+                        }
+                    }
+                }
             }
         }
     }
 
     /// Load strategy settings from file
     async fn load_strategy_settings(&self) {
-        // TODO: Load from JSON file
-        tracing::info!("Loading strategy settings...");
+        let path = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("trade_engine")
+            .join("strategy_settings.json");
+
+        if !path.exists() {
+            tracing::info!("No strategy settings file found at {:?}", path);
+            return;
+        }
+
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                match serde_json::from_str::<HashMap<String, StrategySetting>>(&content) {
+                    Ok(settings_map) => {
+                        let mut settings = self.strategy_settings.write().await;
+                        for (name, setting) in settings_map {
+                            settings.insert(name, setting);
+                        }
+                        tracing::info!("Loaded strategy settings from {:?}", path);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to parse strategy settings: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to read strategy settings file: {}", e);
+            }
+        }
     }
 
     /// Save strategy settings to file
     pub async fn save_strategy_settings(&self) {
-        // TODO: Save to JSON file
-        tracing::info!("Saving strategy settings...");
+        let path = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("trade_engine")
+            .join("strategy_settings.json");
+
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::error!("Failed to create config directory: {}", e);
+                return;
+            }
+        }
+
+        let settings = self.strategy_settings.read().await;
+        match serde_json::to_string_pretty(&*settings) {
+            Ok(content) => {
+                if let Err(e) = std::fs::write(&path, content) {
+                    tracing::error!("Failed to write strategy settings: {}", e);
+                } else {
+                    tracing::info!("Saved strategy settings to {:?}", path);
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to serialize strategy settings: {}", e);
+            }
+        }
     }
 
     /// Get all strategy names

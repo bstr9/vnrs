@@ -16,6 +16,15 @@ use super::manager::BarManager;
 use crate::trader::object::BarData;
 use crate::trader::Interval;
 
+/// Event emitted by ChartWidget
+#[derive(Clone, Debug)]
+pub struct ChartEvent {
+    /// Interval was changed by user
+    pub interval_changed: bool,
+    /// The new interval
+    pub new_interval: Interval,
+}
+
 /// Main chart widget
 pub struct ChartWidget {
     /// Data manager
@@ -271,7 +280,8 @@ impl ChartWidget {
     }
 
     /// Show the chart widget
-    pub fn show(&mut self, ui: &mut Ui, symbol: Option<&str>) -> Response {
+    pub fn show(&mut self, ui: &mut Ui, symbol: Option<&str>) -> (Response, Option<ChartEvent>) {
+        let mut event = None;
         // Draw toolbar first
         egui::TopBottomPanel::top("chart_toolbar").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
@@ -340,7 +350,10 @@ impl ChartWidget {
                             {
                                 self.interval = interval;
                                 self.show_interval_selector = false;
-                                // TODO: Request new data for the selected interval
+                                event = Some(ChartEvent {
+                                    interval_changed: true,
+                                    new_interval: interval,
+                                });
                             }
                         }
                     });
@@ -852,7 +865,7 @@ impl ChartWidget {
                 egui::FontId::proportional(20.0),
                 GREY_COLOR,
             );
-            return response;
+            return (response, event);
         }
 
         // Get price range (auto-scale if enabled)
@@ -1055,10 +1068,8 @@ impl ChartWidget {
             );
         }
 
-        response
+        (response, event)
     }
-
-    /// Draw indicators on a chart
     #[allow(clippy::too_many_arguments)]
     fn draw_indicators(
         &self,

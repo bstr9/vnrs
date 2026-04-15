@@ -122,7 +122,10 @@ impl OptimizationEngine {
         println!("生成{}组参数组合", combinations.len());
 
         // Clear previous results
-        self.results.lock().unwrap().clear();
+        self.results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
 
         // Parallel backtesting
         let factory = Arc::new(strategy_factory);
@@ -158,7 +161,8 @@ impl OptimizationEngine {
             engine.add_strategy(strategy);
 
             // Run backtesting (blocking)
-            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let runtime = tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime for backtesting");
             if runtime.block_on(engine.run_backtesting()).is_ok() {
                 let _result = engine.calculate_result();
                 let stats = engine.calculate_statistics(false);
@@ -170,13 +174,24 @@ impl OptimizationEngine {
                     target_value,
                 };
 
-                results.lock().unwrap().push(result);
+                results
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(result);
             }
         });
 
         // Return sorted results
-        let mut final_results = self.results.lock().unwrap().clone();
-        final_results.sort_by(|a, b| b.target_value.partial_cmp(&a.target_value).unwrap());
+        let mut final_results = self
+            .results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        final_results.sort_by(|a, b| {
+            b.target_value
+                .partial_cmp(&a.target_value)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         final_results
     }
 
@@ -223,7 +238,7 @@ impl OptimizationEngine {
             if let Some((_best_params, best_score)) = population
                 .iter()
                 .zip(fitness_scores.iter())
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             {
                 println!("第 {} 代最优结果: {:.4}", gen + 1, best_score);
             }
@@ -240,7 +255,11 @@ impl OptimizationEngine {
             .collect();
 
         let mut sorted_results = final_results;
-        sorted_results.sort_by(|a, b| b.target_value.partial_cmp(&a.target_value).unwrap());
+        sorted_results.sort_by(|a, b| {
+            b.target_value
+                .partial_cmp(&a.target_value)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         sorted_results
     }
 
@@ -411,7 +430,7 @@ impl OptimizationEngine {
             combined.push((params.clone(), *fit));
         }
 
-        combined.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap());
+        combined.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top N
         combined.into_iter().take(size).map(|(p, _)| p).collect()

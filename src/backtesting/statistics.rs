@@ -21,8 +21,16 @@ pub fn calculate_statistics(
     let mut dates: Vec<&NaiveDate> = daily_results.keys().collect();
     dates.sort();
 
-    let start_date = dates.first().unwrap().format("%Y-%m-%d").to_string();
-    let end_date = dates.last().unwrap().format("%Y-%m-%d").to_string();
+    let start_date = dates
+        .first()
+        .expect("dates non-empty checked above")
+        .format("%Y-%m-%d")
+        .to_string();
+    let end_date = dates
+        .last()
+        .expect("dates non-empty checked above")
+        .format("%Y-%m-%d")
+        .to_string();
 
     // Accumulate metrics
     let mut total_net_pnl = 0.0;

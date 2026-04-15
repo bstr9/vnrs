@@ -223,7 +223,7 @@ impl BinanceSpotGateway {
                     symbol: d["symbol"].as_str().unwrap_or("").to_lowercase(),
                     exchange: Exchange::Binance,
                     orderid: d["clientOrderId"].as_str().unwrap_or("").to_string(),
-                    order_type: *order_type.unwrap(),
+                    order_type: *order_type.expect("order_type verified non-None above"),
                     direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
                     offset: Offset::None,
                     price: d["price"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
@@ -382,7 +382,7 @@ impl BinanceSpotGateway {
                             symbol: packet["s"].as_str().unwrap_or("").to_lowercase(),
                             exchange: Exchange::Binance,
                             orderid: orderid.clone(),
-                            order_type: *order_type.unwrap(),
+                            order_type: *order_type.expect("order_type verified non-None above"),
                             direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
                             offset: Offset::None,
                             price: packet["p"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
@@ -483,6 +483,10 @@ impl BinanceSpotGateway {
 impl BaseGateway for BinanceSpotGateway {
     fn gateway_name(&self) -> &str {
         &self.gateway_name
+    }
+
+    fn default_exchange(&self) -> Exchange {
+        Exchange::Binance
     }
 
     fn default_name() -> &'static str {

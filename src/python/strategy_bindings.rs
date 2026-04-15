@@ -20,7 +20,7 @@ pub struct PyStrategy {
     pub vt_symbols: Vec<String>,
     
     #[pyo3(get, set)]
-    pub strategy_type: String, // "spot" or "futures"
+    pub strategy_type: String,
     
     #[pyo3(get)]
     pub inited: bool,
@@ -28,7 +28,8 @@ pub struct PyStrategy {
     #[pyo3(get)]
     pub trading: bool,
     
-    // Python callbacks (stored as Python objects)
+    engine: Option<Py<PyAny>>,
+    
     on_init_callback: Option<Py<PyAny>>,
     on_start_callback: Option<Py<PyAny>>,
     on_stop_callback: Option<Py<PyAny>>,
@@ -38,10 +39,8 @@ pub struct PyStrategy {
     on_order_callback: Option<Py<PyAny>>,
     on_trade_callback: Option<Py<PyAny>>,
     
-    // Position tracking
     positions: HashMap<String, f64>,
     
-    // Parameters
     parameters: HashMap<String, String>,
 }
 
@@ -57,7 +56,6 @@ impl PyStrategy {
     ) -> Self {
         let mut parameters = HashMap::new();
         
-        // Extract parameters from kwargs
         if let Some(kw) = kwargs {
             for (key, value) in kw.iter() {
                 if let Ok(key_str) = key.extract::<String>() {
@@ -74,6 +72,7 @@ impl PyStrategy {
             strategy_type: strategy_type.unwrap_or("spot").to_string(),
             inited: false,
             trading: false,
+            engine: None,
             on_init_callback: None,
             on_start_callback: None,
             on_stop_callback: None,
@@ -87,129 +86,143 @@ impl PyStrategy {
         }
     }
 
-    /// Set initialization callback
     fn set_on_init(&mut self, callback: Py<PyAny>) {
         self.on_init_callback = Some(callback);
     }
 
-    /// Set start callback
     fn set_on_start(&mut self, callback: Py<PyAny>) {
         self.on_start_callback = Some(callback);
     }
 
-    /// Set stop callback
     fn set_on_stop(&mut self, callback: Py<PyAny>) {
         self.on_stop_callback = Some(callback);
     }
 
-    /// Set tick callback
     fn set_on_tick(&mut self, callback: Py<PyAny>) {
         self.on_tick_callback = Some(callback);
     }
 
-    /// Set bar callback
     fn set_on_bar(&mut self, callback: Py<PyAny>) {
         self.on_bar_callback = Some(callback);
     }
 
-    /// Set bars callback (multi-symbol)
     fn set_on_bars(&mut self, callback: Py<PyAny>) {
         self.on_bars_callback = Some(callback);
     }
 
-    /// Set order callback
     fn set_on_order(&mut self, callback: Py<PyAny>) {
         self.on_order_callback = Some(callback);
     }
 
-    /// Set trade callback
     fn set_on_trade(&mut self, callback: Py<PyAny>) {
         self.on_trade_callback = Some(callback);
     }
 
-    /// Get current position
     fn get_pos(&self, vt_symbol: &str) -> f64 {
         self.positions.get(vt_symbol).copied().unwrap_or(0.0)
     }
 
-    /// Get all positions
     fn get_positions(&self) -> HashMap<String, f64> {
         self.positions.clone()
     }
 
-    /// Write log message
     fn write_log(&self, msg: &str) {
         tracing::info!("[{}] {}", self.strategy_name, msg);
     }
 
-    /// Get parameter value
     fn get_parameter(&self, key: &str) -> Option<String> {
         self.parameters.get(key).cloned()
     }
 
-    /// Set parameter value
     fn set_parameter(&mut self, key: String, value: String) {
         self.parameters.insert(key, value);
     }
 
-    /// Buy order (spot or futures long)
-    // TODO: implement actual order routing through engine
+    /// Set the engine reference for order routing
+    fn set_engine(&mut self, engine: Py<PyAny>) {
+        self.engine = Some(engine);
+    }
+
+    /// Buy (long open)
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn buy(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
-        tracing::info!(
-            "[{}] BUY {} @ {} x{}",
-            self.strategy_name, vt_symbol, price, volume
-        );
+    fn buy(&self, py: Python, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
+        tracing::info!("[{}] BUY {} @ {} x{}", self.strategy_name, vt_symbol, price, volume);
+        if let Some(ref engine) = self.engine {
+            match engine.call_method1(py, "buy", (vt_symbol, price, volume)) {
+                Ok(result) => match result.extract::<Vec<String>>(py) {
+                    Ok(ids) => return ids,
+                    Err(e) => tracing::error!("[{}] Failed to extract buy order IDs: {}", self.strategy_name, e),
+                },
+                Err(e) => tracing::error!("[{}] Failed to call buy on engine: {}", self.strategy_name, e),
+            }
+        }
         Vec::new()
     }
 
-    /// Sell order (spot or futures close long)
-    // TODO: implement actual order routing through engine
+    /// Sell (long close)
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn sell(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
-        tracing::info!(
-            "[{}] SELL {} @ {} x{}",
-            self.strategy_name, vt_symbol, price, volume
-        );
+    fn sell(&self, py: Python, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
+        tracing::info!("[{}] SELL {} @ {} x{}", self.strategy_name, vt_symbol, price, volume);
+        if let Some(ref engine) = self.engine {
+            match engine.call_method1(py, "sell", (vt_symbol, price, volume)) {
+                Ok(result) => match result.extract::<Vec<String>>(py) {
+                    Ok(ids) => return ids,
+                    Err(e) => tracing::error!("[{}] Failed to extract sell order IDs: {}", self.strategy_name, e),
+                },
+                Err(e) => tracing::error!("[{}] Failed to call sell on engine: {}", self.strategy_name, e),
+            }
+        }
         Vec::new()
     }
 
-    /// Short order (futures only)
-    // TODO: implement actual order routing through engine
+    /// Short (short open, futures only)
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn short(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
+    fn short(&self, py: Python, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
         if self.strategy_type == "spot" {
             tracing::warn!("[{}] Short not supported for spot trading", self.strategy_name);
             return Vec::new();
         }
-        
-        tracing::info!(
-            "[{}] SHORT {} @ {} x{}",
-            self.strategy_name, vt_symbol, price, volume
-        );
+        tracing::info!("[{}] SHORT {} @ {} x{}", self.strategy_name, vt_symbol, price, volume);
+        if let Some(ref engine) = self.engine {
+            match engine.call_method1(py, "short", (vt_symbol, price, volume)) {
+                Ok(result) => match result.extract::<Vec<String>>(py) {
+                    Ok(ids) => return ids,
+                    Err(e) => tracing::error!("[{}] Failed to extract short order IDs: {}", self.strategy_name, e),
+                },
+                Err(e) => tracing::error!("[{}] Failed to call short on engine: {}", self.strategy_name, e),
+            }
+        }
         Vec::new()
     }
 
-    /// Cover order (futures only)
-    // TODO: implement actual order routing through engine
+    /// Cover (short close, futures only)
     #[pyo3(signature = (vt_symbol, price, volume, _lock=false))]
-    fn cover(&self, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
+    fn cover(&self, py: Python, vt_symbol: &str, price: f64, volume: f64, _lock: Option<bool>) -> Vec<String> {
         if self.strategy_type == "spot" {
             tracing::warn!("[{}] Cover not supported for spot trading", self.strategy_name);
             return Vec::new();
         }
-        
-        tracing::info!(
-            "[{}] COVER {} @ {} x{}",
-            self.strategy_name, vt_symbol, price, volume
-        );
+        tracing::info!("[{}] COVER {} @ {} x{}", self.strategy_name, vt_symbol, price, volume);
+        if let Some(ref engine) = self.engine {
+            match engine.call_method1(py, "cover", (vt_symbol, price, volume)) {
+                Ok(result) => match result.extract::<Vec<String>>(py) {
+                    Ok(ids) => return ids,
+                    Err(e) => tracing::error!("[{}] Failed to extract cover order IDs: {}", self.strategy_name, e),
+                },
+                Err(e) => tracing::error!("[{}] Failed to call cover on engine: {}", self.strategy_name, e),
+            }
+        }
         Vec::new()
     }
 
     /// Cancel order
-    // TODO: implement
-    fn cancel_order(&self, vt_orderid: &str) {
+    fn cancel_order(&self, py: Python, vt_orderid: &str) {
         tracing::info!("[{}] Cancel order: {}", self.strategy_name, vt_orderid);
+        if let Some(ref engine) = self.engine {
+            if let Err(e) = engine.call_method1(py, "cancel_order", (vt_orderid,)) {
+                tracing::error!("[{}] Failed to call cancel_order on engine: {}", self.strategy_name, e);
+            }
+        }
     }
 
     /// Cancel all orders
@@ -230,15 +243,12 @@ pub struct PyStrategyEngine {
 impl PyStrategyEngine {
     #[new]
     fn new() -> PyResult<Self> {
-        // Create async runtime
         let rt = Runtime::new().map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create runtime: {}", e))
         })?;
 
-        // Create placeholder main and event engines
-        // In production, these would be passed from Python or shared
         let main_engine = Arc::new(crate::trader::MainEngine::new());
-        let event_engine = Arc::new(crate::event::EventEngine::new(1)); // 1ms timer interval
+        let event_engine = Arc::new(crate::event::EventEngine::new(1));
 
         Ok(Self {
             engine: Arc::new(StrategyEngine::new(main_engine, event_engine)),
@@ -247,9 +257,7 @@ impl PyStrategyEngine {
         })
     }
 
-    /// Add a Python strategy
     fn add_strategy(&mut self, py_strategy: &Bound<'_, PyStrategy>, settings: &Bound<'_, PyDict>) -> PyResult<()> {
-        // Convert PyDict to HashMap
         let mut setting_map = HashMap::new();
         for (key, value) in settings.iter() {
             if let (Ok(k), Ok(v)) = (key.extract::<String>(), value.extract::<String>()) {
@@ -264,7 +272,6 @@ impl PyStrategyEngine {
         Ok(())
     }
 
-    /// Initialize a strategy
     fn init_strategy(&self, strategy_name: &str) -> PyResult<()> {
         self.rt.block_on(async {
             self.engine.init_strategy(strategy_name).await
@@ -273,7 +280,6 @@ impl PyStrategyEngine {
         })
     }
 
-    /// Start a strategy
     fn start_strategy(&self, strategy_name: &str) -> PyResult<()> {
         self.rt.block_on(async {
             self.engine.start_strategy(strategy_name).await
@@ -282,7 +288,6 @@ impl PyStrategyEngine {
         })
     }
 
-    /// Stop a strategy
     fn stop_strategy(&self, strategy_name: &str) -> PyResult<()> {
         self.rt.block_on(async {
             self.engine.stop_strategy(strategy_name).await
@@ -291,14 +296,12 @@ impl PyStrategyEngine {
         })
     }
 
-    /// Get all strategy names
     fn get_all_strategies(&self) -> PyResult<Vec<String>> {
         Ok(self.rt.block_on(async {
             self.engine.get_all_strategy_names().await
         }))
     }
 
-    /// Get strategy info
     fn get_strategy_info(&self, strategy_name: &str) -> PyResult<HashMap<String, String>> {
         self.rt.block_on(async {
             self.engine.get_strategy_info(strategy_name).await

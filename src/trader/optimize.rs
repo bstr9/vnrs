@@ -357,10 +357,10 @@ mod tests {
 
         setting
             .add_parameter("param1", 1.0, Some(5.0), Some(1.0))
-            .unwrap();
+            .expect("valid parameter range");
         setting
             .add_parameter("param2", 10.0, Some(20.0), Some(5.0))
-            .unwrap();
+            .expect("valid parameter range");
 
         assert_eq!(setting.count_settings(), 15); // 5 * 3
 
@@ -372,7 +372,9 @@ mod tests {
     fn test_optimization_setting_fixed() {
         let mut setting = OptimizationSetting::new();
 
-        setting.add_parameter("param1", 5.0, None, None).unwrap();
+        setting
+            .add_parameter("param1", 5.0, None, None)
+            .expect("fixed parameter should be valid");
 
         assert_eq!(setting.count_settings(), 1);
     }

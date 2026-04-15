@@ -47,7 +47,6 @@ pub struct PortfolioBacktestingEngine {
     trades: Vec<TradeData>,
     
     // Daily results
-    #[allow(dead_code)]
     daily_results: HashMap<NaiveDate, PortfolioDailyResult>,
     
     // Strategy
@@ -150,35 +149,46 @@ impl PortfolioBacktestingEngine {
 
     /// Run bar-based portfolio backtesting
     async fn run_bar_backtesting(&mut self) -> Result<(), String> {
-        // Merge all bars from different symbols by datetime
-        let mut all_bars: Vec<(&String, &BarData)> = Vec::new();
-        
-        for (symbol, bars) in &self.bar_data {
-            for bar in bars {
-                all_bars.push((symbol, bar));
-            }
+        // Collect and sort all bars by datetime (owned copies to avoid borrow conflicts)
+        let mut all_bars: Vec<BarData> = Vec::new();
+        for bars in self.bar_data.values() {
+            all_bars.extend(bars.iter().cloned());
         }
-
-        // Sort by datetime
-        all_bars.sort_by_key(|(_, bar)| bar.datetime);
+        all_bars.sort_by_key(|bar| bar.datetime);
 
         // Initialize strategy
         if let Some(strategy) = &mut self.strategy {
-            // Use a dummy context for initialization
             let context = Arc::new(crate::strategy::StrategyContext::new());
             strategy.on_init(&context);
             strategy.on_start();
         }
 
+        let mut current_date: Option<NaiveDate> = None;
+        let mut daily_trade_start_idx = 0;
+
         // Process bars
-        for (_symbol, bar) in all_bars {
+        for bar in &all_bars {
+            let bar_date = bar.datetime.date_naive();
+
+            // When date changes, finalize the previous day's result
+            if current_date.is_some_and(|d| d != bar_date) {
+                if let Some(prev_date) = current_date {
+                    self.finalize_daily_result(prev_date, &mut daily_trade_start_idx);
+                }
+            }
+            current_date = Some(bar_date);
+
             self.current_dt = bar.datetime;
             
-            // Update strategy with bar
             if let Some(strategy) = &mut self.strategy {
                 let context = Arc::new(crate::strategy::StrategyContext::new());
                 strategy.on_bar(bar, &context);
             }
+        }
+
+        // Finalize the last day
+        if let Some(date) = current_date {
+            self.finalize_daily_result(date, &mut daily_trade_start_idx);
         }
 
         // Stop strategy
@@ -191,27 +201,34 @@ impl PortfolioBacktestingEngine {
 
     /// Run tick-based portfolio backtesting
     async fn run_tick_backtesting(&mut self) -> Result<(), String> {
-        // Similar to bar backtesting but with ticks
-        let mut all_ticks: Vec<(&String, &TickData)> = Vec::new();
-        
-        for (symbol, ticks) in &self.tick_data {
-            for tick in ticks {
-                all_ticks.push((symbol, tick));
-            }
+        // Collect and sort all ticks by datetime (owned copies to avoid borrow conflicts)
+        let mut all_ticks: Vec<TickData> = Vec::new();
+        for ticks in self.tick_data.values() {
+            all_ticks.extend(ticks.iter().cloned());
         }
-
-        all_ticks.sort_by_key(|(_, tick)| tick.datetime);
+        all_ticks.sort_by_key(|tick| tick.datetime);
 
         // Initialize strategy
         if let Some(strategy) = &mut self.strategy {
-            // on_init requires context
             let context = Arc::new(crate::strategy::StrategyContext::new());
             strategy.on_init(&context);
             strategy.on_start();
         }
 
+        let mut current_date: Option<NaiveDate> = None;
+        let mut daily_trade_start_idx = 0;
+
         // Process ticks
-        for (_symbol, tick) in all_ticks {
+        for tick in &all_ticks {
+            let tick_date = tick.datetime.date_naive();
+
+            if current_date.is_some_and(|d| d != tick_date) {
+                if let Some(prev_date) = current_date {
+                    self.finalize_daily_result(prev_date, &mut daily_trade_start_idx);
+                }
+            }
+            current_date = Some(tick_date);
+
             self.current_dt = tick.datetime;
             
             if let Some(strategy) = &mut self.strategy {
@@ -220,12 +237,68 @@ impl PortfolioBacktestingEngine {
             }
         }
 
+        if let Some(date) = current_date {
+            self.finalize_daily_result(date, &mut daily_trade_start_idx);
+        }
+
         // Stop strategy
         if let Some(strategy) = &mut self.strategy {
             strategy.on_stop();
         }
 
         Ok(())
+    }
+
+    /// Finalize daily result for a given date
+    fn finalize_daily_result(&mut self, date: NaiveDate, daily_trade_start_idx: &mut usize) {
+        let daily_trades: Vec<TradeData> = self.trades[*daily_trade_start_idx..].to_vec();
+        *daily_trade_start_idx = self.trades.len();
+
+        let trade_count = daily_trades.len();
+        let commission: f64 = daily_trades.iter()
+            .map(|t| t.price * t.volume * self.rate)
+            .sum();
+        let slippage: f64 = daily_trades.iter()
+            .map(|t| t.volume * self.slippage)
+            .sum();
+
+        let mut net_pnl = 0.0;
+        for trade in &daily_trades {
+            let config = self.symbols.iter().find(|c| c.symbol == trade.symbol);
+            let size = config.map(|c| c.size).unwrap_or(1.0);
+            let pnl = match trade.direction {
+                Some(Direction::Long) => {
+                    if trade.offset == Offset::Close || trade.offset == Offset::CloseToday || trade.offset == Offset::CloseYesterday {
+                        trade.price * trade.volume * size
+                    } else {
+                        -trade.price * trade.volume * size
+                    }
+                }
+                Some(Direction::Short) => {
+                    if trade.offset == Offset::Close || trade.offset == Offset::CloseToday || trade.offset == Offset::CloseYesterday {
+                        -trade.price * trade.volume * size
+                    } else {
+                        trade.price * trade.volume * size
+                    }
+                }
+                _ => 0.0,
+            };
+            net_pnl += pnl;
+        }
+        net_pnl -= commission + slippage;
+
+        let result = PortfolioDailyResult {
+            date,
+            positions: self.positions.clone(),
+            trades: daily_trades,
+            trade_count,
+            total_pnl: net_pnl + commission + slippage,
+            net_pnl,
+            commission,
+            slippage,
+        };
+
+        self.daily_results.insert(date, result);
     }
 
     /// Calculate portfolio statistics

@@ -74,27 +74,35 @@ impl PythonEngineWrapper {
     }
 
     fn on_tick(&self, _py: Python, tick_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        // Convert the Python dict to a Rust TickData
-        // This would involve more complex conversion in a real implementation
-        let _symbol: String = tick_dict.get_item("symbol")?.unwrap().extract()?;
+        let _symbol: String = tick_dict
+            .get_item("symbol")?
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
+            .extract()?;
 
-        // For now, just call the internal method
-        // In a real implementation, we'd convert the dict to Rust struct first
         Ok(())
     }
 
     fn on_bar(&self, _py: Python, bar_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        let _symbol: String = bar_dict.get_item("symbol")?.unwrap().extract()?;
+        let _symbol: String = bar_dict
+            .get_item("symbol")?
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
+            .extract()?;
         Ok(())
     }
 
     fn on_trade(&self, _py: Python, trade_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        let _symbol: String = trade_dict.get_item("symbol")?.unwrap().extract()?;
+        let _symbol: String = trade_dict
+            .get_item("symbol")?
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
+            .extract()?;
         Ok(())
     }
 
     fn on_order(&self, _py: Python, order_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        let _symbol: String = order_dict.get_item("symbol")?.unwrap().extract()?;
+        let _symbol: String = order_dict
+            .get_item("symbol")?
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
+            .extract()?;
         Ok(())
     }
 

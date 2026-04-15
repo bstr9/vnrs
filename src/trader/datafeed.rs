@@ -89,7 +89,7 @@ mod tests {
         let datafeed = EmptyDatafeed::new();
         
         let result = datafeed.init().await;
-        assert!(!result.unwrap());
+        assert!(!result.expect("empty datafeed init should return Ok(false)"));
         
         let req = HistoryRequest::new(
             "BTCUSDT".to_string(),

@@ -211,18 +211,18 @@ impl BinanceRestClient {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded".parse().unwrap(),
+            "application/x-www-form-urlencoded".parse().expect("static header value is always valid"),
         );
         headers.insert(
             reqwest::header::ACCEPT,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("static header value is always valid"),
         );
 
         if security == Security::Signed || security == Security::ApiKey {
             let key = self.key.read().await;
             headers.insert(
                 "X-MBX-APIKEY",
-                key.parse().unwrap(),
+                key.parse().expect("API key should be valid header value"),
             );
         }
 

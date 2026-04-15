@@ -262,14 +262,15 @@ where
 
             if bar_minute != tick_minute || bar_hour != tick_hour {
                 // Call on_bar callback
-                let mut finished_bar = self.bar.take().unwrap();
-                finished_bar.datetime = finished_bar
-                    .datetime
-                    .with_second(0)
-                    .unwrap()
-                    .with_nanosecond(0)
-                    .unwrap();
-                (self.on_bar)(finished_bar);
+                if let Some(mut finished_bar) = self.bar.take() {
+                    finished_bar.datetime = finished_bar
+                        .datetime
+                        .with_second(0)
+                        .unwrap_or(finished_bar.datetime)
+                        .with_nanosecond(0)
+                        .unwrap_or(finished_bar.datetime);
+                    (self.on_bar)(finished_bar);
+                }
                 new_minute = true;
             }
         }
@@ -316,9 +317,9 @@ where
             bar.datetime = bar
                 .datetime
                 .with_second(0)
-                .unwrap()
+                .unwrap_or(bar.datetime)
                 .with_nanosecond(0)
-                .unwrap();
+                .unwrap_or(bar.datetime);
             (self.on_bar)(bar.clone());
             return Some(bar);
         }

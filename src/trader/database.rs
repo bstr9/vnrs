@@ -264,9 +264,9 @@ mod tests {
             Utc::now(),
         );
         
-        db.save_bar_data(vec![bar], false).await.unwrap();
+        db.save_bar_data(vec![bar], false).await.expect("save_bar_data should succeed");
         
-        let overviews = db.get_bar_overview().await.unwrap();
+        let overviews = db.get_bar_overview().await.expect("get_bar_overview should succeed");
         assert_eq!(overviews.len(), 1);
     }
 
@@ -281,9 +281,9 @@ mod tests {
             Utc::now(),
         );
         
-        db.save_tick_data(vec![tick], false).await.unwrap();
+        db.save_tick_data(vec![tick], false).await.expect("save_tick_data should succeed");
         
-        let overviews = db.get_tick_overview().await.unwrap();
+        let overviews = db.get_tick_overview().await.expect("get_tick_overview should succeed");
         assert_eq!(overviews.len(), 1);
     }
 }

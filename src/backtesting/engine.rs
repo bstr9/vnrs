@@ -160,7 +160,10 @@ impl BacktestingEngine {
             self.symbol = parts[0].to_string();
             self.exchange = match parts[1].to_uppercase().as_str() {
                 "BINANCE" => Exchange::Binance,
-                _ => Exchange::Binance,
+                other => {
+                    tracing::warn!("Unknown exchange '{}', defaulting to Binance", other);
+                    Exchange::Binance
+                }
             };
         }
         
@@ -180,7 +183,7 @@ impl BacktestingEngine {
         self.strategy = Some(strategy);
     }
 
-    /// Load historical data
+    /// Load historical data from CSV file or database
     pub async fn load_data(&mut self) -> Result<(), String> {
         self.write_log("开始加载历史数据");
 
@@ -188,10 +191,64 @@ impl BacktestingEngine {
             return Err("起始日期必须小于结束日期".to_string());
         }
 
-        // In real implementation, load data from database
-        // For now, this is a placeholder
+        let data_dir = std::path::Path::new(".data");
+        let csv_path = data_dir.join(format!(
+            "{}_{}_{}.csv",
+            self.symbol.to_lowercase(),
+            self.exchange.value().to_lowercase(),
+            self.interval.value()
+        ));
+
+        if csv_path.exists() {
+            self.write_log(&format!("从CSV文件加载: {:?}", csv_path));
+            let content = std::fs::read_to_string(&csv_path)
+                .map_err(|e| format!("读取CSV失败: {}", e))?;
+
+            let mut bars = Vec::new();
+            for (i, line) in content.lines().enumerate() {
+                if i == 0 { continue; }
+                let fields: Vec<&str> = line.split(',').collect();
+                if fields.len() < 7 { continue; }
+
+                let datetime = fields[0].parse::<DateTime<Utc>>()
+                    .or_else(|_| {
+                        chrono::NaiveDateTime::parse_from_str(fields[0], "%Y-%m-%d %H:%M:%S")
+                            .map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc))
+                    })
+                    .or_else(|_| {
+                        chrono::NaiveDate::parse_from_str(fields[0], "%Y-%m-%d")
+                            .map(|d| d.and_hms_opt(0, 0, 0).unwrap_or_default())
+                            .map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc))
+                    });
+
+                let Ok(dt) = datetime else { continue };
+
+                if dt < self.start || dt > self.end { continue; }
+
+                bars.push(BarData {
+                    gateway_name: "CSV".to_string(),
+                    symbol: self.symbol.clone(),
+                    exchange: self.exchange,
+                    datetime: dt,
+                    interval: Some(self.interval),
+                    open_price: fields[1].parse().unwrap_or(0.0),
+                    high_price: fields[2].parse().unwrap_or(0.0),
+                    low_price: fields[3].parse().unwrap_or(0.0),
+                    close_price: fields[4].parse().unwrap_or(0.0),
+                    volume: fields[5].parse().unwrap_or(0.0),
+                    turnover: fields.get(6).and_then(|v| v.parse().ok()).unwrap_or(0.0),
+                    open_interest: fields.get(7).and_then(|v| v.parse().ok()).unwrap_or(0.0),
+                    extra: None,
+                });
+            }
+
+            self.write_log(&format!("从CSV加载{}条Bar数据", bars.len()));
+            self.history_data = bars;
+        } else {
+            self.write_log("未找到CSV数据文件，使用空数据集");
+        }
+
         self.write_log("历史数据加载完成");
-        
         Ok(())
     }
 
@@ -535,7 +592,9 @@ impl BacktestingEngine {
             };
 
             self.trade_count += 1;
-            let symbol = stop_order.vt_symbol.split('.').next().unwrap().to_string();
+            let symbol = crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string());
             let trade = TradeData {
                 gateway_name: "BACKTESTING".to_string(),
                 symbol,
@@ -664,7 +723,9 @@ impl BacktestingEngine {
             };
 
             self.trade_count += 1;
-            let symbol = stop_order.vt_symbol.split('.').next().unwrap().to_string();
+            let symbol = crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string());
             let trade = TradeData {
                 gateway_name: "BACKTESTING".to_string(),
                 symbol,

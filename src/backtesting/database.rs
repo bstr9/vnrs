@@ -3,6 +3,8 @@
 //! Loads historical bar and tick data from PostgreSQL database
 
 use chrono::{DateTime, Utc};
+#[cfg(feature = "database")]
+use chrono::NaiveDateTime;
 use crate::trader::{BarData, TickData, Exchange, Interval};
 
 #[cfg(feature = "database")]
@@ -97,7 +99,7 @@ impl DatabaseLoader {
                     .map_err(|e| format!("解析symbol失败: {}", e))?,
                 exchange,
                 datetime: DateTime::from_naive_utc_and_offset(datetime, Utc),
-                interval,
+                interval: Some(interval),
                 volume: row.try_get("volume")
                     .map_err(|e| format!("解析volume失败: {}", e))?,
                 turnover: row.try_get::<f64, _>("turnover")
@@ -183,9 +185,19 @@ impl DatabaseLoader {
                     .map_err(|e| format!("解析symbol失败: {}", e))?,
                 exchange,
                 datetime: DateTime::from_naive_utc_and_offset(datetime, Utc),
+                name: String::new(),
+                volume: row.try_get("volume").unwrap_or(0.0),
+                turnover: row.try_get("turnover").unwrap_or(0.0),
+                open_interest: row.try_get("open_interest").unwrap_or(0.0),
                 last_price: row.try_get("last_price")
                     .map_err(|e| format!("解析last_price失败: {}", e))?,
                 last_volume: row.try_get::<f64, _>("last_volume").unwrap_or(0.0),
+                limit_up: 0.0,
+                limit_down: 0.0,
+                open_price: row.try_get("open_price").unwrap_or(0.0),
+                high_price: row.try_get("high_price").unwrap_or(0.0),
+                low_price: row.try_get("low_price").unwrap_or(0.0),
+                pre_close: row.try_get("pre_close").unwrap_or(0.0),
                 bid_price_1: row.try_get("bid_price_1").unwrap_or(0.0),
                 bid_price_2: row.try_get("bid_price_2").unwrap_or(0.0),
                 bid_price_3: row.try_get("bid_price_3").unwrap_or(0.0),
@@ -206,9 +218,7 @@ impl DatabaseLoader {
                 ask_volume_3: row.try_get("ask_volume_3").unwrap_or(0.0),
                 ask_volume_4: row.try_get("ask_volume_4").unwrap_or(0.0),
                 ask_volume_5: row.try_get("ask_volume_5").unwrap_or(0.0),
-                volume: row.try_get("volume").unwrap_or(0.0),
-                turnover: row.try_get("turnover").unwrap_or(0.0),
-                open_interest: row.try_get("open_interest").unwrap_or(0.0),
+                localtime: None,
                 extra: None,
             };
             ticks.push(tick);

@@ -36,12 +36,7 @@ pub fn logger() -> AlphaLogger {
 
 /// Initialize the global logger
 pub fn init_logger() {
-    // Initialize tracing subscriber
-    let subscriber = tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
-        .finish();
-
-    // This is a simplified initialization
-    // In production, you might want to use tracing_subscriber::registry()
-    let _ = subscriber;
+        .try_init();
 }

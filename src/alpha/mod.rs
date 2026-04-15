@@ -8,12 +8,13 @@ pub mod model;
 pub mod strategy;
 pub mod types;
 
-// Note: dataset and strategy both have a `template` submodule, causing ambiguous glob re-export.
-// We allow this since the submodules are accessed via their parent paths (dataset::template, strategy::template).
-#[allow(ambiguous_glob_reexports)]
-pub use dataset::*;
-pub use lab::*;
-pub use logger::*;
-pub use model::*;
-pub use strategy::*;
-pub use types::*;
+// Explicit re-exports to avoid ambiguous glob re-exports
+// (dataset::template and strategy::template both exist)
+pub use dataset::{query_by_time, to_datetime, AlphaDataset, FeatureExpression, Segment};
+pub use lab::AlphaLab;
+pub use logger::AlphaLogger;
+pub use model::{
+    AlphaModel, EnsembleModel, GradientBoostingModel, LinearRegressionModel, RandomForestModel,
+};
+pub use strategy::{AlphaStrategy, BacktestingEngine};
+pub use types::AlphaBarData;

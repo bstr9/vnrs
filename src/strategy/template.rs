@@ -30,17 +30,30 @@ impl StrategyContext {
 
     /// Get latest tick for symbol
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
-        self.tick_cache.lock().unwrap().get(vt_symbol).cloned()
+        self.tick_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(vt_symbol)
+            .cloned()
     }
 
     /// Get latest bar for symbol
     pub fn get_bar(&self, vt_symbol: &str) -> Option<BarData> {
-        self.bar_cache.lock().unwrap().get(vt_symbol).cloned()
+        self.bar_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(vt_symbol)
+            .cloned()
     }
 
     /// Get historical bars for symbol
     pub fn get_bars(&self, vt_symbol: &str, count: usize) -> Vec<BarData> {
-        if let Some(bars) = self.historical_bars.lock().unwrap().get(vt_symbol) {
+        if let Some(bars) = self
+            .historical_bars
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(vt_symbol)
+        {
             let start = bars.len().saturating_sub(count);
             bars[start..].to_vec()
         } else {
@@ -52,7 +65,7 @@ impl StrategyContext {
     pub fn update_tick(&self, tick: TickData) {
         self.tick_cache
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(tick.vt_symbol(), tick);
     }
 
@@ -63,11 +76,14 @@ impl StrategyContext {
         // Update cache
         self.bar_cache
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(vt_symbol.clone(), bar.clone());
 
         // Update historical bars
-        let mut historical = self.historical_bars.lock().unwrap();
+        let mut historical = self
+            .historical_bars
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let bars = historical.entry(vt_symbol).or_default();
         bars.push(bar);
         bars.truncate(10000);
@@ -233,7 +249,10 @@ impl BaseStrategy {
 
     /// Cancel all orders
     pub fn cancel_all(&self) {
-        let orderids = self.active_orderids.lock().unwrap();
+        let orderids = self
+            .active_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         for orderid in orderids.iter() {
             self.cancel_order(orderid);
         }
@@ -276,7 +295,7 @@ impl BaseStrategy {
     pub fn sync_position(&mut self, vt_symbol: &str, position: f64) {
         self.positions
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(vt_symbol.to_string(), position);
     }
 }

@@ -8,22 +8,22 @@ pub const BLACK_COLOR: Color32 = Color32::from_rgb(0, 0, 0);
 pub const GREY_COLOR: Color32 = Color32::from_rgb(100, 100, 100);
 
 // Price movement colors (Chinese style: red up, green down)
-pub const UP_COLOR: Color32 = Color32::from_rgb(255, 75, 75);      // Red for price up
-pub const DOWN_COLOR: Color32 = Color32::from_rgb(0, 255, 255);    // Cyan for price down
-pub const STAY_COLOR: Color32 = Color32::from_rgb(255, 255, 255);  // White for no change
+pub const UP_COLOR: Color32 = Color32::from_rgb(255, 75, 75); // Red for price up
+pub const DOWN_COLOR: Color32 = Color32::from_rgb(0, 255, 255); // Cyan for price down
+pub const STAY_COLOR: Color32 = Color32::from_rgb(255, 255, 255); // White for no change
 
 // Cursor color
 pub const CURSOR_COLOR: Color32 = Color32::from_rgb(255, 245, 162);
 
 // Profit/Loss colors
-pub const PROFIT_COLOR: Color32 = Color32::from_rgb(255, 0, 0);    // Red for profit
-pub const LOSS_COLOR: Color32 = Color32::from_rgb(0, 255, 0);      // Green for loss
+pub const PROFIT_COLOR: Color32 = Color32::from_rgb(255, 0, 0); // Red for profit
+pub const LOSS_COLOR: Color32 = Color32::from_rgb(0, 255, 0); // Green for loss
 
 // Trade marker colors
-pub const BUY_COLOR: Color32 = Color32::from_rgb(255, 255, 0);     // Yellow for buy
-pub const SELL_COLOR: Color32 = Color32::from_rgb(255, 255, 0);    // Yellow for sell
-pub const SHORT_COLOR: Color32 = Color32::from_rgb(255, 0, 255);   // Magenta for short
-pub const COVER_COLOR: Color32 = Color32::from_rgb(255, 0, 255);   // Magenta for cover
+pub const BUY_COLOR: Color32 = Color32::from_rgb(255, 255, 0); // Yellow for buy
+pub const SELL_COLOR: Color32 = Color32::from_rgb(255, 255, 0); // Yellow for sell
+pub const SHORT_COLOR: Color32 = Color32::from_rgb(255, 0, 255); // Magenta for short
+pub const COVER_COLOR: Color32 = Color32::from_rgb(255, 0, 255); // Magenta for cover
 
 // Chart dimensions
 pub const BAR_WIDTH: f32 = 0.3;
@@ -67,14 +67,14 @@ pub fn calculate_axis_ticks(min_val: f64, max_val: f64, max_ticks: usize) -> Vec
     if min_val >= max_val {
         return vec![min_val];
     }
-    
+
     let range = max_val - min_val;
     let rough_step = range / max_ticks as f64;
-    
+
     // Find the magnitude of the step
     let magnitude = 10.0_f64.powf(rough_step.log10().floor());
     let residual = rough_step / magnitude;
-    
+
     // Choose a nice step value
     let nice_step = if residual <= 1.5 {
         magnitude
@@ -85,24 +85,24 @@ pub fn calculate_axis_ticks(min_val: f64, max_val: f64, max_ticks: usize) -> Vec
     } else {
         10.0 * magnitude
     };
-    
+
     // Generate tick values
     let mut ticks = Vec::new();
     let start = (min_val / nice_step).ceil() * nice_step;
     let mut value = start;
-    
+
     while value <= max_val {
         ticks.push(value);
         value += nice_step;
     }
-    
+
     ticks
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_to_int() {
         assert_eq!(to_int(1.4), 1);
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(to_int(1.6), 2);
         assert_eq!(to_int(-1.5), -2);
     }
-    
+
     #[test]
     fn test_format_volume() {
         assert_eq!(format_volume(100.0), "100.00");
@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(format_volume(1500000.0), "1.50M");
         assert_eq!(format_volume(1500000000.0), "1.50B");
     }
-    
+
     #[test]
     fn test_calculate_axis_ticks() {
         let ticks = calculate_axis_ticks(0.0, 100.0, 5);

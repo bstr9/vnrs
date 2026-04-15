@@ -446,7 +446,7 @@ impl MethodCache {
         Self {
             client,
             cache: Arc::new(Mutex::new(LruCache::new(
-                std::num::NonZeroUsize::new(capacity).unwrap(),
+                std::num::NonZeroUsize::new(capacity).expect("cache capacity must be non-zero"),
             ))),
         }
     }

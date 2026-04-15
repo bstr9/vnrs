@@ -50,6 +50,11 @@ impl AlphaStrategy {
         println!("Processing trade for strategy: {}", self.strategy_name);
     }
 
+    /// Stop callback
+    pub fn on_stop(&mut self) {
+        println!("Strategy {} stopped", self.strategy_name);
+    }
+
     /// Update trade data
     pub fn update_trade(&mut self, trade: &crate::trader::TradeData) {
         {
@@ -170,7 +175,10 @@ impl AlphaStrategy {
         engine: &mut BacktestingEngine,
     ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let order_ids = engine.send_order(vt_symbol, direction, offset, price, volume);
-        let mut active_orders = self.active_orderids.lock().unwrap();
+        let mut active_orders = self
+            .active_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         active_orders.extend(order_ids.clone());
         Ok(order_ids)
     }
@@ -182,7 +190,10 @@ impl AlphaStrategy {
 
     /// Cancel all active orders
     pub fn cancel_all(&mut self, engine: &mut BacktestingEngine) {
-        let mut active_orders = self.active_orderids.lock().unwrap();
+        let mut active_orders = self
+            .active_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         for order_id in active_orders.iter() {
             engine.cancel_order(order_id);
         }
@@ -192,19 +203,19 @@ impl AlphaStrategy {
 
     /// Query current position
     pub fn get_pos(&self, vt_symbol: &str) -> f64 {
-        let pos_data = self.pos_data.lock().unwrap();
+        let pos_data = self.pos_data.lock().unwrap_or_else(|e| e.into_inner());
         *pos_data.get(vt_symbol).unwrap_or(&0.0)
     }
 
     /// Query target position
     pub fn get_target(&self, vt_symbol: &str) -> f64 {
-        let target_data = self.target_data.lock().unwrap();
+        let target_data = self.target_data.lock().unwrap_or_else(|e| e.into_inner());
         *target_data.get(vt_symbol).unwrap_or(&0.0)
     }
 
     /// Set target position
     pub fn set_target(&mut self, vt_symbol: &str, target: f64) {
-        let mut target_data = self.target_data.lock().unwrap();
+        let mut target_data = self.target_data.lock().unwrap_or_else(|e| e.into_inner());
         target_data.insert(vt_symbol.to_string(), target);
     }
 

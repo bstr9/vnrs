@@ -127,10 +127,8 @@ impl AlphaDataset {
         // Calculate label if expression is set
         if !self.label_expression.is_empty() {
             logger::logger().debug(&format!("Calculating label: {}", self.label_expression));
-            // TODO: Evaluate the label expression against the dataframe
-            // For now, initialize with NaN to indicate uncomputed labels
-            let series = Series::new("label".into(), vec![f64::NAN; result_df.height()]);
-            result_df.with_column(series)?;
+            let label_series = self.evaluate_label_expression(&result_df);
+            result_df.with_column(label_series)?;
         }
 
         // Merge pre-computed feature results
@@ -228,26 +226,208 @@ impl AlphaDataset {
         }
         None
     }
+
+    fn evaluate_label_expression(&self, df: &DataFrame) -> Series {
+        let expr = &self.label_expression;
+        let height = df.height();
+
+        match expr.as_str() {
+            "return_1d" => return self.compute_forward_return(df, 1),
+            "return_5d" => return self.compute_forward_return(df, 5),
+            "label_1d" => return self.compute_directional_label(df, 1),
+            _ => {}
+        }
+
+        if let Some(label_series) = self.try_parse_return_label(df, expr) {
+            return label_series;
+        }
+
+        if let Some(label_series) = self.try_parse_shift_label(df, expr) {
+            return label_series;
+        }
+
+        match df
+            .clone()
+            .lazy()
+            .select([polars::prelude::col(expr)])
+            .collect()
+        {
+            Ok(result_df) => {
+                if result_df.width() > 0 {
+                    if let Some(col) = result_df.select_at_idx(0) {
+                        return col.as_materialized_series().clone();
+                    }
+                }
+            }
+            Err(e) => {
+                logger::logger().info(&format!(
+                    "Unrecognized label expression '{}': {}. Using NaN labels.",
+                    expr, e
+                ));
+            }
+        }
+
+        Series::new("label".into(), vec![f64::NAN; height])
+    }
+
+    fn compute_forward_return(&self, df: &DataFrame, periods: usize) -> Series {
+        let height = df.height();
+        let mut label_values = Vec::with_capacity(height);
+        if let Ok(close_col) = df.column("close") {
+            if let Ok(close_f64) = close_col.f64() {
+                for i in 0..height {
+                    let future_idx = i + periods;
+                    if future_idx < height {
+                        let curr = close_f64.get(i).unwrap_or(f64::NAN);
+                        let future = close_f64.get(future_idx).unwrap_or(f64::NAN);
+                        label_values.push(if curr != 0.0 && !curr.is_nan() {
+                            (future - curr) / curr
+                        } else {
+                            f64::NAN
+                        });
+                    } else {
+                        label_values.push(f64::NAN);
+                    }
+                }
+            } else {
+                label_values.resize(height, f64::NAN);
+            }
+        } else {
+            label_values.resize(height, f64::NAN);
+        }
+        Series::new("label".into(), label_values)
+    }
+
+    fn compute_directional_label(&self, df: &DataFrame, periods: usize) -> Series {
+        let returns = self.compute_forward_return(df, periods);
+        if let Ok(returns_f64) = returns.f64() {
+            let values: Vec<f64> = returns_f64
+                .into_iter()
+                .map(|v| match v {
+                    Some(x) if x > 0.0 => 1.0,
+                    Some(x) if x < 0.0 => 0.0,
+                    _ => 0.5,
+                })
+                .collect();
+            Series::new("label".into(), values)
+        } else {
+            Series::new("label".into(), vec![f64::NAN; df.height()])
+        }
+    }
+
+    fn try_parse_return_label(&self, df: &DataFrame, expr: &str) -> Option<Series> {
+        let expr_lower = expr.to_lowercase().replace(" ", "");
+
+        if expr_lower.starts_with("ref(") && expr_lower.contains("/close-1") {
+            if let Ok(close_col) = df.column("close") {
+                if let Ok(close_f64) = close_col.f64() {
+                    let height = df.height();
+                    let mut label_values = Vec::with_capacity(height);
+
+                    let shift = self.parse_ref_shift(&expr_lower).unwrap_or(-1);
+
+                    for i in 0..height {
+                        let shift_idx = (i as i64) - shift;
+                        if shift_idx >= 0 && (shift_idx as usize) < height {
+                            let curr = close_f64.get(i).unwrap_or(f64::NAN);
+                            let shifted = close_f64.get(shift_idx as usize).unwrap_or(f64::NAN);
+                            label_values.push(shifted / curr - 1.0);
+                        } else {
+                            label_values.push(f64::NAN);
+                        }
+                    }
+                    return Some(Series::new("label".into(), label_values));
+                }
+            }
+        }
+
+        if expr_lower.contains("pct_change") || expr_lower.contains("shift") {
+            if let Ok(close_col) = df.column("close") {
+                if let Ok(close_f64) = close_col.f64() {
+                    let height = df.height();
+                    let mut label_values = Vec::with_capacity(height);
+                    for i in 0..height {
+                        if i > 0 {
+                            let prev = close_f64.get(i - 1).unwrap_or(f64::NAN);
+                            let curr = close_f64.get(i).unwrap_or(f64::NAN);
+                            label_values.push(if prev != 0.0 && !prev.is_nan() {
+                                curr / prev - 1.0
+                            } else {
+                                f64::NAN
+                            });
+                        } else {
+                            label_values.push(f64::NAN);
+                        }
+                    }
+                    return Some(Series::new("label".into(), label_values));
+                }
+            }
+        }
+
+        None
+    }
+
+    fn try_parse_shift_label(&self, df: &DataFrame, expr: &str) -> Option<Series> {
+        let expr_lower = expr.to_lowercase().replace(" ", "");
+
+        if expr_lower.starts_with("sign(") {
+            let inner = &expr_lower[5..expr_lower.len().saturating_sub(1)];
+            if let Some(inner_series) = self.try_parse_return_label(df, inner) {
+                if let Ok(inner_f64) = inner_series.f64() {
+                    let values: Vec<f64> = inner_f64
+                        .into_iter()
+                        .map(|v| match v {
+                            Some(x) if x > 0.0 => 1.0,
+                            Some(x) if x < 0.0 => 0.0,
+                            _ => 0.5,
+                        })
+                        .collect();
+                    return Some(Series::new("label".into(), values));
+                }
+            }
+        }
+
+        None
+    }
+
+    fn parse_ref_shift(&self, expr: &str) -> Option<i64> {
+        let start = expr.find(',')?;
+        let end = expr.find(')')?;
+        let num_str = &expr[start + 1..end];
+        num_str.parse::<i64>().ok()
+    }
 }
 
 /// Filter DataFrame based on time range
 pub fn query_by_time(df: &DataFrame, start: &str, end: &str) -> DataFrame {
-    let start_dt = to_datetime(start);
-    let end_dt = to_datetime(end);
+    let start_dt = match to_datetime(start) {
+        Ok(dt) => dt,
+        Err(e) => {
+            eprintln!("Invalid start date '{}': {}", start, e);
+            return df.clone();
+        }
+    };
+    let end_dt = match to_datetime(end) {
+        Ok(dt) => dt,
+        Err(e) => {
+            eprintln!("Invalid end date '{}': {}", end, e);
+            return df.clone();
+        }
+    };
 
     let datetime_col = df.column("datetime");
     if datetime_col.is_err() {
         return df.clone();
     }
 
-    let datetime_col = datetime_col.unwrap();
+    let datetime_col = datetime_col.expect("datetime column existence verified above");
     let datetime_series = datetime_col.datetime();
 
     if datetime_series.is_err() {
         return df.clone();
     }
 
-    let datetime_series = datetime_series.unwrap();
+    let datetime_series = datetime_series.expect("datetime series conversion verified above");
     let mask: Vec<u32> = datetime_series
         .into_iter()
         .enumerate()

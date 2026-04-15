@@ -93,6 +93,9 @@ pub trait BaseGateway: Send + Sync {
     /// Get the gateway name
     fn gateway_name(&self) -> &str;
 
+    /// Get the default exchange for this gateway instance
+    fn default_exchange(&self) -> Exchange;
+
     /// Get the default name for this gateway type
     fn default_name() -> &'static str
     where

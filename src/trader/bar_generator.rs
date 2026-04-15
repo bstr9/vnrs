@@ -135,7 +135,10 @@ impl BarGenerator {
                 return None;
             } else {
                 // New period - complete the old bar and start a new one
-                let old_builder = self.current_bars.remove(&vt_symbol).unwrap();
+                let old_builder = self
+                    .current_bars
+                    .remove(&vt_symbol)
+                    .expect("builder must exist for the current vt_symbol");
                 let finished_bar = old_builder.build();
 
                 // Notify callback if set
@@ -344,9 +347,9 @@ mod tests {
 
         let base_time = Utc::now()
             .with_second(0)
-            .unwrap()
+            .expect("second 0 is always valid")
             .with_nanosecond(0)
-            .unwrap();
+            .expect("nanosecond 0 is always valid");
 
         // First tick - creates new bar
         let tick1 = create_test_tick("BTCUSDT", 50000.0, base_time);
@@ -361,7 +364,7 @@ mod tests {
         let completed = gen.update_tick(&tick3);
         assert!(completed.is_some());
 
-        let bar = completed.unwrap();
+        let bar = completed.expect("completed bar should exist after period transition");
         assert_eq!(bar.open_price, 50000.0);
         assert_eq!(bar.close_price, 50100.0);
         assert_eq!(bar.high_price, 50100.0);

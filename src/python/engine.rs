@@ -4,23 +4,25 @@
 use crate::python::data_converter;
 use crate::python::strategy::PythonStrategy;
 use crate::trader::{
-    BarData, Exchange, MainEngine, OrderData, SubscribeRequest, TickData, TradeData,
+    BarData, CancelRequest, Direction, Exchange, MainEngine, Offset, OrderData, OrderType,
+    OrderRequest, SubscribeRequest, TickData, TradeData,
 };
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
+use crate::trader::utility::extract_vt_symbol;
 
 #[pyclass]
 pub struct PythonEngine {
-    #[allow(dead_code)]
-    main_engine: MainEngine,
+    main_engine: Arc<MainEngine>,
     strategies: HashMap<String, Py<PythonStrategy>>,
-    symbol_strategy_map: HashMap<String, String>, // symbol -> strategy_name
+    symbol_strategy_map: HashMap<String, String>,
 }
 
 impl PythonEngine {
     pub fn new(main_engine: MainEngine) -> Self {
         PythonEngine {
-            main_engine,
+            main_engine: Arc::new(main_engine),
             strategies: HashMap::new(),
             symbol_strategy_map: HashMap::new(),
         }
@@ -39,30 +41,31 @@ impl PythonEngine {
 
         strategy.borrow_mut().engine = Some(engine_ref);
 
-        // Store the strategy
         self.strategies
             .insert(strategy_name.clone(), strategy.clone().unbind());
 
-        // Map symbols to strategy
         for symbol in vt_symbols.iter() {
             self.symbol_strategy_map
                 .insert(symbol.clone(), strategy_name.clone());
         }
 
-        // Subscribe to market data for the strategy symbols
         for vt_symbol in vt_symbols.iter() {
-            let parts: Vec<&str> = vt_symbol.split('.').collect();
-            if parts.len() >= 2 {
-                let symbol = parts[0].to_string();
-                let _exchange = Exchange::Binance; // This would need proper implementation
-
-                let _req = SubscribeRequest {
-                    symbol,
-                    exchange: Exchange::Binance,
-                };
-
-                // Subscribe to the symbol
-                // self.main_engine.subscribe(req, &exchange.to_string()).await;
+            let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
+                .map(|(_, e)| e)
+                .unwrap_or(Exchange::Binance);
+            let symbol = vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string();
+            let req = SubscribeRequest { symbol, exchange };
+            if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+                let engine = self.main_engine.clone();
+                let gw = gw_name.clone();
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(async {
+                        if let Err(e) = engine.subscribe(req, &gw).await {
+                            tracing::warn!("Python strategy subscribe failed: {}", e);
+                        }
+                    });
+                });
             }
         }
 
@@ -78,7 +81,6 @@ impl PythonEngine {
     }
 
     pub fn start_strategy(&self, _py: Python, strategy_name: &str) -> PyResult<()> {
-        // In a real implementation, this would start the strategy
         println!("Starting strategy: {}", strategy_name);
         Ok(())
     }
@@ -92,7 +94,7 @@ impl PythonEngine {
     }
 
     pub fn on_tick(&self, py: Python, tick: &TickData) -> PyResult<()> {
-        let vt_symbol = format!("{}.{}", tick.symbol, "BINANCE"); // Simplified
+        let vt_symbol = format!("{}.{}", tick.symbol, tick.exchange.value());
 
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
@@ -106,12 +108,11 @@ impl PythonEngine {
     }
 
     pub fn on_bar(&self, py: Python, bar: &BarData) -> PyResult<()> {
-        let vt_symbol = format!("{}.{}", bar.symbol, "BINANCE"); // Simplified
+        let vt_symbol = format!("{}.{}", bar.symbol, bar.exchange.value());
 
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
                 let strategy = strategy_obj.bind(py);
-                // Create a dict with the bar data
                 let bar_dict = pyo3::types::PyDict::new(py);
                 bar_dict.set_item("datetime", bar.datetime.to_rfc3339())?;
                 bar_dict.set_item("open", bar.open_price)?;
@@ -136,7 +137,6 @@ impl PythonEngine {
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
                 let strategy = strategy_obj.bind(py);
-                // Convert trade to Python object
                 let trade_dict = pyo3::types::PyDict::new(py);
                 trade_dict.set_item("symbol", &trade.symbol)?;
                 trade_dict.set_item("exchange", format!("{:?}", trade.exchange))?;
@@ -164,7 +164,6 @@ impl PythonEngine {
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
                 let strategy = strategy_obj.bind(py);
-                // Convert order to Python object
                 let order_dict = pyo3::types::PyDict::new(py);
                 order_dict.set_item("symbol", &order.symbol)?;
                 order_dict.set_item("exchange", format!("{:?}", order.exchange))?;
@@ -187,35 +186,137 @@ impl PythonEngine {
         Ok(())
     }
 
-    // Methods to be called from Python strategies
-    pub fn buy(&self, _vt_symbol: &str, _price: f64, _volume: f64) -> Vec<String> {
-        // In a real implementation, this would send the order through main_engine
-        vec![format!("ORDER_{}", uuid::Uuid::new_v4())]
+    /// Send an order through the MainEngine
+    pub fn send_order(
+        &self,
+        vt_symbol: &str,
+        direction: Direction,
+        offset: Offset,
+        price: f64,
+        volume: f64,
+        order_type: OrderType,
+    ) -> Vec<String> {
+        let (symbol, exchange) = match extract_vt_symbol(vt_symbol) {
+            Some((s, e)) => (s, e),
+            None => {
+                tracing::error!("Invalid vt_symbol format: {}", vt_symbol);
+                return Vec::new();
+            }
+        };
+
+        let req = OrderRequest {
+            symbol,
+            exchange,
+            direction,
+            order_type,
+            volume,
+            price,
+            offset,
+            reference: String::new(),
+        };
+
+        let gateway_name = match exchange {
+            Exchange::Binance | Exchange::BinanceUsdm | Exchange::BinanceCoinm => {
+                let gateways = self.main_engine.get_all_gateway_names();
+                if gateways.contains(&"BINANCE_SPOT".to_string()) {
+                    "BINANCE_SPOT".to_string()
+                } else if gateways.contains(&"BINANCE_USDT".to_string()) {
+                    "BINANCE_USDT".to_string()
+                } else {
+                    tracing::warn!("No Binance gateway available for order");
+                    return Vec::new();
+                }
+            }
+            _ => {
+                tracing::warn!("Unsupported exchange for order: {:?}", exchange);
+                return Vec::new();
+            }
+        };
+
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                let me = self.main_engine.clone();
+                let gw = gateway_name;
+                match handle.block_on(async { me.send_order(req, &gw).await }) {
+                    Ok(vt_orderid) => vec![vt_orderid],
+                    Err(e) => {
+                        tracing::error!("Failed to send order: {}", e);
+                        Vec::new()
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::error!("No tokio runtime available to send order");
+                Vec::new()
+            }
+        }
     }
 
-    pub fn sell(&self, _vt_symbol: &str, _price: f64, _volume: f64) -> Vec<String> {
-        // In a real implementation, this would send the order through main_engine
-        vec![format!("ORDER_{}", uuid::Uuid::new_v4())]
+    pub fn buy(&self, vt_symbol: &str, price: f64, volume: f64) -> Vec<String> {
+        self.send_order(vt_symbol, Direction::Long, Offset::Open, price, volume, OrderType::Limit)
     }
 
-    pub fn short(&self, _vt_symbol: &str, _price: f64, _volume: f64) -> Vec<String> {
-        // In a real implementation, this would send the order through main_engine
-        vec![format!("ORDER_{}", uuid::Uuid::new_v4())]
+    pub fn sell(&self, vt_symbol: &str, price: f64, volume: f64) -> Vec<String> {
+        self.send_order(vt_symbol, Direction::Short, Offset::Close, price, volume, OrderType::Limit)
     }
 
-    pub fn cover(&self, _vt_symbol: &str, _price: f64, _volume: f64) -> Vec<String> {
-        // In a real implementation, this would send the order through main_engine
-        vec![format!("ORDER_{}", uuid::Uuid::new_v4())]
+    pub fn short(&self, vt_symbol: &str, price: f64, volume: f64) -> Vec<String> {
+        self.send_order(vt_symbol, Direction::Short, Offset::Open, price, volume, OrderType::Limit)
     }
 
+    pub fn cover(&self, vt_symbol: &str, price: f64, volume: f64) -> Vec<String> {
+        self.send_order(vt_symbol, Direction::Long, Offset::Close, price, volume, OrderType::Limit)
+    }
+
+    /// Cancel an existing order through the MainEngine
     pub fn cancel_order(&self, vt_orderid: &str) {
-        // In a real implementation, this would cancel the order through main_engine
-        println!("Canceling order: {}", vt_orderid);
+        // vt_orderid format: "gateway_name.orderid"
+        let parts: Vec<&str> = vt_orderid.splitn(2, '.').collect();
+        if parts.len() != 2 {
+            tracing::error!("Invalid vt_orderid format: {}", vt_orderid);
+            return;
+        }
+
+        let gateway_name = parts[0].to_string();
+        let orderid = parts[1].to_string();
+
+        if let Some(order) = self.main_engine.get_order(vt_orderid) {
+            let req = CancelRequest {
+                orderid,
+                symbol: order.symbol.clone(),
+                exchange: order.exchange,
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    let me = self.main_engine.clone();
+                    let gw = gateway_name;
+                    if let Err(e) = handle.block_on(async { me.cancel_order(req, &gw).await }) {
+                        tracing::error!("Failed to cancel order {}: {}", vt_orderid, e);
+                    }
+                }
+                Err(_) => {
+                    tracing::error!("No tokio runtime available to cancel order");
+                }
+            }
+        } else {
+            tracing::warn!("Order {} not found for cancellation", vt_orderid);
+        }
     }
 
-    pub fn get_pos(&self, _vt_symbol: &str) -> f64 {
-        // In a real implementation, this would get the position from main_engine
-        0.0
+    /// Get position volume for a symbol
+    pub fn get_pos(&self, vt_symbol: &str) -> f64 {
+        let mut total_volume: f64 = 0.0;
+        for position in self.main_engine.get_all_positions() {
+            if position.vt_symbol() == vt_symbol {
+                total_volume += match position.direction {
+                    Direction::Long => position.volume,
+                    Direction::Short => -position.volume,
+                    Direction::Net => position.volume,
+                };
+            }
+        }
+        total_volume
     }
 
     pub fn send_email(&self, msg: &str) {
@@ -232,9 +333,8 @@ impl PythonEngine {
 impl PythonEngine {
     #[new]
     fn new_py(_main_engine: Py<PyAny>) -> Self {
-        // For the Python interface, we'll create a minimal engine
         PythonEngine {
-            main_engine: MainEngine::new(), // This would need proper initialization
+            main_engine: Arc::new(MainEngine::new()),
             strategies: HashMap::new(),
             symbol_strategy_map: HashMap::new(),
         }

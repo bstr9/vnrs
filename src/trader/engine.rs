@@ -1,7 +1,7 @@
 //! Engine module for the trading platform core functionality.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, atomic::{AtomicBool, Ordering}};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -401,7 +401,7 @@ pub struct MainEngine {
     event_rx: RwLock<Option<mpsc::UnboundedReceiver<(String, GatewayEvent)>>>,
     
     handlers: RwLock<HashMap<String, Vec<EventHandler>>>,
-    running: RwLock<bool>,
+    running: AtomicBool,
 }
 
 impl MainEngine {
@@ -422,7 +422,7 @@ impl MainEngine {
             event_tx,
             event_rx: RwLock::new(Some(event_rx)),
             handlers: RwLock::new(HashMap::new()),
-            running: RwLock::new(false),
+            running: AtomicBool::new(false),
         };
         
         // Register OMS engine
@@ -437,9 +437,7 @@ impl MainEngine {
 
     /// Start the main engine event loop
     pub async fn start(&self) {
-        let mut running = self.running.write().unwrap_or_else(|e| e.into_inner());
-        *running = true;
-        drop(running);
+        self.running.store(true, Ordering::SeqCst);
 
         // Take the receiver from the RwLock
         let rx = {
@@ -449,17 +447,14 @@ impl MainEngine {
 
         if let Some(mut rx) = rx {
             loop {
-                let is_running = *self.running.read().unwrap_or_else(|e| e.into_inner());
-                if !is_running {
+                if !self.running.load(Ordering::SeqCst) {
                     break;
                 }
                 tokio::select! {
                     Some((event_type, event)) = rx.recv() => {
                         self.process_event(&event_type, &event);
                     }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(1)) => {
-                        // Timer tick — short sleep to check running flag
-                    }
+                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(1)) => {}
                 }
             }
         }
@@ -521,6 +516,17 @@ impl MainEngine {
     pub fn get_all_gateway_names(&self) -> Vec<String> {
         let gateways = self.gateways.read().unwrap_or_else(|e| e.into_inner());
         gateways.keys().cloned().collect()
+    }
+
+    /// Find the first gateway name that supports the given exchange
+    pub fn find_gateway_name_for_exchange(&self, exchange: Exchange) -> Option<String> {
+        let gateways = self.gateways.read().unwrap_or_else(|e| e.into_inner());
+        for (name, gateway) in gateways.iter() {
+            if gateway.default_exchange() == exchange {
+                return Some(name.clone());
+            }
+        }
+        None
     }
 
     /// Get all exchanges
@@ -699,7 +705,7 @@ impl MainEngine {
     pub fn register_handler(&self, event_type: &str, handler: EventHandler) {
         let mut handlers = self.handlers.write().unwrap_or_else(|e| e.into_inner());
         handlers.entry(event_type.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(handler);
     }
 
@@ -710,11 +716,7 @@ impl MainEngine {
 
     /// Close the main engine
     pub async fn close(&self) {
-        // Stop event loop
-        {
-            let mut running = self.running.write().unwrap_or_else(|e| e.into_inner());
-            *running = false;
-        }
+        self.running.store(false, Ordering::SeqCst);
 
         // Close all engines
         {

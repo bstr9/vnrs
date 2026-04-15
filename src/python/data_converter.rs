@@ -2,9 +2,21 @@
 //! Converts between Rust data structures and Python/Arrow representations
 
 use crate::trader::{BarData, TickData};
+#[cfg(feature = "alpha")]
 use polars::prelude::*;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+
+macro_rules! get_required {
+    ($dict:expr, $key:expr, $type:ty) => {
+        $dict
+            .get_item($key)?
+            .ok_or_else(|| {
+                pyo3::exceptions::PyKeyError::new_err(format!("Missing required key: {}", $key))
+            })?
+            .extract::<$type>()?
+    };
+}
 
 /// Convert Rust BarData to Python dict
 pub fn bar_to_py<'py>(py: Python<'py>, bar: &BarData) -> PyResult<Bound<'py, PyDict>> {
@@ -30,8 +42,8 @@ pub fn bar_to_py<'py>(py: Python<'py>, bar: &BarData) -> PyResult<Bound<'py, PyD
 
 /// Convert Python dict to Rust BarData
 pub fn py_to_bar(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<BarData> {
-    let symbol: String = py_dict.get_item("symbol")?.unwrap().extract()?;
-    let datetime_str: String = py_dict.get_item("datetime")?.unwrap().extract()?;
+    let symbol: String = get_required!(py_dict, "symbol", String);
+    let datetime_str: String = get_required!(py_dict, "datetime", String);
 
     // Parse datetime
     let datetime = chrono::DateTime::parse_from_rfc3339(&datetime_str)
@@ -66,19 +78,20 @@ pub fn py_to_bar(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<BarData> 
         exchange,
         datetime,
         interval,
-        volume: py_dict.get_item("volume")?.unwrap().extract()?,
-        turnover: py_dict.get_item("turnover")?.unwrap().extract()?,
-        open_interest: py_dict.get_item("open_interest")?.unwrap().extract()?,
-        open_price: py_dict.get_item("open")?.unwrap().extract()?,
-        high_price: py_dict.get_item("high")?.unwrap().extract()?,
-        low_price: py_dict.get_item("low")?.unwrap().extract()?,
-        close_price: py_dict.get_item("close")?.unwrap().extract()?,
-        gateway_name: py_dict.get_item("gateway_name")?.unwrap().extract()?,
+        volume: get_required!(py_dict, "volume", f64),
+        turnover: get_required!(py_dict, "turnover", f64),
+        open_interest: get_required!(py_dict, "open_interest", f64),
+        open_price: get_required!(py_dict, "open", f64),
+        high_price: get_required!(py_dict, "high", f64),
+        low_price: get_required!(py_dict, "low", f64),
+        close_price: get_required!(py_dict, "close", f64),
+        gateway_name: get_required!(py_dict, "gateway_name", String),
         extra: None,
     })
 }
 
-/// Convert vector of BarData to Arrow representation
+/// Convert vector of BarData to Polars DataFrame representation
+#[cfg(feature = "alpha")]
 pub fn bars_to_arrow(bars: &[BarData]) -> Result<DataFrame, Box<dyn std::error::Error>> {
     let mut symbols = Vec::new();
     let mut exchanges = Vec::new();
@@ -130,7 +143,8 @@ pub fn bars_to_arrow(bars: &[BarData]) -> Result<DataFrame, Box<dyn std::error::
     Ok(df)
 }
 
-/// Convert Arrow DataFrame to vector of BarData
+/// Convert Polars DataFrame to vector of BarData
+#[cfg(feature = "alpha")]
 pub fn arrow_to_bars(df: &DataFrame) -> Result<Vec<BarData>, Box<dyn std::error::Error>> {
     let mut bars = Vec::new();
 

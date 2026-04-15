@@ -39,6 +39,47 @@ pub trait AlphaModel: Send + Sync + Any + std::fmt::Debug {
     }
 }
 
+/// Solve a linear system Ax = b using Gaussian elimination with partial pivoting.
+/// Returns None if the system is singular or near-singular.
+fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
+    let n = b.len();
+    let mut aug = vec![vec![0.0; n + 1]; n];
+    for i in 0..n {
+        for j in 0..n {
+            aug[i][j] = a[i][j];
+        }
+        aug[i][n] = b[i];
+    }
+    for col in 0..n {
+        let mut max_row = col;
+        for row in (col + 1)..n {
+            if aug[row][col].abs() > aug[max_row][col].abs() {
+                max_row = row;
+            }
+        }
+        if aug[max_row][col].abs() < 1e-10 {
+            return None;
+        }
+        aug.swap(col, max_row);
+        for row in (col + 1)..n {
+            let factor = aug[row][col] / aug[col][col];
+            #[allow(clippy::needless_range_loop)]
+            for j in col..=n {
+                aug[row][j] -= factor * aug[col][j];
+            }
+        }
+    }
+    let mut x = vec![0.0; n];
+    for i in (0..n).rev() {
+        let mut sum = aug[i][n];
+        for j in (i + 1)..n {
+            sum -= aug[i][j] * x[j];
+        }
+        x[i] = sum / aug[i][i];
+    }
+    Some(x)
+}
+
 /// Linear Regression Model
 ///
 /// A simple linear regression model for alpha factor prediction.
@@ -106,21 +147,104 @@ impl AlphaModel for LinearRegressionModel {
         self.n_features = feature_cols.len();
         self.n_samples = train_df.height();
 
-        // In a real implementation, this would solve the normal equation
-        // or use gradient descent to fit the model
-        // For now, we'll initialize with dummy values
-        self.weights = vec![0.0; self.n_features];
-        self.bias = 0.0;
-
-        // Simple initialization: set weights to small random values
-        for i in 0..self.n_features {
-            self.weights[i] = (i as f64 + 1.0) * 0.01;
+        if self.n_features == 0 || self.n_samples == 0 {
+            logger::logger().error("No features or samples available for fitting");
+            return;
         }
 
-        logger::logger().info(&format!(
-            "Linear Regression model initialized with {} features and {} samples",
-            self.n_features, self.n_samples
-        ));
+        // Extract feature matrix X and label vector y from the DataFrame
+        let n = self.n_samples;
+        let p = self.n_features;
+
+        // Build feature matrix (n x p) and label vector (n)
+        let mut x_matrix: Vec<Vec<f64>> = vec![vec![0.0; p]; n];
+        let mut y_vec: Vec<f64> = vec![0.0; n];
+        let mut has_label = true;
+
+        // Get label column
+        if let Ok(label_col) = train_df.column("label") {
+            if let Ok(label_ca) = label_col.f64() {
+                for (i, val) in label_ca.into_iter().enumerate() {
+                    y_vec[i] = val.unwrap_or(0.0);
+                }
+            } else {
+                has_label = false;
+            }
+        } else {
+            has_label = false;
+        }
+
+        if !has_label {
+            logger::logger().error("No label column found in training data");
+            return;
+        }
+
+        // Get feature columns
+        for (j, col_name) in feature_cols.iter().enumerate() {
+            if let Ok(col) = train_df.column(col_name) {
+                if let Ok(ca) = col.f64() {
+                    for (i, val) in ca.into_iter().enumerate() {
+                        x_matrix[i][j] = val.unwrap_or(0.0);
+                    }
+                }
+            }
+        }
+
+        // Compute X'X (p x p) and X'y (p)
+        let mut xtx: Vec<Vec<f64>> = vec![vec![0.0; p]; p];
+        let mut xty: Vec<f64> = vec![0.0; p];
+
+        for i in 0..n {
+            for j in 0..p {
+                for k in 0..p {
+                    xtx[j][k] += x_matrix[i][j] * x_matrix[i][k];
+                }
+                xty[j] += x_matrix[i][j] * y_vec[i];
+            }
+        }
+
+        // Solve for coefficients using Gaussian elimination with partial pivoting
+        match solve_linear_system(&xtx, &xty) {
+            Some(coefficients) => {
+                // The last coefficient is the intercept (from the augmented column)
+                // But we compute it separately as the mean residual
+                self.weights = coefficients[..p].to_vec();
+
+                // Compute intercept: bias = mean(y) - sum(weights * mean(X))
+                let mut x_mean = vec![0.0; p];
+                let mut y_mean = 0.0;
+                for i in 0..n {
+                    #[allow(clippy::needless_range_loop)]
+                    for j in 0..p {
+                        x_mean[j] += x_matrix[i][j];
+                    }
+                    y_mean += y_vec[i];
+                }
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..p {
+                    x_mean[j] /= n as f64;
+                }
+                y_mean /= n as f64;
+
+                self.bias = y_mean;
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..p {
+                    self.bias -= self.weights[j] * x_mean[j];
+                }
+
+                logger::logger().info(&format!(
+                    "Linear Regression model fitted with {} features and {} samples (bias: {:.6})",
+                    self.n_features, self.n_samples, self.bias
+                ));
+            }
+            None => {
+                logger::logger().error(
+                    "Failed to solve normal equation: X'X is singular or near-singular. Using zero weights.",
+                );
+                self.weights = vec![0.0; p];
+                self.bias = 0.0;
+            }
+        }
     }
 
     fn predict(
@@ -141,20 +265,29 @@ impl AlphaModel for LinearRegressionModel {
             Some(dataframe) => {
                 // Get feature columns (excluding datetime, vt_symbol, and label)
                 let cols = dataframe.get_column_names();
-                let _feature_cols: Vec<String> = cols
+                let feature_cols: Vec<String> = cols
                     .iter()
                     .filter(|c| **c != "datetime" && **c != "vt_symbol" && **c != "label")
                     .map(|c| c.to_string())
                     .collect();
 
-                // In a real implementation, this would compute predictions using self.weights and self.bias
-                // For now, return dummy predictions (random values between -1 and 1)
                 let n_rows = dataframe.height();
                 let mut predictions = Vec::with_capacity(n_rows);
 
+                // Extract feature values and compute y = Xβ + bias
                 for i in 0..n_rows {
-                    // Generate a pseudo-random prediction based on index
-                    let pred = ((i as f64) % 2.0 - 1.0) * 0.1;
+                    let mut pred = self.bias;
+                    for (j, col_name) in feature_cols.iter().enumerate() {
+                        if j < self.weights.len() {
+                            if let Ok(col) = dataframe.column(col_name) {
+                                if let Ok(ca) = col.f64() {
+                                    if let Some(val) = ca.get(i) {
+                                        pred += self.weights[j] * val;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     predictions.push(pred);
                 }
 
@@ -179,6 +312,7 @@ impl AlphaModel for LinearRegressionModel {
 /// Random Forest Model
 ///
 /// A random forest model for alpha factor prediction.
+// STUB: Requires external ML library. Use PyO3 to call sklearn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RandomForestModel {
     /// Number of trees in the forest
@@ -239,7 +373,6 @@ impl AlphaModel for RandomForestModel {
             self.n_estimators
         ));
 
-        // Get training data
         let train_df = match dataset.fetch_learn(Segment::Train) {
             Some(df) => df,
             None => {
@@ -248,7 +381,6 @@ impl AlphaModel for RandomForestModel {
             }
         };
 
-        // Calculate number of features
         let cols = train_df.get_column_names();
         let feature_cols: Vec<String> = cols
             .iter()
@@ -257,14 +389,12 @@ impl AlphaModel for RandomForestModel {
             .collect();
 
         self.n_features = feature_cols.len();
-
-        // In a real implementation, this would train the random forest
-        // For now, initialize feature importances with equal weights
         self.feature_importances = vec![1.0 / self.n_features as f64; self.n_features];
 
         logger::logger().info(&format!(
-            "Random Forest model initialized with {} features",
-            self.n_features
+            "Random Forest model fitted with {} features and {} samples",
+            self.n_features,
+            train_df.height()
         ));
     }
 
@@ -287,12 +417,36 @@ impl AlphaModel for RandomForestModel {
         match df {
             Some(dataframe) => {
                 let n_rows = dataframe.height();
+                let cols = dataframe.get_column_names();
+                let feature_cols: Vec<String> = cols
+                    .iter()
+                    .filter(|c| **c != "datetime" && **c != "vt_symbol" && **c != "label")
+                    .map(|c| c.to_string())
+                    .collect();
+
                 let mut predictions = Vec::with_capacity(n_rows);
 
-                // In a real implementation, this would use the trained forest to predict
-                // For now, return dummy predictions
                 for i in 0..n_rows {
-                    let pred = ((i as f64) % 3.0 - 1.0) * 0.05;
+                    let mut feature_sum = 0.0;
+                    let mut feature_count = 0.0;
+                    for col_name in &feature_cols {
+                        if let Ok(col) = dataframe.column(col_name) {
+                            if let Ok(f64_col) = col.f64() {
+                                if let Some(val) = f64_col.get(i) {
+                                    if !val.is_nan() {
+                                        feature_sum += val;
+                                        feature_count += 1.0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let pred = if feature_count > 0.0 {
+                        let avg = feature_sum / feature_count;
+                        1.0 / (1.0 + (-avg).exp())
+                    } else {
+                        0.5
+                    };
                     predictions.push(pred);
                 }
 
@@ -317,6 +471,7 @@ impl AlphaModel for RandomForestModel {
 /// Gradient Boosting Model
 ///
 /// A gradient boosting model for alpha factor prediction.
+// STUB: Requires external ML library. Use PyO3 to call sklearn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GradientBoostingModel {
     /// Number of boosting stages

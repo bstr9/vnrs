@@ -372,9 +372,14 @@ impl BacktestingPanel {
             .unwrap_or(Utc::now());
 
         // Strategy info
-        let strategy_file = self.strategy_file.clone();
-        let strategy_class = self.strategy_class.clone();
-        let strategy_name = self.strategy_name.clone();
+        #[cfg(not(feature = "python"))]
+        let _ = (&self.strategy_file, &self.strategy_class, &self.strategy_name);
+        #[cfg(feature = "python")]
+        let (strategy_file, strategy_class, strategy_name) = (
+            self.strategy_file.clone(),
+            self.strategy_class.clone(),
+            self.strategy_name.clone(),
+        );
 
         // Clone engine arc to pass to thread
         let engine_arc = self.engine.clone();
@@ -382,7 +387,8 @@ impl BacktestingPanel {
         // Spawn thread
         thread::spawn(move || {
             // Create runtime
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime for backtesting panel");
 
             rt.block_on(async {
                 // Create engine
@@ -417,7 +423,10 @@ impl BacktestingPanel {
                     "BINANCE_COINM" => Exchange::BinanceCoinm,
                     "OKEX" | "OKX" | "BYBIT" | "HUOBI" => Exchange::Global,
                     "LOCAL" => Exchange::Local,
-                    _ => Exchange::Binance,
+                    other => {
+                        tracing::warn!("Unknown exchange '{}', defaulting to Binance", other);
+                        Exchange::Binance
+                    }
                 };
 
                 // Connect to database (PostgreSQL)
@@ -532,7 +541,7 @@ impl BacktestingPanel {
                 // Calculate statistics
                 engine.calculate_statistics(false);
 
-                *engine_arc.lock().unwrap() = Some(engine);
+                *engine_arc.lock().unwrap_or_else(|e| e.into_inner()) = Some(engine);
             });
         });
     }
@@ -541,7 +550,7 @@ impl BacktestingPanel {
     fn check_results(&mut self) {
         // Poll the engine for results if we are running
         if self.is_running {
-            let engine_guard = self.engine.lock().unwrap();
+            let engine_guard = self.engine.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(engine) = engine_guard.as_ref() {
                 let logs = engine.get_logs();
                 if !logs.is_empty() && logs.last().unwrap().contains("回测运行结束") {
@@ -578,10 +587,138 @@ impl BacktestingPanel {
         self.progress = 0.0;
     }
 
-    /// Export results
+    /// Export results to CSV/JSON file
     fn export_results(&self) {
-        // TODO: Implement export to CSV/JSON
-        println!("导出回测结果...");
+        let Some(ref stats) = self.results else {
+            return;
+        };
+
+        #[cfg(feature = "gui")]
+        {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("CSV文件", &["csv"])
+                .add_filter("JSON文件", &["json"])
+                .set_title("导出回测结果")
+                .save_file()
+            {
+                let path_str = path.to_string_lossy().to_string();
+                if path_str.ends_with(".json") {
+                    match serde_json::to_string_pretty(stats) {
+                        Ok(json) => {
+                            if let Err(e) = std::fs::write(&path, json) {
+                                tracing::error!("导出JSON失败: {}", e);
+                            }
+                        }
+                        Err(e) => tracing::error!("序列化JSON失败: {}", e),
+                    }
+                } else {
+                    let csv = format!(
+                        "指标,值\n\
+                         起始日期,{}\n\
+                         结束日期,{}\n\
+                         总交易日,{}\n\
+                         盈利天数,{}\n\
+                         亏损天数,{}\n\
+                         期末余额,{:.2}\n\
+                         最大回,{:.2}\n\
+                         最大回撤百分比,{:.2}%\n\
+                         总净盈亏,{:.2}\n\
+                         总手续费,{:.2}\n\
+                         总滑点,{:.2}\n\
+                         总成交额,{:.2}\n\
+                         总交易次数,{}\n\
+                         日均净盈亏,{:.2}\n\
+                         日均手续费,{:.2}\n\
+                         日均滑点,{:.2}\n\
+                         日均成交额,{:.2}\n\
+                         日均交易次数,{:.2}\n\
+                         日收益率,{:.4}\n\
+                         收益率标准差,{:.4}\n\
+                         夏普比率,{:.4}\n\
+                         年化收益,{:.4}",
+                        stats.start_date,
+                        stats.end_date,
+                        stats.total_days,
+                        stats.profit_days,
+                        stats.loss_days,
+                        stats.end_balance,
+                        stats.max_drawdown,
+                        stats.max_drawdown_percent,
+                        stats.total_net_pnl,
+                        stats.total_commission,
+                        stats.total_slippage,
+                        stats.total_turnover,
+                        stats.total_trade_count,
+                        stats.daily_net_pnl,
+                        stats.daily_commission,
+                        stats.daily_slippage,
+                        stats.daily_turnover,
+                        stats.daily_trade_count,
+                        stats.daily_return,
+                        stats.return_std,
+                        stats.sharpe_ratio,
+                        stats.return_mean,
+                    );
+                    if let Err(e) = std::fs::write(&path, csv) {
+                        tracing::error!("导出CSV失败: {}", e);
+                    }
+                }
+
+                // Also export daily PnL data if available
+                if !self.daily_pnl.is_empty() {
+                    let pnl_path = if path_str.ends_with(".json") {
+                        path.with_extension("pnl.json")
+                    } else {
+                        path.with_extension("pnl.csv")
+                    };
+                    let pnl_csv = {
+                        let mut lines = String::from("day_index,pnl\n");
+                        for (idx, pnl) in &self.daily_pnl {
+                            lines.push_str(&format!("{},{:.6}\n", idx, pnl));
+                        }
+                        lines
+                    };
+                    if let Err(e) = std::fs::write(&pnl_path, pnl_csv) {
+                        tracing::error!("导出日盈亏数据失败: {}", e);
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(feature = "gui"))]
+        {
+            let csv = format!(
+                "start_date,end_date,total_days,profit_days,loss_days,\
+                 end_balance,max_drawdown,max_drawdown_percent,\
+                 total_net_pnl,total_commission,total_slippage,total_turnover,total_trade_count,\
+                 daily_net_pnl,daily_commission,daily_slippage,daily_turnover,daily_trade_count,\
+                 daily_return,return_std,sharpe_ratio,return_mean\n\
+                 {},{},{},{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.4},{:.4},{:.4},{:.4}",
+                stats.start_date,
+                stats.end_date,
+                stats.total_days,
+                stats.profit_days,
+                stats.loss_days,
+                stats.end_balance,
+                stats.max_drawdown,
+                stats.max_drawdown_percent,
+                stats.total_net_pnl,
+                stats.total_commission,
+                stats.total_slippage,
+                stats.total_turnover,
+                stats.total_trade_count,
+                stats.daily_net_pnl,
+                stats.daily_commission,
+                stats.daily_slippage,
+                stats.daily_turnover,
+                stats.daily_trade_count,
+                stats.daily_return,
+                stats.return_std,
+                stats.sharpe_ratio,
+                stats.return_mean,
+            );
+            println!("{}", csv);
+        }
     }
 
     /// Browse for strategy file

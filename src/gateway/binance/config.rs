@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use tracing::{error, info};
 
-use crate::trader::{GatewaySettings, GatewaySettingValue};
 use crate::trader::utility::get_folder_path;
+use crate::trader::{GatewaySettingValue, GatewaySettings};
 
 /// Configuration for a single Binance gateway
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,11 +85,26 @@ impl BinanceGatewayConfig {
     /// Convert to GatewaySettings
     pub fn to_settings(&self) -> GatewaySettings {
         let mut settings = GatewaySettings::new();
-        settings.insert("key".to_string(), GatewaySettingValue::String(self.key.clone()));
-        settings.insert("secret".to_string(), GatewaySettingValue::String(self.secret.clone()));
-        settings.insert("server".to_string(), GatewaySettingValue::String(self.server.clone()));
-        settings.insert("proxy_host".to_string(), GatewaySettingValue::String(self.proxy_host.clone()));
-        settings.insert("proxy_port".to_string(), GatewaySettingValue::Int(self.proxy_port as i64));
+        settings.insert(
+            "key".to_string(),
+            GatewaySettingValue::String(self.key.clone()),
+        );
+        settings.insert(
+            "secret".to_string(),
+            GatewaySettingValue::String(self.secret.clone()),
+        );
+        settings.insert(
+            "server".to_string(),
+            GatewaySettingValue::String(self.server.clone()),
+        );
+        settings.insert(
+            "proxy_host".to_string(),
+            GatewaySettingValue::String(self.proxy_host.clone()),
+        );
+        settings.insert(
+            "proxy_port".to_string(),
+            GatewaySettingValue::Int(self.proxy_port as i64),
+        );
         settings
     }
 }
@@ -106,12 +121,15 @@ impl BinanceConfigs {
     /// Load configurations from disk
     pub fn load() -> Self {
         let config_path = Self::get_config_path();
-        
+
         if config_path.exists() {
             match fs::read_to_string(&config_path) {
                 Ok(content) => match serde_json::from_str(&content) {
                     Ok(configs) => {
-                        info!("Loaded Binance gateway configurations from {:?}", config_path);
+                        info!(
+                            "Loaded Binance gateway configurations from {:?}",
+                            config_path
+                        );
                         return configs;
                     }
                     Err(e) => {
@@ -123,7 +141,7 @@ impl BinanceConfigs {
                 }
             }
         }
-        
+
         // Return default empty config
         Self::default()
     }
@@ -131,7 +149,7 @@ impl BinanceConfigs {
     /// Save configurations to disk
     pub fn save(&self) -> Result<(), String> {
         let config_path = Self::get_config_path();
-        
+
         match serde_json::to_string_pretty(self) {
             Ok(json) => {
                 // Ensure parent directory exists
@@ -140,7 +158,7 @@ impl BinanceConfigs {
                         return Err(format!("Failed to create config directory: {}", e));
                     }
                 }
-                
+
                 match fs::write(&config_path, json) {
                     Ok(_) => {
                         info!("Saved Binance gateway configurations to {:?}", config_path);
@@ -188,8 +206,10 @@ mod tests {
             proxy_port: 1080,
         };
 
-        let json = serde_json::to_string_pretty(&config).unwrap();
-        let deserialized: BinanceGatewayConfig = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string_pretty(&config)
+            .expect("serialization of valid config should succeed");
+        let deserialized: BinanceGatewayConfig =
+            serde_json::from_str(&json).expect("deserialization of valid JSON should succeed");
 
         assert_eq!(config.key, deserialized.key);
         assert_eq!(config.secret, deserialized.secret);
@@ -221,7 +241,7 @@ mod tests {
     #[test]
     fn test_configs_operations() {
         let mut configs = BinanceConfigs::default();
-        
+
         let config1 = BinanceGatewayConfig {
             key: "key1".to_string(),
             secret: "secret1".to_string(),
@@ -231,10 +251,12 @@ mod tests {
         };
 
         configs.set("BINANCE_SPOT".to_string(), config1.clone());
-        
-        let retrieved = configs.get("BINANCE_SPOT").unwrap();
+
+        let retrieved = configs
+            .get("BINANCE_SPOT")
+            .expect("config should exist after insertion");
         assert_eq!(retrieved.key, "key1");
-        
+
         configs.remove("BINANCE_SPOT");
         assert!(configs.get("BINANCE_SPOT").is_none());
     }

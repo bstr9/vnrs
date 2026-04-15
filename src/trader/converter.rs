@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::constant::{Direction, Exchange, Offset};
 use super::object::{ContractData, OrderData, OrderRequest, PositionData, TradeData};
+use tracing::warn;
 
 /// Position holding for tracking long/short positions and frozen amounts
 #[derive(Debug, Clone)]
@@ -134,7 +135,12 @@ impl PositionHolding {
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    warn!(
+                        "Unexpected offset {:?} in long position update for trade, ignoring",
+                        trade.offset
+                    );
+                }
             }
         } else {
             match trade.offset {
@@ -158,7 +164,12 @@ impl PositionHolding {
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    warn!(
+                        "Unexpected offset {:?} in short position update for trade, ignoring",
+                        trade.offset
+                    );
+                }
             }
         }
 
@@ -206,7 +217,7 @@ impl PositionHolding {
                             self.short_td_frozen = self.short_td;
                         }
                     }
-                    _ => {}
+                    Offset::None | Offset::Open => {}
                 }
             } else if direction == Direction::Short {
                 match order.offset {
@@ -223,7 +234,7 @@ impl PositionHolding {
                             self.long_td_frozen = self.long_td;
                         }
                     }
-                    _ => {}
+                    Offset::None | Offset::Open => {}
                 }
             }
         }

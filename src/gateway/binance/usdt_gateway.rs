@@ -529,6 +529,7 @@ impl BinanceUsdtGateway {
 #[async_trait]
 impl BaseGateway for BinanceUsdtGateway {
     fn gateway_name(&self) -> &str { &self.gateway_name }
+    fn default_exchange(&self) -> Exchange { Exchange::BinanceUsdm }
     fn default_name() -> &'static str { "BINANCE_USDT" }
 
     fn default_setting() -> GatewaySettings {

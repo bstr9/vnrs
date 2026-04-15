@@ -508,7 +508,10 @@ impl MainWindow {
                         "INE" => crate::trader::constant::Exchange::Ine,
                         "SSE" => crate::trader::constant::Exchange::Sse,
                         "SZSE" => crate::trader::constant::Exchange::Szse,
-                        _ => crate::trader::constant::Exchange::Binance,
+                        other => {
+                            tracing::warn!("Unknown exchange '{}', defaulting to Binance", other);
+                            crate::trader::constant::Exchange::Binance
+                        }
                     };
                     self.trading.set_symbol(&position.symbol, exchange);
                 }
@@ -617,12 +620,14 @@ impl MainWindow {
             
             // Query historical data from main engine
             if let Some(ref engine) = self.main_engine {
-                let gw_name = gateway_name.unwrap().to_string();
+                let gw_name = gateway_name.unwrap_or_default().to_string();
                 let sym = symbol.to_string();
                 let vt_sym = vt_symbol.to_string();
                 
                 // Parse exchange
-                let exchange = crate::trader::Exchange::Binance; // TODO: parse properly
+                let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
+                    .map(|(_, e)| e)
+                    .unwrap_or(crate::trader::Exchange::Binance);
                 
                 let req = crate::trader::HistoryRequest {
                     symbol: sym,
@@ -656,6 +661,7 @@ impl MainWindow {
     /// Show all chart windows
     fn show_chart_windows(&mut self, ctx: &Context) {
         let mut to_remove = Vec::new();
+        let mut interval_changes: Vec<(String, crate::trader::Interval)> = Vec::new();
         
         for (vt_symbol, chart) in &mut self.charts {
             let mut is_open = true;
@@ -664,7 +670,12 @@ impl MainWindow {
                 .default_size([800.0, 600.0])
                 .open(&mut is_open)
                 .show(ctx, |ui| {
-                    chart.show(ui, Some(vt_symbol));
+                    let (_, event) = chart.show(ui, Some(vt_symbol));
+                    if let Some(evt) = event {
+                        if evt.interval_changed {
+                            interval_changes.push((vt_symbol.clone(), evt.new_interval));
+                        }
+                    }
                 });
             
             if !is_open {
@@ -672,10 +683,38 @@ impl MainWindow {
             }
         }
         
-        // Remove closed charts
         for vt_symbol in to_remove {
             self.charts.remove(&vt_symbol);
             tracing::info!("关闭K线图: {}", vt_symbol);
+        }
+
+        for (vt_symbol, interval) in interval_changes {
+            if let Some(ref engine) = self.main_engine {
+                let (sym, exchange) = crate::trader::utility::extract_vt_symbol(&vt_symbol)
+                    .unwrap_or((vt_symbol.clone(), crate::trader::Exchange::Binance));
+                let req = crate::trader::HistoryRequest {
+                    symbol: sym,
+                    exchange,
+                    start: chrono::Utc::now() - chrono::Duration::days(1),
+                    end: Some(chrono::Utc::now()),
+                    interval: Some(interval),
+                };
+                let engine_clone = engine.clone();
+                let pending_data = self.pending_history_data.clone();
+                let vt_sym = vt_symbol.clone();
+                tokio::spawn(async move {
+                    match engine_clone.query_history(req, "").await {
+                        Ok(bars) => {
+                            tracing::info!("周期切换查询到历史数据: {} 条, symbol: {}", bars.len(), vt_sym);
+                            let mut data = pending_data.lock().await;
+                            data.insert(vt_sym, bars);
+                        }
+                        Err(e) => {
+                            tracing::warn!("周期切换查询历史数据失败: {}", e);
+                        }
+                    }
+                });
+            }
         }
     }
     
