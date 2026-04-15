@@ -50,6 +50,22 @@ pub const USDT_TESTNET_WS_TRADE_HOST: &str = "wss://stream.binancefuture.com/ws/
 pub const USDT_TESTNET_WS_DATA_HOST: &str = "wss://stream.binancefuture.com/stream";
 
 // ============================================================================
+// WebSocket API Hosts (for user data stream subscription)
+// ============================================================================
+
+/// Spot WebSocket API endpoint (production) - for user data stream subscription
+pub const SPOT_WS_API_HOST: &str = "wss://ws-api.binance.com:443/ws-api/v3";
+
+/// Spot WebSocket API endpoint (testnet) - for user data stream subscription
+pub const SPOT_TESTNET_WS_API_HOST: &str = "wss://testnet.binance.vision/ws-api/v3";
+
+/// USDT-M Futures WebSocket API endpoint (production)
+pub const USDT_WS_API_HOST: &str = "wss://ws-api.binance.com:443/ws-api/v3";
+
+/// USDT-M Futures WebSocket API endpoint (testnet)
+pub const USDT_TESTNET_WS_API_HOST: &str = "wss://testnet.binancefuture.com/ws-api/v3";
+
+// ============================================================================
 // Security Types
 // ============================================================================
 

@@ -148,6 +148,21 @@ impl BinanceRestClient {
         *self.proxy_port.read().await
     }
 
+    /// Get API key (needed for WebSocket API subscription)
+    pub async fn get_api_key(&self) -> String {
+        self.key.read().await.clone()
+    }
+
+    /// Sign a query string (needed for WebSocket API subscription)
+    pub async fn sign_query(&self, query: &str) -> String {
+        self.sign(query).await
+    }
+
+    /// Get current timestamp in milliseconds (public accessor for WebSocket API)
+    pub fn get_timestamp_ms(&self) -> i64 {
+        self.get_timestamp()
+    }
+
     /// Generate signature for request
     async fn sign(&self, query: &str) -> String {
         let secret = self.secret.read().await;

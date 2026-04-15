@@ -243,6 +243,10 @@ impl MainWindow {
                 })
                 .collect();
             self.contract_manager.set_contracts(contracts);
+            
+            // Update trading widget with available contracts for dropdown
+            let all_contracts = engine.get_all_contracts();
+            self.trading.set_contracts(all_contracts);
         }
     }
     

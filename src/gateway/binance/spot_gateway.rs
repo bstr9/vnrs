@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{Local, Utc};
+use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
@@ -47,10 +48,8 @@ pub struct BinanceSpotGateway {
     order_count: AtomicU64,
     /// Connect time for generating order IDs
     connect_time: AtomicI64,
-    /// User stream listen key
-    listen_key: Arc<RwLock<String>>,
-    /// Keep alive counter
-    keep_alive_count: AtomicU64,
+    /// User stream subscription ID (new WebSocket API)
+    subscription_id: Arc<RwLock<Option<u64>>>,
     /// Server mode (REAL or TESTNET)
     server: Arc<RwLock<String>>,
     /// Cached orders
@@ -72,8 +71,7 @@ impl BinanceSpotGateway {
             event_sender: Arc::new(RwLock::new(None)),
             order_count: AtomicU64::new(1_000_000),
             connect_time: AtomicI64::new(0),
-            listen_key: Arc::new(RwLock::new(String::new())),
-            keep_alive_count: AtomicU64::new(0),
+            subscription_id: Arc::new(RwLock::new(None)),
             server: Arc::new(RwLock::new("REAL".to_string())),
             orders: Arc::new(RwLock::new(HashMap::new())),
             contracts: Arc::new(RwLock::new(HashMap::new())),
@@ -302,45 +300,71 @@ impl BinanceSpotGateway {
         Ok(())
     }
 
-    /// Start user data stream
+    /// Start user data stream via WebSocket API
     async fn start_user_stream(&self, proxy_host: &str, proxy_port: u16) -> Result<(), String> {
         // Debug log
         tracing::info!("start_user_stream: proxy_host='{}', proxy_port={}", proxy_host, proxy_port);
-        
-        let params = HashMap::new();
-        let data = self.rest_client.post("/api/v3/userDataStream", &params, Security::ApiKey).await?;
 
-        let listen_key = data["listenKey"].as_str().unwrap_or("").to_string();
-        *self.listen_key.write().await = listen_key.clone();
-        self.keep_alive_count.store(0, Ordering::SeqCst);
-
-        // Build WebSocket URL
+        // 1. Build WebSocket API URL
         let server = self.server.read().await.clone();
         let url = if server == "REAL" {
-            format!("{}{}", SPOT_WS_TRADE_HOST, listen_key)
+            SPOT_WS_API_HOST
         } else {
-            format!("{}{}", SPOT_TESTNET_WS_TRADE_HOST, listen_key)
+            SPOT_TESTNET_WS_API_HOST
         };
 
-        // Setup trade WebSocket handler
+        // 2. Setup trade WebSocket handler BEFORE connecting
+        // The handler must handle THREE types of messages:
+        //   a) Subscription responses: {"id": "...", "status": 200, "result": {"subscriptionId": 0}}
+        //   b) User data events: {"subscriptionId": 0, "event": {"e": "outboundAccountPosition", ...}}
+        //   c) Event stream terminated: {"subscriptionId": 0, "event": {"e": "eventStreamTerminated"}}
         let event_sender = self.event_sender.clone();
         let orders = self.orders.clone();
         let gateway_name = self.gateway_name.clone();
+        let subscription_id = self.subscription_id.clone();
         let order_lock = Arc::new(Mutex::new(()));
-        
+
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let event_sender = event_sender.clone();
             let orders = orders.clone();
             let gateway_name = gateway_name.clone();
+            let subscription_id = subscription_id.clone();
             let lock = order_lock.clone();
-            
+
             tokio::spawn(async move {
+                // Check if this is a subscription response (has "status" and "result" fields)
+                if packet.get("status").is_some() && packet.get("result").is_some() {
+                    let status = packet["status"].as_u64().unwrap_or(0);
+                    let req_id = packet.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    if status == 200 {
+                        if let Some(result) = packet.get("result") {
+                            let sub_id = result["subscriptionId"].as_u64();
+                            *subscription_id.write().await = sub_id;
+                            tracing::info!("{}: User data stream subscribed, subscriptionId={:?}, reqId={}", gateway_name, sub_id, req_id);
+                        }
+                    } else {
+                        let error_msg = packet.get("error")
+                            .and_then(|e| e.get("msg"))
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("unknown error");
+                        tracing::error!("{}: User data stream subscription failed (status={}): {}", gateway_name, status, error_msg);
+                    }
+                    return;
+                }
+
                 let _guard = lock.lock().await;
-                let event_type = packet.get("e").and_then(|s| s.as_str()).unwrap_or("");
-                
+
+                // Extract event data - new format nests under "event" key
+                let event_data = match packet.get("event") {
+                    Some(e) => e.clone(),
+                    None => packet.clone(), // fallback for unexpected format
+                };
+
+                let event_type = event_data.get("e").and_then(|s| s.as_str()).unwrap_or("");
+
                 match event_type {
                     "outboundAccountPosition" => {
-                        if let Some(balances) = packet.get("B").and_then(|b| b.as_array()) {
+                        if let Some(balances) = event_data.get("B").and_then(|b| b.as_array()) {
                             for b in balances {
                                 let free: f64 = b["f"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
                                 let locked: f64 = b["l"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
@@ -362,34 +386,34 @@ impl BinanceSpotGateway {
                         }
                     }
                     "executionReport" => {
-                        let order_type_str = packet["o"].as_str().unwrap_or("");
+                        let order_type_str = event_data["o"].as_str().unwrap_or("");
                         let order_type = ORDERTYPE_BINANCE2VT.get(order_type_str);
-                        
+
                         if order_type.is_none() {
                             return;
                         }
 
-                        let orderid = if packet["C"].as_str().unwrap_or("").is_empty() {
-                            packet["c"].as_str().unwrap_or("").to_string()
+                        let orderid = if event_data["C"].as_str().unwrap_or("").is_empty() {
+                            event_data["c"].as_str().unwrap_or("").to_string()
                         } else {
-                            packet["C"].as_str().unwrap_or("").to_string()
+                            event_data["C"].as_str().unwrap_or("").to_string()
                         };
 
-                        let status_str = packet["X"].as_str().unwrap_or("");
-                        let direction_str = packet["S"].as_str().unwrap_or("");
+                        let status_str = event_data["X"].as_str().unwrap_or("");
+                        let direction_str = event_data["S"].as_str().unwrap_or("");
 
                         let order = OrderData {
-                            symbol: packet["s"].as_str().unwrap_or("").to_lowercase(),
+                            symbol: event_data["s"].as_str().unwrap_or("").to_lowercase(),
                             exchange: Exchange::Binance,
                             orderid: orderid.clone(),
                             order_type: *order_type.expect("order_type verified non-None above"),
                             direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
                             offset: Offset::None,
-                            price: packet["p"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                            volume: packet["q"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                            traded: packet["z"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                            price: event_data["p"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                            volume: event_data["q"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                            traded: event_data["z"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
                             status: STATUS_BINANCE2VT.get(status_str).copied().unwrap_or(Status::Submitting),
-                            datetime: Some(timestamp_to_datetime(packet["O"].as_i64().unwrap_or(0))),
+                            datetime: Some(timestamp_to_datetime(event_data["O"].as_i64().unwrap_or(0))),
                             reference: String::new(),
                             gateway_name: gateway_name.clone(),
                             extra: None,
@@ -401,18 +425,18 @@ impl BinanceSpotGateway {
                         }
 
                         // Check for trade
-                        let trade_volume: f64 = packet["l"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                        let trade_volume: f64 = event_data["l"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
                         if trade_volume > 0.0 {
                             let trade = TradeData {
                                 symbol: order.symbol.clone(),
                                 exchange: Exchange::Binance,
                                 orderid,
-                                tradeid: packet["t"].as_i64().unwrap_or(0).to_string(),
+                                tradeid: event_data["t"].as_i64().unwrap_or(0).to_string(),
                                 direction: order.direction,
                                 offset: Offset::None,
-                                price: packet["L"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                price: event_data["L"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
                                 volume: trade_volume,
-                                datetime: Some(timestamp_to_datetime(packet["T"].as_i64().unwrap_or(0))),
+                                datetime: Some(timestamp_to_datetime(event_data["T"].as_i64().unwrap_or(0))),
                                 gateway_name: gateway_name.clone(),
                                 extra: None,
                             };
@@ -421,8 +445,11 @@ impl BinanceSpotGateway {
                             }
                         }
                     }
+                    "eventStreamTerminated" => {
+                        warn!("{}: Event stream terminated, will need to reconnect", gateway_name);
+                    }
                     "listenKeyExpired" => {
-                        warn!("{}: Listen key expired, attempting to recreate and reconnect trade stream", gateway_name);
+                        warn!("{}: Listen key expired (legacy event), reconnecting via WebSocket API", gateway_name);
                     }
                     _ => {}
                 }
@@ -430,51 +457,39 @@ impl BinanceSpotGateway {
         });
 
         self.trade_ws.set_handler(handler).await;
-        self.trade_ws.connect(&url, proxy_host, proxy_port).await?;
-        self.write_log("交易Websocket API连接成功").await;
+        self.trade_ws.connect(url, proxy_host, proxy_port).await?;
+
+        // 3. Send subscription request after connecting
+        let api_key = self.rest_client.get_api_key().await;
+        let timestamp = self.rest_client.get_timestamp_ms();
+        let query = format!("apiKey={}&timestamp={}", api_key, timestamp);
+        let signature = self.rest_client.sign_query(&query).await;
+
+        let subscribe_msg = json!({
+            "id": format!("sub_{}", timestamp),
+            "method": "userDataStream.subscribe.signature",
+            "params": {
+                "apiKey": api_key,
+                "timestamp": timestamp,
+                "signature": signature
+            }
+        });
+
+        self.trade_ws.send(subscribe_msg).await?;
+        self.write_log("交易Websocket API连接成功，已发送订阅请求").await;
 
         Ok(())
     }
 
-    /// Keep user stream alive
-    pub async fn keep_user_stream(&self) {
-        let count = self.keep_alive_count.fetch_add(1, Ordering::SeqCst);
-        if count < 600 {
-            return;
-        }
-        self.keep_alive_count.store(0, Ordering::SeqCst);
-
-        let listen_key = self.listen_key.read().await.clone();
-        let mut params = HashMap::new();
-        params.insert("listenKey".to_string(), listen_key);
-
-        if let Err(e) = self.rest_client.put("/api/v3/userDataStream", &params, Security::ApiKey).await {
-            warn!("{}: Keep user stream failed: {}", self.gateway_name, e);
-        }
-    }
-
-    /// Recreate listen key and reconnect trade stream
-    pub async fn recreate_listen_key(&self) -> Result<(), String> {
+    /// Reconnect user data stream (disconnect, reconnect, re-subscribe)
+    pub async fn reconnect_user_stream(&self) -> Result<(), String> {
         self.trade_ws.disconnect().await;
-
-        let params = HashMap::new();
-        let data = self.rest_client.post("/api/v3/userDataStream", &params, Security::ApiKey).await?;
-
-        let listen_key = data["listenKey"].as_str().unwrap_or("").to_string();
-        *self.listen_key.write().await = listen_key.clone();
-        self.keep_alive_count.store(0, Ordering::SeqCst);
-
-        let server = self.server.read().await.clone();
-        let url = if server == "REAL" {
-            format!("{}{}", SPOT_WS_TRADE_HOST, listen_key)
-        } else {
-            format!("{}{}", SPOT_TESTNET_WS_TRADE_HOST, listen_key)
-        };
+        *self.subscription_id.write().await = None;
 
         let proxy_host = self.rest_client.get_proxy_host().await;
         let proxy_port = self.rest_client.get_proxy_port().await;
-        self.trade_ws.connect(&url, &proxy_host, proxy_port).await?;
-        self.write_log("ListenKey recreated, trade stream reconnected").await;
+        self.start_user_stream(&proxy_host, proxy_port).await?;
+        self.write_log("User data stream reconnected via WebSocket API").await;
         Ok(())
     }
 }
@@ -654,16 +669,18 @@ impl BaseGateway for BinanceSpotGateway {
 
     async fn subscribe(&self, req: SubscribeRequest) -> Result<(), String> {
         let symbol = req.symbol.to_lowercase();
-        if !self.contracts.read().await.contains_key(&symbol) {
-            return Err(format!("找不到该合约代码: {}", symbol));
-        }
+        
+        // 允许订阅未预加载的合约（动态订阅）
+        // 如果合约不在预加载列表中，创建一个默认的 tick 数据
         if self.ticks.read().await.contains_key(&symbol) {
-            return Ok(());
+            return Ok(()); // 已订阅
         }
 
+        // 创建 tick 数据（即使合约未预加载）
         let tick = TickData::new(self.gateway_name.clone(), symbol.clone(), Exchange::Binance, Utc::now());
         self.ticks.write().await.insert(symbol.clone(), tick);
 
+        // 订阅 ticker 和 depth5 数据流
         let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5", symbol)];
         self.market_ws.subscribe(channels).await?;
         self.write_log(&format!("订阅行情: {}", symbol)).await;
