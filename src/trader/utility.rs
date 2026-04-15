@@ -484,7 +484,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = SimpleMovingAverage::new(n).unwrap();
+        let mut indicator =
+            SimpleMovingAverage::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in (self.size - n)..self.size {
             result = indicator.next(self.close_array[i]);
@@ -497,7 +498,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = SimpleMovingAverage::new(n).unwrap();
+        let mut indicator =
+            SimpleMovingAverage::new(n).expect("TA indicator with valid period should not fail");
         self.close_array
             .iter()
             .map(|&v| indicator.next(v))
@@ -509,7 +511,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = ExponentialMovingAverage::new(n).unwrap();
+        let mut indicator = ExponentialMovingAverage::new(n)
+            .expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(self.close_array[i]);
@@ -522,7 +525,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = ExponentialMovingAverage::new(n).unwrap();
+        let mut indicator = ExponentialMovingAverage::new(n)
+            .expect("TA indicator with valid period should not fail");
         self.close_array
             .iter()
             .map(|&v| indicator.next(v))
@@ -536,7 +540,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = RelativeStrengthIndex::new(n).unwrap();
+        let mut indicator =
+            RelativeStrengthIndex::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(self.close_array[i]);
@@ -549,7 +554,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = RelativeStrengthIndex::new(n).unwrap();
+        let mut indicator =
+            RelativeStrengthIndex::new(n).expect("TA indicator with valid period should not fail");
         self.close_array
             .iter()
             .map(|&v| indicator.next(v))
@@ -561,7 +567,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = RateOfChange::new(n).unwrap();
+        let mut indicator =
+            RateOfChange::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(self.close_array[i]);
@@ -574,7 +581,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = RateOfChange::new(n).unwrap();
+        let mut indicator =
+            RateOfChange::new(n).expect("TA indicator with valid period should not fail");
         self.close_array
             .iter()
             .map(|&v| indicator.next(v))
@@ -597,7 +605,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = StandardDeviation::new(n).unwrap();
+        let mut indicator =
+            StandardDeviation::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(self.close_array[i]);
@@ -610,7 +619,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = StandardDeviation::new(n).unwrap();
+        let mut indicator =
+            StandardDeviation::new(n).expect("TA indicator with valid period should not fail");
         self.close_array
             .iter()
             .map(|&v| indicator.next(v))
@@ -622,7 +632,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = AverageTrueRange::new(n).unwrap();
+        let mut indicator =
+            AverageTrueRange::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(&self.get_data_item(i));
@@ -635,7 +646,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = AverageTrueRange::new(n).unwrap();
+        let mut indicator =
+            AverageTrueRange::new(n).expect("TA indicator with valid period should not fail");
         (0..self.size)
             .map(|i| indicator.next(&self.get_data_item(i)))
             .collect()
@@ -677,7 +689,8 @@ impl ArrayManager {
         if fast > self.size || slow > self.size || signal > self.size {
             return (0.0, 0.0, 0.0);
         }
-        let mut indicator = MovingAverageConvergenceDivergence::new(fast, slow, signal).unwrap();
+        let mut indicator = MovingAverageConvergenceDivergence::new(fast, slow, signal)
+            .expect("TA indicator with valid period should not fail");
         let mut result = ta::indicators::MovingAverageConvergenceDivergenceOutput {
             macd: 0.0,
             signal: 0.0,
@@ -703,7 +716,8 @@ impl ArrayManager {
                 vec![0.0; self.size],
             );
         }
-        let mut indicator = MovingAverageConvergenceDivergence::new(fast, slow, signal).unwrap();
+        let mut indicator = MovingAverageConvergenceDivergence::new(fast, slow, signal)
+            .expect("TA indicator with valid period should not fail");
         let mut macd_arr = Vec::with_capacity(self.size);
         let mut signal_arr = Vec::with_capacity(self.size);
         let mut hist_arr = Vec::with_capacity(self.size);
@@ -722,7 +736,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = CommodityChannelIndex::new(n).unwrap();
+        let mut indicator =
+            CommodityChannelIndex::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(&self.get_data_item(i));
@@ -735,7 +750,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = CommodityChannelIndex::new(n).unwrap();
+        let mut indicator =
+            CommodityChannelIndex::new(n).expect("TA indicator with valid period should not fail");
         (0..self.size)
             .map(|i| indicator.next(&self.get_data_item(i)))
             .collect()
@@ -749,7 +765,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return (0.0, 0.0, 0.0);
         }
-        let mut indicator = BollingerBands::new(n, dev).unwrap();
+        let mut indicator =
+            BollingerBands::new(n, dev).expect("TA indicator with valid period should not fail");
         let mut result = ta::indicators::BollingerBandsOutput {
             average: 0.0,
             upper: 0.0,
@@ -770,7 +787,8 @@ impl ArrayManager {
                 vec![0.0; self.size],
             );
         }
-        let mut indicator = BollingerBands::new(n, dev).unwrap();
+        let mut indicator =
+            BollingerBands::new(n, dev).expect("TA indicator with valid period should not fail");
         let mut upper = Vec::with_capacity(self.size);
         let mut middle = Vec::with_capacity(self.size);
         let mut lower = Vec::with_capacity(self.size);
@@ -790,7 +808,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return (0.0, 0.0, 0.0);
         }
-        let mut indicator = KeltnerChannel::new(n, multiplier).unwrap();
+        let mut indicator = KeltnerChannel::new(n, multiplier)
+            .expect("TA indicator with valid period should not fail");
         let mut result = ta::indicators::KeltnerChannelOutput {
             average: 0.0,
             upper: 0.0,
@@ -811,7 +830,8 @@ impl ArrayManager {
                 vec![0.0; self.size],
             );
         }
-        let mut indicator = KeltnerChannel::new(n, multiplier).unwrap();
+        let mut indicator = KeltnerChannel::new(n, multiplier)
+            .expect("TA indicator with valid period should not fail");
         let mut upper = Vec::with_capacity(self.size);
         let mut middle = Vec::with_capacity(self.size);
         let mut lower = Vec::with_capacity(self.size);
@@ -831,8 +851,10 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return (0.0, 0.0);
         }
-        let mut max_indicator = Maximum::new(n).unwrap();
-        let mut min_indicator = Minimum::new(n).unwrap();
+        let mut max_indicator =
+            Maximum::new(n).expect("TA indicator with valid period should not fail");
+        let mut min_indicator =
+            Minimum::new(n).expect("TA indicator with valid period should not fail");
         let mut upper = 0.0;
         let mut lower = 0.0;
 
@@ -848,8 +870,10 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return (vec![0.0; self.size], vec![0.0; self.size]);
         }
-        let mut max_indicator = Maximum::new(n).unwrap();
-        let mut min_indicator = Minimum::new(n).unwrap();
+        let mut max_indicator =
+            Maximum::new(n).expect("TA indicator with valid period should not fail");
+        let mut min_indicator =
+            Minimum::new(n).expect("TA indicator with valid period should not fail");
 
         let upper: Vec<f64> = self
             .high_array
@@ -872,7 +896,8 @@ impl ArrayManager {
         if period > self.size || period == 0 {
             return 0.0;
         }
-        let mut indicator = FastStochastic::new(period).unwrap();
+        let mut indicator =
+            FastStochastic::new(period).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(&self.get_data_item(i));
@@ -886,7 +911,8 @@ impl ArrayManager {
         if stochastic_period > self.size || ema_period > self.size {
             return 0.0;
         }
-        let mut indicator = SlowStochastic::new(stochastic_period, ema_period).unwrap();
+        let mut indicator = SlowStochastic::new(stochastic_period, ema_period)
+            .expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(&self.get_data_item(i));
@@ -902,13 +928,15 @@ impl ArrayManager {
         }
 
         // Calculate %K values using FastStochastic
-        let mut fast_stoch = FastStochastic::new(k_period).unwrap();
+        let mut fast_stoch =
+            FastStochastic::new(k_period).expect("TA indicator with valid period should not fail");
         let k_values: Vec<f64> = (0..self.size)
             .map(|i| fast_stoch.next(&self.get_data_item(i)))
             .collect();
 
         // Calculate %D as SMA of %K
-        let mut d_sma = SimpleMovingAverage::new(d_period).unwrap();
+        let mut d_sma = SimpleMovingAverage::new(d_period)
+            .expect("TA indicator with valid period should not fail");
         let mut d_value = 0.0;
         for &k in &k_values {
             d_value = d_sma.next(k);
@@ -967,7 +995,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = MoneyFlowIndex::new(n).unwrap();
+        let mut indicator =
+            MoneyFlowIndex::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(&self.get_data_item(i));
@@ -980,7 +1009,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return vec![0.0; self.size];
         }
-        let mut indicator = MoneyFlowIndex::new(n).unwrap();
+        let mut indicator =
+            MoneyFlowIndex::new(n).expect("TA indicator with valid period should not fail");
         (0..self.size)
             .map(|i| indicator.next(&self.get_data_item(i)))
             .collect()
@@ -993,7 +1023,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = Maximum::new(n).unwrap();
+        let mut indicator =
+            Maximum::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(self.high_array[i]);
@@ -1006,7 +1037,8 @@ impl ArrayManager {
         if n > self.size || n == 0 {
             return 0.0;
         }
-        let mut indicator = Minimum::new(n).unwrap();
+        let mut indicator =
+            Minimum::new(n).expect("TA indicator with valid period should not fail");
         let mut result = 0.0;
         for i in 0..self.size {
             result = indicator.next(self.low_array[i]);
@@ -1171,7 +1203,9 @@ impl ArrayManager {
 
         // Subsequent values use Wilder's smoothing
         for val in data[n..].iter() {
-            let prev = result.last().unwrap();
+            let prev = result
+                .last()
+                .expect("result has at least one element after push");
             let smoothed = prev - (prev / n as f64) + val;
             result.push(smoothed);
         }

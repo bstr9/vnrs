@@ -1058,3 +1058,662 @@ impl Default for BacktestingEngine {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trader::{OrderType, OrderRequest};
+    use chrono::{TimeZone, NaiveDate};
+
+    #[test]
+    fn test_engine_new_default_state() {
+        let engine = BacktestingEngine::new();
+        assert_eq!(engine.vt_symbol, "");
+        assert_eq!(engine.symbol, "");
+        assert_eq!(engine.exchange, Exchange::Binance);
+        assert_eq!(engine.interval, Interval::Minute);
+        assert!((engine.rate - 0.0).abs() < 1e-10);
+        assert!((engine.slippage - 0.0).abs() < 1e-10);
+        assert!((engine.size - 1.0).abs() < 1e-10);
+        assert!((engine.pricetick - 0.01).abs() < 1e-10);
+        assert!((engine.capital - 1_000_000.0).abs() < 1e-10);
+        assert_eq!(engine.mode, BacktestingMode::Bar);
+        assert!(engine.strategy.is_none());
+        assert!(engine.history_data.is_empty());
+        assert!(engine.limit_orders.is_empty());
+        assert!(engine.active_limit_orders.is_empty());
+        assert!(engine.stop_orders.is_empty());
+        assert!(engine.active_stop_orders.is_empty());
+        assert!(engine.trades.is_empty());
+        assert!((engine.pos - 0.0).abs() < 1e-10);
+        assert!(engine.daily_results.is_empty());
+        assert!(engine.daily_result.is_none());
+    }
+
+    #[test]
+    fn test_engine_default_trait() {
+        let engine = BacktestingEngine::default();
+        assert!((engine.capital - 1_000_000.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_set_parameters() {
+        let mut engine = BacktestingEngine::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        engine.set_parameters(
+            "BTCUSDT.BINANCE".to_string(),
+            Interval::Minute,
+            start,
+            end,
+            0.001,
+            0.5,
+            1.0,
+            0.01,
+            100_000.0,
+            BacktestingMode::Bar,
+        );
+
+        assert_eq!(engine.vt_symbol, "BTCUSDT.BINANCE");
+        assert_eq!(engine.symbol, "BTCUSDT");
+        assert_eq!(engine.exchange, Exchange::Binance);
+        assert_eq!(engine.interval, Interval::Minute);
+        assert!((engine.rate - 0.001).abs() < 1e-10);
+        assert!((engine.slippage - 0.5).abs() < 1e-10);
+        assert!((engine.capital - 100_000.0).abs() < 1e-10);
+        assert_eq!(engine.mode, BacktestingMode::Bar);
+    }
+
+    #[test]
+    fn test_clear_data() {
+        let mut engine = BacktestingEngine::new();
+        engine.limit_order_count = 5;
+        engine.stop_order_count = 3;
+        engine.trade_count = 2;
+        engine.pos = 10.0;
+
+        engine.clear_data();
+
+        assert_eq!(engine.limit_order_count, 0);
+        assert!(engine.limit_orders.is_empty());
+        assert!(engine.active_limit_orders.is_empty());
+        assert_eq!(engine.stop_order_count, 0);
+        assert!(engine.stop_orders.is_empty());
+        assert!(engine.active_stop_orders.is_empty());
+        assert_eq!(engine.trade_count, 0);
+        assert!(engine.trades.is_empty());
+        assert!((engine.pos - 0.0).abs() < 1e-10);
+        assert!(engine.daily_results.is_empty());
+        assert!(engine.daily_result.is_none());
+        assert!(engine.history_data.is_empty());
+    }
+
+    #[test]
+    fn test_send_limit_order() {
+        let mut engine = BacktestingEngine::new();
+        let req = OrderRequest::new(
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Long,
+            OrderType::Limit,
+            1.0,
+        );
+
+        let orderid = engine.send_limit_order(req);
+        assert!(orderid.starts_with("BACKTEST_"));
+        assert_eq!(engine.limit_order_count, 1);
+        assert!(engine.limit_orders.contains_key(&orderid));
+        assert!(engine.active_limit_orders.contains_key(&orderid));
+
+        let order = &engine.limit_orders[&orderid];
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.direction, Some(Direction::Long));
+        assert_eq!(order.status, Status::NotTraded);
+    }
+
+    #[test]
+    fn test_send_stop_order() {
+        let mut engine = BacktestingEngine::new();
+        let req = OrderRequest::new(
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Long,
+            OrderType::Stop,
+            1.0,
+        );
+
+        let stop_orderid = engine.send_stop_order(req);
+        assert!(stop_orderid.starts_with("STOP_"));
+        assert_eq!(engine.stop_order_count, 1);
+        assert!(engine.stop_orders.contains_key(&stop_orderid));
+        assert!(engine.active_stop_orders.contains_key(&stop_orderid));
+
+        let stop_order = &engine.stop_orders[&stop_orderid];
+        assert_eq!(stop_order.direction, Direction::Long);
+        assert_eq!(stop_order.status, StopOrderStatus::Waiting);
+    }
+
+    #[test]
+    fn test_cancel_limit_order() {
+        let mut engine = BacktestingEngine::new();
+        let req = OrderRequest::new(
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Long,
+            OrderType::Limit,
+            1.0,
+        );
+
+        let orderid = engine.send_limit_order(req);
+        assert!(engine.active_limit_orders.contains_key(&orderid));
+
+        engine.cancel_order(&orderid);
+        assert!(!engine.active_limit_orders.contains_key(&orderid));
+        // Order should still be in the full orders map
+        assert!(engine.limit_orders.contains_key(&orderid));
+    }
+
+    #[test]
+    fn test_cancel_stop_order() {
+        let mut engine = BacktestingEngine::new();
+        let req = OrderRequest::new(
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Long,
+            OrderType::Stop,
+            1.0,
+        );
+
+        let stop_orderid = engine.send_stop_order(req);
+        assert!(engine.active_stop_orders.contains_key(&stop_orderid));
+
+        engine.cancel_order(&stop_orderid);
+        assert!(!engine.active_stop_orders.contains_key(&stop_orderid));
+    }
+
+    #[test]
+    fn test_cancel_nonexistent_order() {
+        let mut engine = BacktestingEngine::new();
+        // Should not panic when cancelling non-existent order
+        engine.cancel_order("NONEXISTENT");
+    }
+
+    #[test]
+    fn test_get_position() {
+        let engine = BacktestingEngine::new();
+        assert!((engine.get_position() - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_update_position_long_open() {
+        let mut engine = BacktestingEngine::new();
+        let trade = TradeData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "1".to_string(),
+            tradeid: "1".to_string(),
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            datetime: Some(Utc::now()),
+            extra: None,
+        };
+        engine.update_position(&trade);
+        assert!((engine.get_position() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_update_position_long_close() {
+        let mut engine = BacktestingEngine::new();
+        engine.pos = 1.0;
+        let trade = TradeData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "1".to_string(),
+            tradeid: "1".to_string(),
+            direction: Some(Direction::Long),
+            offset: Offset::Close,
+            price: 51000.0,
+            volume: 1.0,
+            datetime: Some(Utc::now()),
+            extra: None,
+        };
+        engine.update_position(&trade);
+        assert!((engine.get_position() - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_update_position_short_open() {
+        let mut engine = BacktestingEngine::new();
+        let trade = TradeData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "1".to_string(),
+            tradeid: "1".to_string(),
+            direction: Some(Direction::Short),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            datetime: Some(Utc::now()),
+            extra: None,
+        };
+        engine.update_position(&trade);
+        assert!((engine.get_position() - (-1.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_update_position_short_close() {
+        let mut engine = BacktestingEngine::new();
+        engine.pos = -1.0;
+        let trade = TradeData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "1".to_string(),
+            tradeid: "1".to_string(),
+            direction: Some(Direction::Short),
+            offset: Offset::Close,
+            price: 49000.0,
+            volume: 1.0,
+            datetime: Some(Utc::now()),
+            extra: None,
+        };
+        engine.update_position(&trade);
+        assert!((engine.get_position() - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cross_limit_order_buy() {
+        let mut engine = BacktestingEngine::new();
+        engine.slippage = 0.1;
+
+        // Place a buy limit order at 50000
+        let req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 50000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let orderid = engine.send_limit_order(req);
+
+        // Create a bar where low_price <= order price (should cross)
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50100.0,
+            high_price: 50200.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.cross_limit_order(&bar);
+
+        // Order should be removed from active list
+        assert!(!engine.active_limit_orders.contains_key(&orderid));
+        // A trade should have been recorded
+        assert_eq!(engine.trade_count, 1);
+        // Trade price should include slippage (50000 + 0.1)
+        let trade = engine.trades.values().next().unwrap();
+        assert!((trade.price - 50000.1).abs() < 1e-10);
+        // Position should be updated
+        assert!((engine.pos - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cross_limit_order_sell() {
+        let mut engine = BacktestingEngine::new();
+        engine.slippage = 0.1;
+
+        // Place a sell limit order at 50000
+        let req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 50000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let orderid = engine.send_limit_order(req);
+
+        // Create a bar where high_price >= order price (should cross)
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 49900.0,
+            high_price: 50100.0,
+            low_price: 49800.0,
+            close_price: 49950.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.cross_limit_order(&bar);
+
+        assert!(!engine.active_limit_orders.contains_key(&orderid));
+        assert_eq!(engine.trade_count, 1);
+        let trade = engine.trades.values().next().unwrap();
+        assert!((trade.price - 49999.9).abs() < 1e-10); // 50000 - 0.1 slippage
+        assert!((engine.pos - (-1.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cross_limit_order_no_cross() {
+        let mut engine = BacktestingEngine::new();
+
+        // Place a buy limit order at 49000 (below the bar's low)
+        let req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 49000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let orderid = engine.send_limit_order(req);
+
+        // Bar low is 49900, above our buy price of 49000 - should NOT cross
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50100.0,
+            high_price: 50200.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.cross_limit_order(&bar);
+
+        // Order should still be active
+        assert!(engine.active_limit_orders.contains_key(&orderid));
+        assert_eq!(engine.trade_count, 0);
+    }
+
+    #[test]
+    fn test_cross_stop_order_long() {
+        let mut engine = BacktestingEngine::new();
+        engine.slippage = 0.1;
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+
+        // Place a buy stop order at 50500
+        let req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Stop,
+            volume: 1.0,
+            price: 50500.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let stop_orderid = engine.send_stop_order(req);
+
+        // Create a bar where high >= stop price (should trigger)
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50400.0,
+            high_price: 50600.0,
+            low_price: 50300.0,
+            close_price: 50550.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.cross_stop_order(&bar);
+
+        // Stop order should be removed from active list
+        assert!(!engine.active_stop_orders.contains_key(&stop_orderid));
+        // Stop order status should be Triggered
+        assert_eq!(engine.stop_orders[&stop_orderid].status, StopOrderStatus::Triggered);
+        // A trade should have been recorded with slippage
+        assert_eq!(engine.trade_count, 1);
+        let trade = engine.trades.values().next().unwrap();
+        assert!((trade.price - 50500.1).abs() < 1e-10); // 50500 + 0.1 slippage
+    }
+
+    #[test]
+    fn test_cross_stop_order_short() {
+        let mut engine = BacktestingEngine::new();
+        engine.slippage = 0.1;
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+
+        // Place a sell stop order at 49500
+        let req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Stop,
+            volume: 1.0,
+            price: 49500.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let stop_orderid = engine.send_stop_order(req);
+
+        // Create a bar where low <= stop price (should trigger)
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 49600.0,
+            high_price: 49700.0,
+            low_price: 49400.0,
+            close_price: 49450.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.cross_stop_order(&bar);
+
+        assert!(!engine.active_stop_orders.contains_key(&stop_orderid));
+        assert_eq!(engine.stop_orders[&stop_orderid].status, StopOrderStatus::Triggered);
+        let trade = engine.trades.values().next().unwrap();
+        assert!((trade.price - 49499.9).abs() < 1e-10); // 49500 - 0.1 slippage
+    }
+
+    #[test]
+    fn test_new_day_creates_daily_result() {
+        let mut engine = BacktestingEngine::new();
+        let dt = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: dt,
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 50100.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.new_day(&bar);
+        assert!(engine.daily_result.is_some());
+        let result = engine.daily_result.as_ref().unwrap();
+        assert_eq!(result.date, NaiveDate::from_ymd_opt(2024, 1, 15).unwrap());
+        assert!((result.close_price - 50050.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_close_day_saves_result() {
+        let mut engine = BacktestingEngine::new();
+        let dt = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: dt,
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 50100.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.new_day(&bar);
+        engine.close_day(&bar);
+
+        assert!(engine.daily_result.is_none());
+        assert_eq!(engine.daily_results.len(), 1);
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        assert!(engine.daily_results.contains_key(&date));
+    }
+
+    #[test]
+    fn test_calculate_result() {
+        let mut engine = BacktestingEngine::new();
+        engine.capital = 100_000.0;
+
+        // Manually insert a daily result
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let mut daily = DailyResult::new(date, 50000.0);
+        daily.net_pnl = 1000.0;
+        engine.daily_results.insert(date, daily);
+
+        let result = engine.calculate_result();
+        assert!((result.start_capital - 100_000.0).abs() < 1e-10);
+        assert!((result.end_capital - 101_000.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_statistics_empty() {
+        let engine = BacktestingEngine::new();
+        let stats = engine.calculate_statistics(false);
+        // With empty daily_results, should return default stats
+        assert_eq!(stats.total_days, 0);
+    }
+
+    #[test]
+    fn test_set_history_data() {
+        let mut engine = BacktestingEngine::new();
+        let dt = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+
+        let bars = vec![BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: dt,
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 50100.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        }];
+
+        engine.set_history_data(bars);
+        assert_eq!(engine.history_data.len(), 1);
+    }
+
+    #[test]
+    fn test_set_risk_free_and_annual_days() {
+        let mut engine = BacktestingEngine::new();
+        engine.set_risk_free(0.02);
+        assert!((engine.risk_free - 0.02).abs() < 1e-10);
+
+        engine.set_annual_days(365);
+        assert_eq!(engine.annual_days, 365);
+    }
+
+    #[tokio::test]
+    async fn test_run_backtesting_no_data() {
+        let mut engine = BacktestingEngine::new();
+        let result = engine.run_backtesting().await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("历史数据为空"));
+    }
+
+    #[tokio::test]
+    async fn test_run_backtesting_no_strategy() {
+        let mut engine = BacktestingEngine::new();
+        let dt = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
+        engine.set_history_data(vec![BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: dt,
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 50100.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        }]);
+
+        let result = engine.run_backtesting().await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("未设置策略"));
+    }
+
+    #[tokio::test]
+    async fn test_load_data_start_after_end() {
+        let mut engine = BacktestingEngine::new();
+        engine.start = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        engine.end = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+
+        let result = engine.load_data().await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("起始日期必须小于结束日期"));
+    }
+}

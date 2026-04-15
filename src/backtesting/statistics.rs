@@ -295,4 +295,233 @@ mod tests {
         let sharpe = calculate_sharpe_ratio(&returns, 0.03, 252);
         assert!(sharpe.is_finite());
     }
+
+    #[test]
+    fn test_calculate_statistics_empty() {
+        let daily_results = HashMap::new();
+        let stats = calculate_statistics(&daily_results, 100_000.0, 0.0, 252);
+        assert_eq!(stats.total_days, 0);
+        assert_eq!(stats.profit_days, 0);
+        assert_eq!(stats.loss_days, 0);
+        assert!((stats.end_balance - 0.0).abs() < 1e-10);
+        assert!((stats.sharpe_ratio - 0.0).abs() < 1e-10);
+        assert!((stats.return_mean - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_statistics_single_day() {
+        let mut daily_results = HashMap::new();
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let mut dr = DailyResult::new(date, 50000.0);
+        dr.net_pnl = 1000.0;
+        dr.commission = 10.0;
+        dr.slippage = 5.0;
+        dr.turnover = 50000.0;
+        dr.trade_count = 2;
+        daily_results.insert(date, dr);
+
+        let stats = calculate_statistics(&daily_results, 100_000.0, 0.0, 252);
+
+        assert_eq!(stats.total_days, 1);
+        assert_eq!(stats.profit_days, 1);
+        assert_eq!(stats.loss_days, 0);
+        assert!((stats.total_net_pnl - 1000.0).abs() < 1e-10);
+        assert!((stats.total_commission - 10.0).abs() < 1e-10);
+        assert!((stats.total_slippage - 5.0).abs() < 1e-10);
+        assert!((stats.end_balance - 101_000.0).abs() < 1e-10);
+        assert_eq!(stats.start_date, "2024-01-15");
+        assert_eq!(stats.end_date, "2024-01-15");
+    }
+
+    #[test]
+    fn test_calculate_statistics_multiple_days() {
+        let mut daily_results = HashMap::new();
+
+        let d1 = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let mut dr1 = DailyResult::new(d1, 50000.0);
+        dr1.net_pnl = 1000.0;
+        dr1.commission = 10.0;
+        dr1.slippage = 2.0;
+        dr1.turnover = 50000.0;
+        dr1.trade_count = 2;
+        daily_results.insert(d1, dr1);
+
+        let d2 = NaiveDate::from_ymd_opt(2024, 1, 16).unwrap();
+        let mut dr2 = DailyResult::new(d2, 51000.0);
+        dr2.net_pnl = -500.0;
+        dr2.commission = 8.0;
+        dr2.slippage = 1.0;
+        dr2.turnover = 40000.0;
+        dr2.trade_count = 1;
+        daily_results.insert(d2, dr2);
+
+        let d3 = NaiveDate::from_ymd_opt(2024, 1, 17).unwrap();
+        let mut dr3 = DailyResult::new(d3, 50500.0);
+        dr3.net_pnl = 2000.0;
+        dr3.commission = 15.0;
+        dr3.slippage = 3.0;
+        dr3.turnover = 80000.0;
+        dr3.trade_count = 3;
+        daily_results.insert(d3, dr3);
+
+        let stats = calculate_statistics(&daily_results, 100_000.0, 0.0, 252);
+
+        assert_eq!(stats.total_days, 3);
+        assert_eq!(stats.profit_days, 2);
+        assert_eq!(stats.loss_days, 1);
+        assert!((stats.total_net_pnl - 2500.0).abs() < 1e-10);
+        assert!((stats.total_commission - 33.0).abs() < 1e-10);
+        assert!((stats.total_slippage - 6.0).abs() < 1e-10);
+        assert!((stats.total_turnover - 170_000.0).abs() < 1e-10);
+        assert_eq!(stats.total_trade_count, 6);
+        assert!((stats.end_balance - 102_500.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_statistics_max_drawdown() {
+        let mut daily_results = HashMap::new();
+
+        let d1 = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let mut dr1 = DailyResult::new(d1, 50000.0);
+        dr1.net_pnl = 5000.0;
+        daily_results.insert(d1, dr1);
+
+        let d2 = NaiveDate::from_ymd_opt(2024, 1, 16).unwrap();
+        let mut dr2 = DailyResult::new(d2, 55000.0);
+        dr2.net_pnl = -8000.0;
+        daily_results.insert(d2, dr2);
+
+        let d3 = NaiveDate::from_ymd_opt(2024, 1, 17).unwrap();
+        let mut dr3 = DailyResult::new(d3, 47000.0);
+        dr3.net_pnl = 3000.0;
+        daily_results.insert(d3, dr3);
+
+        let stats = calculate_statistics(&daily_results, 100_000.0, 0.0, 252);
+
+        // Balance: 100k -> 105k -> 97k -> 100k. Max DD from 105k to 97k = 8000
+        assert!((stats.max_drawdown - 8000.0).abs() < 1e-10);
+        assert!((stats.max_drawdown_percent - (8000.0 / 105_000.0 * 100.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_calculate_statistics_annual_return() {
+        let mut daily_results = HashMap::new();
+        for i in 0..5 {
+            let date = NaiveDate::from_ymd_opt(2024, 1, 15 + i as u32).unwrap();
+            let mut dr = DailyResult::new(date, 50000.0);
+            dr.net_pnl = 100.0;
+            daily_results.insert(date, dr);
+        }
+
+        let stats = calculate_statistics(&daily_results, 100_000.0, 0.0, 252);
+
+        // annual_return = daily_return_mean * 252
+        // daily_return for each day is ~100/(100000+100*prev_day) ≈ 0.001
+        assert!(stats.return_mean.is_finite());
+        assert!(stats.return_mean > 0.0);
+    }
+
+    #[test]
+    fn test_calculate_statistics_sharpe_ratio() {
+        let mut daily_results = HashMap::new();
+        let returns_data = [0.01, -0.005, 0.02, 0.015, -0.01, 0.005, 0.012];
+        let mut balance = 100_000.0_f64;
+
+        for (i, &ret) in returns_data.iter().enumerate() {
+            let date = NaiveDate::from_ymd_opt(2024, 1, 15 + i as u32).unwrap();
+            let pnl = balance * ret;
+            let mut dr = DailyResult::new(date, 50000.0);
+            dr.net_pnl = pnl;
+            daily_results.insert(date, dr);
+            balance += pnl;
+        }
+
+        let stats = calculate_statistics(&daily_results, 100_000.0, 0.03, 252);
+        assert!(stats.sharpe_ratio.is_finite());
+    }
+
+    #[test]
+    fn test_calculate_max_drawdown_empty() {
+        let (dd, dd_pct) = calculate_max_drawdown(&[]);
+        assert!((dd - 0.0).abs() < 1e-10);
+        assert!((dd_pct - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_max_drawdown_single() {
+        let (dd, dd_pct) = calculate_max_drawdown(&[100.0]);
+        assert!((dd - 0.0).abs() < 1e-10);
+        assert!((dd_pct - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_max_drawdown_monotonic_increase() {
+        let balances = vec![100.0, 110.0, 120.0, 130.0];
+        let (dd, dd_pct) = calculate_max_drawdown(&balances);
+        assert!((dd - 0.0).abs() < 1e-10);
+        assert!((dd_pct - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_returns_empty() {
+        let returns = calculate_returns(&[]);
+        assert!(returns.is_empty());
+    }
+
+    #[test]
+    fn test_calculate_returns_zero_balance() {
+        let balances = vec![0.0, 100.0];
+        let returns = calculate_returns(&balances);
+        assert_eq!(returns.len(), 1);
+        assert!((returns[0] - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_sharpe_ratio_empty() {
+        let sharpe = calculate_sharpe_ratio(&[], 0.0, 252);
+        assert!((sharpe - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_sharpe_ratio_single() {
+        let sharpe = calculate_sharpe_ratio(&[0.01], 0.0, 252);
+        assert!((sharpe - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_sharpe_ratio_zero_std() {
+        let sharpe = calculate_sharpe_ratio(&[0.01, 0.01, 0.01], 0.0, 252);
+        assert!((sharpe - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_statistics_daily_averages() {
+        let mut daily_results = HashMap::new();
+
+        let d1 = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let mut dr1 = DailyResult::new(d1, 50000.0);
+        dr1.net_pnl = 100.0;
+        dr1.commission = 5.0;
+        dr1.slippage = 1.0;
+        dr1.turnover = 10000.0;
+        dr1.trade_count = 2;
+        daily_results.insert(d1, dr1);
+
+        let d2 = NaiveDate::from_ymd_opt(2024, 1, 16).unwrap();
+        let mut dr2 = DailyResult::new(d2, 50100.0);
+        dr2.net_pnl = 200.0;
+        dr2.commission = 10.0;
+        dr2.slippage = 2.0;
+        dr2.turnover = 20000.0;
+        dr2.trade_count = 4;
+        daily_results.insert(d2, dr2);
+
+        let stats = calculate_statistics(&daily_results, 100_000.0, 0.0, 252);
+
+        assert!((stats.daily_net_pnl - 150.0).abs() < 1e-10);
+        assert!((stats.daily_commission - 7.5).abs() < 1e-10);
+        assert!((stats.daily_slippage - 1.5).abs() < 1e-10);
+        assert!((stats.daily_turnover - 15000.0).abs() < 1e-10);
+        assert!((stats.daily_trade_count - 3.0).abs() < 1e-10);
+    }
 }

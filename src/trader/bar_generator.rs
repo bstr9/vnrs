@@ -370,4 +370,207 @@ mod tests {
         assert_eq!(bar.high_price, 50100.0);
         assert_eq!(bar.low_price, 50000.0);
     }
+
+    #[test]
+    fn test_bar_generator_daily() {
+        let mut gen = BarGenerator::new(Interval::Daily);
+
+        let day1 = Utc::now()
+            .with_hour(10)
+            .unwrap_or(Utc::now())
+            .with_minute(0)
+            .unwrap_or(Utc::now())
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        let tick1 = create_test_tick("ETHUSDT", 3000.0, day1);
+        assert!(gen.update_tick(&tick1).is_none());
+
+        let tick2 = create_test_tick("ETHUSDT", 3050.0, day1 + Duration::hours(6));
+        assert!(gen.update_tick(&tick2).is_none());
+
+        let day2 = day1 + Duration::days(1);
+        let tick3 = create_test_tick("ETHUSDT", 3100.0, day2);
+        let completed = gen.update_tick(&tick3);
+        assert!(completed.is_some());
+
+        let bar = completed.unwrap();
+        assert_eq!(bar.open_price, 3000.0);
+        assert_eq!(bar.close_price, 3050.0);
+        assert_eq!(bar.high_price, 3050.0);
+        assert_eq!(bar.low_price, 3000.0);
+    }
+
+    #[test]
+    fn test_bar_generator_out_of_order_tick() {
+        let mut gen = BarGenerator::new(Interval::Minute);
+
+        let base_time = Utc::now()
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        let tick1 = create_test_tick("BTCUSDT", 50000.0, base_time);
+        assert!(gen.update_tick(&tick1).is_none());
+
+        let later_tick = create_test_tick("BTCUSDT", 50200.0, base_time + Duration::minutes(1));
+        assert!(gen.update_tick(&later_tick).is_some());
+
+        let out_of_order_tick =
+            create_test_tick("BTCUSDT", 50100.0, base_time + Duration::seconds(30));
+        let result = gen.update_tick(&out_of_order_tick);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_bar_generator_flush_all() {
+        let mut gen = BarGenerator::new(Interval::Minute);
+
+        let base_time = Utc::now()
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        let tick1 = create_test_tick("BTCUSDT", 50000.0, base_time);
+        gen.update_tick(&tick1);
+
+        let bars = gen.flush_all();
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0].open_price, 50000.0);
+        assert_eq!(bars[0].close_price, 50000.0);
+    }
+
+    #[test]
+    fn test_bar_generator_get_current_bar() {
+        let mut gen = BarGenerator::new(Interval::Minute);
+
+        let base_time = Utc::now()
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        assert!(gen.get_current_bar("BTCUSDT.BINANCE").is_none());
+
+        let tick1 = create_test_tick("BTCUSDT", 50000.0, base_time);
+        gen.update_tick(&tick1);
+
+        let current = gen.get_current_bar("BTCUSDT.BINANCE");
+        assert!(current.is_some());
+        let bar = current.unwrap();
+        assert_eq!(bar.open_price, 50000.0);
+        assert_eq!(bar.close_price, 50000.0);
+    }
+
+    #[test]
+    fn test_bar_generator_multiple_symbols() {
+        let mut gen = BarGenerator::new(Interval::Minute);
+
+        let base_time = Utc::now()
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        let tick_btc = create_test_tick("BTCUSDT", 50000.0, base_time);
+        let tick_eth = create_test_tick("ETHUSDT", 3000.0, base_time);
+
+        assert!(gen.update_tick(&tick_btc).is_none());
+        assert!(gen.update_tick(&tick_eth).is_none());
+
+        assert!(gen.get_current_bar("BTCUSDT.BINANCE").is_some());
+        assert!(gen.get_current_bar("ETHUSDT.BINANCE").is_some());
+    }
+
+    #[test]
+    fn test_bar_generator_set_interval() {
+        let mut gen = BarGenerator::new(Interval::Minute);
+
+        let base_time = Utc::now()
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        let tick1 = create_test_tick("BTCUSDT", 50000.0, base_time);
+        gen.update_tick(&tick1);
+
+        let bars = gen.set_interval(Interval::Hour);
+        assert_eq!(bars.len(), 1);
+    }
+
+    #[test]
+    fn test_bar_generator_callback() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = Arc::clone(&counter);
+
+        let mut gen = BarGenerator::new(Interval::Minute);
+        gen.set_callback(move |_bar| {
+            counter_clone.fetch_add(1, Ordering::SeqCst);
+        });
+
+        let base_time = Utc::now()
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        let tick1 = create_test_tick("BTCUSDT", 50000.0, base_time);
+        gen.update_tick(&tick1);
+
+        let tick2 = create_test_tick("BTCUSDT", 50100.0, base_time + Duration::minutes(1));
+        gen.update_tick(&tick2);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_bar_generator_high_low_tracking() {
+        let mut gen = BarGenerator::new(Interval::Minute);
+
+        let base_time = Utc::now()
+            .with_second(0)
+            .unwrap_or(Utc::now())
+            .with_nanosecond(0)
+            .unwrap_or(Utc::now());
+
+        let tick1 = create_test_tick("BTCUSDT", 50000.0, base_time);
+        gen.update_tick(&tick1);
+
+        let tick2 = create_test_tick("BTCUSDT", 50500.0, base_time + Duration::seconds(10));
+        gen.update_tick(&tick2);
+
+        let tick3 = create_test_tick("BTCUSDT", 49800.0, base_time + Duration::seconds(20));
+        gen.update_tick(&tick3);
+
+        let tick4 = create_test_tick("BTCUSDT", 50200.0, base_time + Duration::minutes(1));
+        let completed = gen.update_tick(&tick4);
+        assert!(completed.is_some());
+
+        let bar = completed.unwrap();
+        assert_eq!(bar.high_price, 50500.0);
+        assert_eq!(bar.low_price, 49800.0);
+        assert_eq!(bar.open_price, 50000.0);
+        assert_eq!(bar.close_price, 50200.0);
+    }
+
+    #[test]
+    fn test_bar_generator_flush_all_empty() {
+        let gen = BarGenerator::new(Interval::Minute);
+        let bars = gen.flush_all();
+        assert!(bars.is_empty());
+    }
+
+    #[test]
+    fn test_bar_generator_no_current_bar_for_unknown_symbol() {
+        let gen = BarGenerator::new(Interval::Minute);
+        assert!(gen.get_current_bar("UNKNOWN.BINANCE").is_none());
+    }
 }

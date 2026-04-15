@@ -533,3 +533,184 @@ impl Clone for StrategyEngine {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::trader::MainEngine;
+    use crate::event::EventEngine;
+    use crate::{StrategyType, BarData};
+
+    fn create_strategy_engine() -> StrategyEngine {
+        let main_engine = Arc::new(MainEngine::new());
+        let event_engine = Arc::new(EventEngine::new(1));
+        StrategyEngine::new(main_engine, event_engine)
+    }
+
+    #[tokio::test]
+    async fn test_strategy_engine_new() {
+        let engine = create_strategy_engine();
+        let names = engine.get_all_strategy_names().await;
+        assert!(names.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_all_strategy_names_empty() {
+        let engine = create_strategy_engine();
+        let names = engine.get_all_strategy_names().await;
+        assert!(names.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_strategy_info_not_found() {
+        let engine = create_strategy_engine();
+        let info = engine.get_strategy_info("nonexistent").await;
+        assert!(info.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_init_strategy_not_found() {
+        let engine = create_strategy_engine();
+        let result = engine.init_strategy("nonexistent").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_start_strategy_not_found() {
+        let engine = create_strategy_engine();
+        let result = engine.start_strategy("nonexistent").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_stop_strategy_not_found() {
+        let engine = create_strategy_engine();
+        let result = engine.stop_strategy("nonexistent").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_add_strategy_and_get_names() {
+        let engine = create_strategy_engine();
+        let strategy = MockStrategy::new("TestStrategy".to_string());
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+        let names = engine.get_all_strategy_names().await;
+        assert_eq!(names.len(), 1);
+        assert!(names.contains(&"TestStrategy".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_add_duplicate_strategy() {
+        let engine = create_strategy_engine();
+
+        let strategy1 = MockStrategy::new("TestStrategy".to_string());
+        let setting1 = StrategySetting::new();
+        engine.add_strategy(Box::new(strategy1), setting1).await.unwrap();
+
+        let strategy2 = MockStrategy::new("TestStrategy".to_string());
+        let setting2 = StrategySetting::new();
+        let result = engine.add_strategy(Box::new(strategy2), setting2).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn test_get_strategy_info_found() {
+        let engine = create_strategy_engine();
+        let strategy = MockStrategy::new("TestStrategy".to_string());
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+        let info = engine.get_strategy_info("TestStrategy").await;
+        assert!(info.is_some());
+        let info = info.unwrap();
+        assert_eq!(info.get("name").unwrap(), "TestStrategy");
+    }
+
+    #[tokio::test]
+    async fn test_start_strategy_not_inited() {
+        let engine = create_strategy_engine();
+        let strategy = MockStrategy::new("TestStrategy".to_string());
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+        let result = engine.start_strategy("TestStrategy").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[tokio::test]
+    async fn test_stop_strategy_not_trading() {
+        let engine = create_strategy_engine();
+        let strategy = MockStrategy::new("TestStrategy".to_string());
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+        let result = engine.stop_strategy("TestStrategy").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not trading"));
+    }
+
+    #[test]
+    fn test_strategy_engine_clone() {
+        let engine = create_strategy_engine();
+        let _cloned = engine.clone();
+    }
+
+    struct MockStrategy {
+        name: String,
+        vt_symbols: Vec<String>,
+        state: StrategyState,
+        positions: std::collections::HashMap<String, f64>,
+    }
+
+    impl MockStrategy {
+        fn new(name: String) -> Self {
+            Self {
+                name,
+                vt_symbols: vec!["BTCUSDT.BINANCE".to_string()],
+                state: StrategyState::NotInited,
+                positions: std::collections::HashMap::new(),
+            }
+        }
+    }
+
+    impl StrategyTemplate for MockStrategy {
+        fn strategy_name(&self) -> &str { &self.name }
+        fn vt_symbols(&self) -> &[String] { &self.vt_symbols }
+        fn strategy_type(&self) -> StrategyType { StrategyType::Spot }
+        fn state(&self) -> StrategyState { self.state }
+        fn parameters(&self) -> std::collections::HashMap<String, String> {
+            std::collections::HashMap::new()
+        }
+        fn variables(&self) -> std::collections::HashMap<String, String> {
+            std::collections::HashMap::new()
+        }
+        fn on_init(&mut self, _context: &StrategyContext) {
+            self.state = StrategyState::Inited;
+        }
+        fn on_start(&mut self) {
+            self.state = StrategyState::Trading;
+        }
+        fn on_stop(&mut self) {
+            self.state = StrategyState::Stopped;
+        }
+        fn on_tick(&mut self, _tick: &TickData, _context: &StrategyContext) {}
+        fn on_bar(&mut self, _bar: &BarData, _context: &StrategyContext) {}
+        fn on_order(&mut self, _order: &OrderData) {}
+        fn on_trade(&mut self, _trade: &TradeData) {}
+        fn on_stop_order(&mut self, _stop_orderid: &str) {}
+        fn update_position(&mut self, vt_symbol: &str, position: f64) {
+            self.positions.insert(vt_symbol.to_string(), position);
+        }
+        fn get_position(&self, vt_symbol: &str) -> f64 {
+            *self.positions.get(vt_symbol).unwrap_or(&0.0)
+        }
+    }
+}

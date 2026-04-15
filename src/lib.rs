@@ -25,6 +25,8 @@
 //! }
 //! ```
 
+#![deny(clippy::unwrap_used)]
+
 pub mod event;
 pub mod trader;
 pub mod rpc;

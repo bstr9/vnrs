@@ -242,3 +242,208 @@ impl Drop for EventEngine {
         self.stop();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_event_new() {
+        let event = Event::new("test_event".to_string(), None);
+        assert_eq!(event.event_type, "test_event");
+        assert!(event.data.is_none());
+    }
+
+    #[test]
+    fn test_event_engine_new() {
+        let engine = EventEngine::new(1);
+        let active = engine.active.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!*active);
+    }
+
+    #[test]
+    fn test_event_engine_start_stop() {
+        let mut engine = EventEngine::new(1);
+        engine.start();
+        let active = engine.active.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(*active);
+        drop(active);
+
+        engine.stop();
+        let active = engine.active.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!*active);
+    }
+
+    #[test]
+    fn test_register_and_emit_event() {
+        let mut engine = EventEngine::new(1);
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let counter_clone = Arc::clone(&counter);
+        engine.register(
+            "test_event",
+            Arc::new(move |_event| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        engine.start();
+
+        let event = Event::new("test_event".to_string(), None);
+        engine.put(event);
+
+        std::thread::sleep(Duration::from_millis(200));
+        engine.stop();
+
+        let count = counter.load(Ordering::SeqCst);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_multiple_handlers_same_event() {
+        let mut engine = EventEngine::new(1);
+        let counter1 = Arc::new(AtomicUsize::new(0));
+        let counter2 = Arc::new(AtomicUsize::new(0));
+
+        let c1 = Arc::clone(&counter1);
+        engine.register(
+            "test_event",
+            Arc::new(move |_event| {
+                c1.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        let c2 = Arc::clone(&counter2);
+        engine.register(
+            "test_event",
+            Arc::new(move |_event| {
+                c2.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        engine.start();
+
+        let event = Event::new("test_event".to_string(), None);
+        engine.put(event);
+
+        std::thread::sleep(Duration::from_millis(200));
+        engine.stop();
+
+        assert_eq!(counter1.load(Ordering::SeqCst), 1);
+        assert_eq!(counter2.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_general_handler_receives_all_events() {
+        let mut engine = EventEngine::new(1);
+        let general_counter = Arc::new(AtomicUsize::new(0));
+
+        let gc = Arc::clone(&general_counter);
+        engine.register_general(Arc::new(move |_event| {
+            gc.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        engine.start();
+
+        engine.put(Event::new("event_a".to_string(), None));
+        engine.put(Event::new("event_b".to_string(), None));
+
+        std::thread::sleep(Duration::from_millis(200));
+        engine.stop();
+
+        assert!(general_counter.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[test]
+    fn test_unregister_handler() {
+        let mut engine = EventEngine::new(1);
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c = Arc::clone(&counter);
+        let handler_id = engine.register(
+            "test_event",
+            Arc::new(move |_event| {
+                c.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        engine.unregister("test_event", handler_id);
+
+        engine.start();
+
+        engine.put(Event::new("test_event".to_string(), None));
+
+        std::thread::sleep(Duration::from_millis(200));
+        engine.stop();
+
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_unregister_general_handler() {
+        let mut engine = EventEngine::new(1);
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c = Arc::clone(&counter);
+        let handler_id = engine.register_general(Arc::new(move |_event| {
+            c.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        engine.unregister_general(handler_id);
+
+        engine.start();
+
+        engine.put(Event::new("test_event".to_string(), None));
+
+        std::thread::sleep(Duration::from_millis(200));
+        engine.stop();
+
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_timer_event() {
+        let mut engine = EventEngine::new(1);
+        let timer_counter = Arc::new(AtomicUsize::new(0));
+
+        let tc = Arc::clone(&timer_counter);
+        engine.register(
+            EVENT_TIMER,
+            Arc::new(move |_event| {
+                tc.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        engine.start();
+
+        std::thread::sleep(Duration::from_millis(2500));
+        engine.stop();
+
+        assert!(timer_counter.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[test]
+    fn test_handler_id_uniqueness() {
+        let engine = EventEngine::new(1);
+        let id1 = engine.generate_handler_id();
+        let id2 = engine.generate_handler_id();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_put_without_start() {
+        let engine = EventEngine::new(1);
+        let event = Event::new("test_event".to_string(), None);
+        engine.put(event);
+    }
+
+    #[test]
+    fn test_sender_clone() {
+        let engine = EventEngine::new(1);
+        let sender = engine.sender();
+        let event = Event::new("test_event".to_string(), None);
+        let _ = sender.send(event);
+    }
+}

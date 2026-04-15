@@ -698,7 +698,10 @@ impl MainWindow {
                     let (_, event) = chart.show(ui, Some(vt_symbol));
                     if let Some(evt) = event {
                         if evt.interval_changed {
-                            interval_changes.push((vt_symbol.clone(), evt.new_interval));
+                            interval_changes.push((
+                                evt.symbol.unwrap_or_else(|| vt_symbol.clone()),
+                                evt.new_interval,
+                            ));
                         }
                         if evt.need_more_history {
                             if let Some(earliest) = chart.get_earliest_bar_time() {
@@ -721,9 +724,11 @@ impl MainWindow {
         }
 
         for (vt_symbol, interval) in interval_changes {
-            // Clear old bar data before loading new interval
             if let Some(chart) = self.charts.get_mut(&vt_symbol) {
                 chart.clear_data();
+            }
+            if let Some(aggregator) = self.tick_aggregators.get_mut(&vt_symbol) {
+                aggregator.set_interval(interval);
             }
 
             if let Some(ref engine) = self.main_engine {
@@ -1103,6 +1108,11 @@ impl TickBarAggregator {
         }
     }
     
+    fn set_interval(&mut self, interval: crate::trader::Interval) {
+        self.interval = interval;
+        self.current_bar_start = None;
+    }
+
     fn update_tick(&mut self, tick: &crate::trader::object::TickData) -> Option<BarData> {
         let bar_start = self.get_bar_start_time(&tick.datetime);
         

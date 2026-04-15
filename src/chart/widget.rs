@@ -26,6 +26,8 @@ pub struct ChartEvent {
     pub new_interval: Interval,
     /// User scrolled/dragged to the left edge and needs more historical data
     pub need_more_history: bool,
+    /// The symbol (vt_symbol) for which data should be requested
+    pub symbol: Option<String>,
 }
 
 /// Main chart widget
@@ -415,10 +417,12 @@ impl ChartWidget {
                             {
                                 self.interval = interval;
                                 self.show_interval_selector = false;
+                                self.clear_all();
                                 event = Some(ChartEvent {
                                     interval_changed: true,
                                     new_interval: interval,
                                     need_more_history: false,
+                                    symbol: symbol.map(|s| s.to_string()),
                                 });
                             }
                         }
@@ -1030,6 +1034,7 @@ impl ChartWidget {
                 interval_changed: false,
                 new_interval: self.interval,
                 need_more_history: true,
+                symbol: None,
             });
         }
 

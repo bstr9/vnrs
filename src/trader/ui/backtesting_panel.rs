@@ -553,7 +553,7 @@ impl BacktestingPanel {
             let engine_guard = self.engine.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(engine) = engine_guard.as_ref() {
                 let logs = engine.get_logs();
-                if !logs.is_empty() && logs.last().unwrap().contains("回测运行结束") {
+                if !logs.is_empty() && logs.last().expect("logs is non-empty").contains("回测运行结束") {
                     // It finished!
                     self.is_running = false;
                     self.status_message = "回测完成".to_string();
