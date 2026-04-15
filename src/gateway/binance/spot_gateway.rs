@@ -670,13 +670,20 @@ impl BaseGateway for BinanceSpotGateway {
     async fn subscribe(&self, req: SubscribeRequest) -> Result<(), String> {
         let symbol = req.symbol.to_lowercase();
         
-        // 允许订阅未预加载的合约（动态订阅）
-        // 如果合约不在预加载列表中，创建一个默认的 tick 数据
+        // 检查是否已订阅
         if self.ticks.read().await.contains_key(&symbol) {
             return Ok(()); // 已订阅
         }
 
-        // 创建 tick 数据（即使合约未预加载）
+        // 检查合约是否在已知列表中
+        let contracts = self.contracts.read().await;
+        if !contracts.contains_key(&symbol) {
+            // 合约不在预加载列表中，发出警告但允许继续订阅（动态订阅）
+            self.write_log(&format!("⚠️ 警告: 合约 {} 不在已知合约列表中，可能是无效的交易对", symbol.to_uppercase())).await;
+        }
+        drop(contracts);
+
+        // 创建 tick 数据
         let tick = TickData::new(self.gateway_name.clone(), symbol.clone(), Exchange::Binance, Utc::now());
         self.ticks.write().await.insert(symbol.clone(), tick);
 
