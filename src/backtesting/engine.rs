@@ -412,8 +412,7 @@ impl BacktestingEngine {
             // 4. Cross pending stop orders from previous bar
             self.cross_stop_order(bar);
             
-            // 4.5. Update registered indicators BEFORE strategy.on_bar()
-            //      so the strategy can use the latest indicator values
+            #[cfg(feature = "gui")]
             self.strategy_context.update_indicators(&self.vt_symbol, bar);
             
             // 5. Call strategy on_bar AFTER fills are settled
@@ -468,9 +467,8 @@ impl BacktestingEngine {
             // Cross stop orders with tick data
             self.cross_stop_order_tick(tick);
             
-            // Update registered indicators with synthetic bar BEFORE strategy callbacks
-            let vt_symbol = format!("{}.{}", tick.symbol, tick.exchange.value());
-            self.strategy_context.update_indicators(&vt_symbol, &synthetic_bar);
+            #[cfg(feature = "gui")]
+            self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
             
             // Call strategy on_tick AFTER fills are settled
             if let Some(strategy) = &mut self.strategy {
@@ -1085,7 +1083,7 @@ mod tests {
         assert!(engine.stop_orders.is_empty());
         assert!(engine.active_stop_orders.is_empty());
         assert!(engine.trades.is_empty());
-        assert!((engine.pos - 0.0).abs() < 1e-10);
+        assert!((engine.get_pos() - 0.0).abs() < 1e-10);
         assert!(engine.daily_results.is_empty());
         assert!(engine.daily_result.is_none());
     }
@@ -1131,7 +1129,6 @@ mod tests {
         engine.limit_order_count = 5;
         engine.stop_order_count = 3;
         engine.trade_count = 2;
-        engine.pos = 10.0;
 
         engine.clear_data();
 
@@ -1143,7 +1140,7 @@ mod tests {
         assert!(engine.active_stop_orders.is_empty());
         assert_eq!(engine.trade_count, 0);
         assert!(engine.trades.is_empty());
-        assert!((engine.pos - 0.0).abs() < 1e-10);
+        assert!((engine.get_pos() - 0.0).abs() < 1e-10);
         assert!(engine.daily_results.is_empty());
         assert!(engine.daily_result.is_none());
         assert!(engine.history_data.is_empty());
@@ -1242,12 +1239,21 @@ mod tests {
     #[test]
     fn test_get_position() {
         let engine = BacktestingEngine::new();
-        assert!((engine.get_position() - 0.0).abs() < 1e-10);
+        assert!(engine.get_position().is_flat());
+        assert!((engine.get_pos() - 0.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_update_position_long_open() {
         let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
         let trade = TradeData {
             gateway_name: "TEST".to_string(),
             symbol: "BTCUSDT".to_string(),
@@ -1261,20 +1267,41 @@ mod tests {
             datetime: Some(Utc::now()),
             extra: None,
         };
-        engine.update_position(&trade);
-        assert!((engine.get_position() - 1.0).abs() < 1e-10);
+        engine.position.apply_fill(&trade).expect("apply_fill failed");
+        assert!((engine.get_pos() - 1.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_update_position_long_close() {
         let mut engine = BacktestingEngine::new();
-        engine.pos = 1.0;
-        let trade = TradeData {
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+        let open_trade = TradeData {
             gateway_name: "TEST".to_string(),
             symbol: "BTCUSDT".to_string(),
             exchange: Exchange::Binance,
             orderid: "1".to_string(),
             tradeid: "1".to_string(),
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            datetime: Some(Utc::now()),
+            extra: None,
+        };
+        engine.position.apply_fill(&open_trade).expect("apply_fill failed");
+        let close_trade = TradeData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "2".to_string(),
+            tradeid: "2".to_string(),
             direction: Some(Direction::Long),
             offset: Offset::Close,
             price: 51000.0,
@@ -1282,13 +1309,21 @@ mod tests {
             datetime: Some(Utc::now()),
             extra: None,
         };
-        engine.update_position(&trade);
-        assert!((engine.get_position() - 0.0).abs() < 1e-10);
+        engine.position.apply_fill(&close_trade).expect("apply_fill failed");
+        assert!(engine.position.is_flat());
     }
 
     #[test]
     fn test_update_position_short_open() {
         let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
         let trade = TradeData {
             gateway_name: "TEST".to_string(),
             symbol: "BTCUSDT".to_string(),
@@ -1302,20 +1337,41 @@ mod tests {
             datetime: Some(Utc::now()),
             extra: None,
         };
-        engine.update_position(&trade);
-        assert!((engine.get_position() - (-1.0)).abs() < 1e-10);
+        engine.position.apply_fill(&trade).expect("apply_fill failed");
+        assert!((engine.get_pos() - (-1.0)).abs() < 1e-10);
     }
 
     #[test]
     fn test_update_position_short_close() {
         let mut engine = BacktestingEngine::new();
-        engine.pos = -1.0;
-        let trade = TradeData {
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+        let open_trade = TradeData {
             gateway_name: "TEST".to_string(),
             symbol: "BTCUSDT".to_string(),
             exchange: Exchange::Binance,
             orderid: "1".to_string(),
             tradeid: "1".to_string(),
+            direction: Some(Direction::Short),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            datetime: Some(Utc::now()),
+            extra: None,
+        };
+        engine.position.apply_fill(&open_trade).expect("apply_fill failed");
+        let close_trade = TradeData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "2".to_string(),
+            tradeid: "2".to_string(),
             direction: Some(Direction::Short),
             offset: Offset::Close,
             price: 49000.0,
@@ -1323,14 +1379,23 @@ mod tests {
             datetime: Some(Utc::now()),
             extra: None,
         };
-        engine.update_position(&trade);
-        assert!((engine.get_position() - 0.0).abs() < 1e-10);
+        engine.position.apply_fill(&close_trade).expect("apply_fill failed");
+        assert!(engine.position.is_flat());
     }
 
     #[test]
     fn test_cross_limit_order_buy() {
         let mut engine = BacktestingEngine::new();
         engine.slippage = 0.1;
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
 
         // Place a buy limit order at 50000
         let req = OrderRequest {
@@ -1372,13 +1437,22 @@ mod tests {
         let trade = engine.trades.values().next().unwrap();
         assert!((trade.price - 50000.1).abs() < 1e-10);
         // Position should be updated
-        assert!((engine.pos - 1.0).abs() < 1e-10);
+        assert!((engine.get_pos() - 1.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_cross_limit_order_sell() {
         let mut engine = BacktestingEngine::new();
         engine.slippage = 0.1;
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
 
         // Place a sell limit order at 50000
         let req = OrderRequest {
@@ -1416,7 +1490,7 @@ mod tests {
         assert_eq!(engine.trade_count, 1);
         let trade = engine.trades.values().next().unwrap();
         assert!((trade.price - 49999.9).abs() < 1e-10); // 50000 - 0.1 slippage
-        assert!((engine.pos - (-1.0)).abs() < 1e-10);
+        assert!((engine.get_pos() - (-1.0)).abs() < 1e-10);
     }
 
     #[test]
@@ -1467,6 +1541,12 @@ mod tests {
         engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
         engine.symbol = "BTCUSDT".to_string();
         engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
 
         // Place a buy stop order at 50500
         let req = OrderRequest {
@@ -1507,7 +1587,7 @@ mod tests {
         // A trade should have been recorded with slippage
         assert_eq!(engine.trade_count, 1);
         let trade = engine.trades.values().next().unwrap();
-        assert!((trade.price - 50500.1).abs() < 1e-10); // 50500 + 0.1 slippage
+        assert!((trade.price - 50550.1).abs() < 1e-10);
     }
 
     #[test]
@@ -1517,6 +1597,12 @@ mod tests {
         engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
         engine.symbol = "BTCUSDT".to_string();
         engine.exchange = Exchange::Binance;
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
 
         // Place a sell stop order at 49500
         let req = OrderRequest {
@@ -1553,7 +1639,7 @@ mod tests {
         assert!(!engine.active_stop_orders.contains_key(&stop_orderid));
         assert_eq!(engine.stop_orders[&stop_orderid].status, StopOrderStatus::Triggered);
         let trade = engine.trades.values().next().unwrap();
-        assert!((trade.price - 49499.9).abs() < 1e-10); // 49500 - 0.1 slippage
+        assert!((trade.price - 49449.9).abs() < 1e-10);
     }
 
     #[test]

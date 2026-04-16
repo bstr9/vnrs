@@ -7,10 +7,12 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::backtesting::{BacktestingEngine, BacktestingMode, BacktestingStatistics};
-use crate::python::{OrderFactory, PortfolioFacade, PortfolioState};
+use crate::python::{OrderFactory, PortfolioFacade, PortfolioState, PyRiskManager};
 use crate::trader::{BarData, Direction, Exchange, Interval, Offset, OrderRequest, OrderType};
 
 use std::sync::{Arc, Mutex};
+
+use pyo3::types::PyAnyMethods;
 
 /// Python wrapper for BacktestingEngine
 #[pyclass]
@@ -18,6 +20,7 @@ pub struct PyBacktestingEngine {
     engine: Mutex<BacktestingEngine>,
     runtime: tokio::runtime::Runtime,
     portfolio_state: Arc<Mutex<PortfolioState>>,
+    risk_manager: Option<Py<PyRiskManager>>,
 }
 
 #[pymethods]
@@ -30,7 +33,13 @@ impl PyBacktestingEngine {
             engine: Mutex::new(BacktestingEngine::new()),
             runtime: rt,
             portfolio_state: Arc::new(Mutex::new(PortfolioState::default())),
+            risk_manager: None,
         })
+    }
+
+    /// Set the risk manager for order validation
+    fn set_risk_manager(slf: &Bound<'_, Self>, risk_manager: Py<PyRiskManager>) {
+        slf.borrow_mut().risk_manager = Some(risk_manager);
     }
 
     /// Clear all backtesting data
@@ -266,6 +275,7 @@ impl PyBacktestingEngine {
     #[allow(clippy::too_many_arguments)]
     fn send_order(
         &self,
+        py: Python,
         _strategy: Py<PyAny>,
         direction: &Bound<'_, PyAny>,
         offset: &Bound<'_, PyAny>,
@@ -319,6 +329,39 @@ impl PyBacktestingEngine {
             offset: offset_enum,
             reference: "VNPY_STRATEGY".to_string(),
         };
+
+        // Risk manager check
+        if let Some(ref risk_manager) = self.risk_manager {
+            let dir_str = match direction_enum {
+                Direction::Long => "LONG",
+                Direction::Short => "SHORT",
+                Direction::Net => "NET",
+            };
+            let off_str = match offset_enum {
+                Offset::None => "NONE",
+                Offset::Open => "OPEN",
+                Offset::Close => "CLOSE",
+                Offset::CloseToday => "CLOSE_TODAY",
+                Offset::CloseYesterday => "CLOSE_YESTERDAY",
+            };
+            let vt_symbol = engine.get_vt_symbol().to_string();
+            let result = risk_manager.borrow(py).check_order(
+                vt_symbol.as_str(),
+                dir_str,
+                off_str,
+                price,
+                volume,
+                "LIMIT",
+                0.0,
+                0,
+            )?;
+            if !result.is_approved() {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Order rejected by risk manager: {}",
+                    result.reason().unwrap_or("unknown reason")
+                )));
+            }
+        }
 
         if stop {
             let vt_orderid = engine.send_stop_order(req);

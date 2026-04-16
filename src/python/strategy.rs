@@ -7,7 +7,7 @@
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
-use crate::python::{OrderFactory, PortfolioFacade};
+use crate::python::{MessageBus, OrderFactory, PortfolioFacade};
 
 /// Strategy state as a string property for Python consumers.
 /// Maps to the Rust StrategyState enum:
@@ -74,6 +74,10 @@ pub struct Strategy {
     /// Order factory for typed order creation
     #[pyo3(get)]
     pub order_factory: Option<Py<OrderFactory>>,
+
+    /// Message bus for inter-strategy communication
+    #[pyo3(get)]
+    pub message_bus: Option<Py<MessageBus>>,
 }
 
 #[pymethods]
@@ -94,6 +98,7 @@ impl Strategy {
             engine: None,
             portfolio: None,
             order_factory: None,
+            message_bus: None,
         }
     }
 

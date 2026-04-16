@@ -25,6 +25,8 @@ pub mod order_factory;
 pub mod message_bus;
 #[cfg(feature = "python")]
 pub mod risk_manager;
+#[cfg(feature = "python")]
+pub mod sync_bar_bindings;
 
 #[cfg(feature = "python")]
 pub use strategy::Strategy;
@@ -47,3 +49,5 @@ pub use order_factory::{PyOrder, OrderFactory};
 pub use message_bus::{MessageBus, PyMessage, Message, MessageBusInner};
 #[cfg(feature = "python")]
 pub use risk_manager::{PyRiskManager, PyRiskConfig, PyRiskCheckResult};
+#[cfg(feature = "python")]
+pub use sync_bar_bindings::{PySyncBarGenerator, PySynchronizedBars};

@@ -1,5 +1,6 @@
+#![allow(deprecated)]
 //! Python bindings for Strategy Engine
-//! 
+//!
 //! Allows Python strategies to interface with the Rust strategy engine
 
 use pyo3::prelude::*;

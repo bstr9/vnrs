@@ -27,6 +27,9 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register risk manager module
     crate::python::risk_manager::register_risk_module(m)?;
 
+    // Register sync bar generator module
+    crate::python::sync_bar_bindings::register_sync_bar_module(m)?;
+
     // Register deprecated strategy classes (kept for backward compatibility)
     #[allow(deprecated)]
     {

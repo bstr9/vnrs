@@ -3,7 +3,7 @@
 
 use crate::python::data_converter;
 use crate::python::strategy::Strategy;
-use crate::python::{OrderFactory, PortfolioFacade, PortfolioState};
+use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PortfolioState};
 use crate::trader::{
     BarData, CancelRequest, Direction, Exchange, MainEngine, Offset, OrderData, OrderType,
     OrderRequest, SubscribeRequest, TickData, TradeData,
@@ -54,6 +54,11 @@ impl PythonEngine {
         let order_factory = OrderFactory::from_engine(engine_ref, "");
         let factory_py = Py::new(py, order_factory)?;
         strategy.borrow_mut().order_factory = Some(factory_py);
+
+        // Create and inject MessageBus
+        let message_bus = MessageBus::new();
+        let bus_py = Py::new(py, message_bus)?;
+        strategy.borrow_mut().message_bus = Some(bus_py);
 
         self.strategies
             .insert(strategy_name.clone(), strategy.clone().unbind());

@@ -239,13 +239,13 @@ pub struct PyRiskCheckResult {
 impl PyRiskCheckResult {
     /// Whether the order passed all risk checks.
     #[getter]
-    fn is_approved(&self) -> bool {
+    pub fn is_approved(&self) -> bool {
         self.is_approved
     }
 
     /// Rejection reason, or None if approved.
     #[getter]
-    fn reason(&self) -> Option<&str> {
+    pub fn reason(&self) -> Option<&str> {
         self.reason.as_deref()
     }
 
@@ -375,7 +375,7 @@ impl PyRiskManager {
     /// Returns:
     ///     RiskCheckResult indicating approval or rejection with reason.
     #[pyo3(signature = (vt_symbol, direction, offset, price, volume, order_type, position_qty=0.0, active_orders=0))]
-    fn check_order(
+    pub fn check_order(
         &self,
         vt_symbol: &str,
         direction: &str,
