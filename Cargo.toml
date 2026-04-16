@@ -94,7 +94,7 @@ lru = "0.16.2"
 tokio-test = "0.4"
 
 [features]
-default = ["gui","alpha"]
+default = ["gui","alpha","python"]
 gui = ["dep:egui", "dep:eframe", "dep:egui_extras", "dep:rfd", "dep:rmcp", "dep:schemars"]
 python = ["dep:pyo3", "dep:arrow", "dep:arrow-array", "dep:arrow-schema"]
 alpha = ["dep:polars", "dep:arrow", "dep:arrow-array", "dep:arrow-schema"]
