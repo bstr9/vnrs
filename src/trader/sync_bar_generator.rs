@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use trade_engine::chart::SynchronizedBarGenerator;
+//! use trade_engine::trader::SynchronizedBarGenerator;
 //!
 //! let mut gen = SynchronizedBarGenerator::new(vec![
 //!     "BTCUSDT.BINANCE".to_string(),

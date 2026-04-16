@@ -31,6 +31,7 @@ pub mod logger;
 pub mod object;
 pub mod optimize;
 pub mod setting;
+pub mod sync_bar_generator;
 pub mod utility;
 
 #[cfg(feature = "gui")]
@@ -55,6 +56,7 @@ pub use object::{
 };
 pub use optimize::{check_optimization_setting, run_bf_optimization, run_ga_optimization, OptimizationSetting};
 pub use setting::{Settings, SettingValue, SETTINGS};
+pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use utility::{
     ceil_to, extract_vt_symbol, floor_to, generate_vt_symbol, get_digits, get_file_path,
     get_folder_path, load_json, round_to, save_json, ArrayManager, BarGenerator, TEMP_DIR,

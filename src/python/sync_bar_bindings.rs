@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::chart::{SynchronizedBarGenerator, SynchronizedBars};
 use crate::trader::object::BarData;
+use crate::trader::{SynchronizedBarGenerator, SynchronizedBars};
 
 // ---------------------------------------------------------------------------
 // PySynchronizedBars — Python-facing synchronized bar batch
