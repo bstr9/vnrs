@@ -7,7 +7,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::base::{StrategySetting, StrategyState, StrategyType};
+use crate::chart::Indicator;
 use crate::trader::{BarData, Direction, Interval, Offset, OrderData, TickData, TradeData};
+
+/// Type alias for the indicator storage map
+type IndicatorMap = Arc<Mutex<HashMap<String, Vec<Box<dyn Indicator>>>>>;
 
 /// Strategy context providing market data and trading interface
 pub struct StrategyContext {
@@ -17,6 +21,8 @@ pub struct StrategyContext {
     pub bar_cache: Arc<Mutex<HashMap<String, BarData>>>,
     /// Historical bars for each symbol
     pub historical_bars: Arc<Mutex<HashMap<String, Vec<BarData>>>>,
+    /// Registered indicators, keyed by vt_symbol
+    indicators: IndicatorMap,
 }
 
 impl StrategyContext {
@@ -25,6 +31,7 @@ impl StrategyContext {
             tick_cache: Arc::new(Mutex::new(HashMap::new())),
             bar_cache: Arc::new(Mutex::new(HashMap::new())),
             historical_bars: Arc::new(Mutex::new(HashMap::new())),
+            indicators: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -88,11 +95,92 @@ impl StrategyContext {
         bars.push(bar);
         bars.truncate(10000);
     }
+
+    /// Register an indicator to receive bar updates for a specific symbol.
+    /// Returns an IndicatorRef that can be used to query the indicator's state.
+    pub fn register_indicator(
+        &self,
+        vt_symbol: &str,
+        indicator: Box<dyn Indicator>,
+    ) -> IndicatorRef {
+        let mut indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let list = indicators.entry(vt_symbol.to_string()).or_default();
+        let index = list.len();
+        list.push(indicator);
+        IndicatorRef {
+            key: vt_symbol.to_string(),
+            index,
+            indicators: Arc::clone(&self.indicators),
+        }
+    }
+
+    /// Get all indicator references registered for a symbol
+    pub fn get_indicator_refs(&self, vt_symbol: &str) -> Vec<IndicatorRef> {
+        let indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        match indicators.get(vt_symbol) {
+            Some(list) => (0..list.len())
+                .map(|index| IndicatorRef {
+                    key: vt_symbol.to_string(),
+                    index,
+                    indicators: Arc::clone(&self.indicators),
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Update all indicators for a symbol with new bar data.
+    /// Should be called BEFORE strategy.on_bar() so indicators have latest values.
+    pub fn update_indicators(&self, vt_symbol: &str, bar: &BarData) {
+        let mut indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(indicator_list) = indicators.get_mut(vt_symbol) {
+            for indicator in indicator_list.iter_mut() {
+                indicator.update(bar);
+            }
+        }
+    }
 }
 
 impl Default for StrategyContext {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A reference to an indicator that can be queried safely.
+///
+/// Stores a key (vt_symbol), index, and a clone of the shared indicator map,
+/// allowing concurrent read access to indicator state.
+pub struct IndicatorRef {
+    key: String,
+    index: usize,
+    indicators: IndicatorMap,
+}
+
+impl IndicatorRef {
+    /// Check if the indicator is ready (has enough data)
+    pub fn is_ready(&self) -> bool {
+        let map = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&self.key)
+            .and_then(|v| v.get(self.index))
+            .map(|i| i.is_ready())
+            .unwrap_or(false)
+    }
+
+    /// Get the current value of the indicator
+    pub fn current_value(&self) -> Option<f64> {
+        let map = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&self.key)
+            .and_then(|v| v.get(self.index))
+            .and_then(|i| i.current_value())
+    }
+
+    /// Get indicator name
+    pub fn name(&self) -> Option<String> {
+        let map = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&self.key)
+            .and_then(|v| v.get(self.index))
+            .map(|i| i.name().to_string())
     }
 }
 
@@ -164,6 +252,20 @@ pub trait StrategyTemplate: Send + Sync {
     /// Set target position
     fn set_target(&mut self, _vt_symbol: &str, _target: f64) {
         // Default implementation (do nothing)
+    }
+
+    /// Called when a registered indicator updates (optional override)
+    fn on_indicator(&mut self, _indicator_name: &str, _value: f64) {}
+
+    /// Register an indicator for automatic bar updates (convenience method).
+    /// Returns an IndicatorRef for querying the indicator's state.
+    fn register_indicator_for_bars(
+        &self,
+        context: &StrategyContext,
+        vt_symbol: &str,
+        indicator: Box<dyn Indicator>,
+    ) -> IndicatorRef {
+        context.register_indicator(vt_symbol, indicator)
     }
 }
 

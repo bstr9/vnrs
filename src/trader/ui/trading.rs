@@ -220,6 +220,24 @@ impl TradingWidget {
         self.update_vt_symbol();
     }
 
+    /// Set subscribe request from MCP command
+    pub fn set_subscribe_request(&mut self, req: SubscribeRequest, gateway_name: &str) {
+        // Update gateway index if found
+        if let Some(idx) = self.gateways.iter().position(|g| g == gateway_name) {
+            self.gateway_index = idx;
+        }
+        self.pending_subscribe = Some(req);
+    }
+
+    /// Set order request from MCP command
+    pub fn set_order_request(&mut self, req: OrderRequest, gateway_name: &str) {
+        // Update gateway index if found
+        if let Some(idx) = self.gateways.iter().position(|g| g == gateway_name) {
+            self.gateway_index = idx;
+        }
+        self.pending_order = Some(req);
+    }
+
     /// Update vt_symbol and request subscription
     fn update_vt_symbol(&mut self) {
         if self.symbol.is_empty() {
@@ -315,7 +333,7 @@ impl TradingWidget {
                         let popup_id = egui::Id::new("contract_autocomplete");
 
                         egui::Area::new(popup_id)
-                            .pivot(egui::Align2::LEFT_TOP.into())
+                            .pivot(egui::Align2::LEFT_TOP)
                             .fixed_pos(response.rect.left_bottom())
                             .order(egui::Order::Foreground)
                             .show(ui.ctx(), |ui| {

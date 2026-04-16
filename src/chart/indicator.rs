@@ -2,6 +2,7 @@
 
 use crate::trader::object::BarData;
 use egui::{Color32, Stroke};
+use std::collections::VecDeque;
 
 /// Indicator display location
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,97 @@ impl Default for IndicatorLineConfig {
     }
 }
 
+/// Base state shared by all indicators
+pub struct IndicatorBase {
+    pub name: String,
+    pub location: IndicatorLocation,
+    pub has_inputs: bool,
+    pub count: usize,
+    pub initialized: bool,
+    pub line_configs: Vec<IndicatorLineConfig>,
+}
+
+impl IndicatorBase {
+    pub fn new(name: &str, location: IndicatorLocation) -> Self {
+        Self {
+            name: name.to_string(),
+            location,
+            has_inputs: false,
+            count: 0,
+            initialized: false,
+            line_configs: Vec::new(),
+        }
+    }
+
+    /// Check if we have enough inputs to be initialized
+    pub fn check_initialized(&mut self, required_count: usize) -> bool {
+        if !self.initialized && self.count >= required_count {
+            self.initialized = true;
+        }
+        self.initialized
+    }
+
+    /// Common get_y_range implementation for a single value series
+    pub fn get_y_range_for_values(
+        values: &[Option<f64>],
+        min_ix: usize,
+        max_ix: usize,
+    ) -> Option<(f64, f64)> {
+        if values.is_empty() || min_ix > max_ix || min_ix >= values.len() {
+            return None;
+        }
+        let end_ix = max_ix.min(values.len().saturating_sub(1));
+        let min_val = values[min_ix..=end_ix]
+            .iter()
+            .filter_map(|&v| v)
+            .fold(f64::INFINITY, f64::min);
+        let max_val = values[min_ix..=end_ix]
+            .iter()
+            .filter_map(|&v| v)
+            .fold(f64::NEG_INFINITY, f64::max);
+        if min_val == f64::INFINITY || max_val == f64::NEG_INFINITY {
+            None
+        } else {
+            Some((min_val, max_val))
+        }
+    }
+
+    /// Combine multiple value series into a single y range
+    pub fn get_y_range_for_multi_series(
+        series_list: &[&[Option<f64>]],
+        min_ix: usize,
+        max_ix: usize,
+    ) -> Option<(f64, f64)> {
+        if min_ix > max_ix {
+            return None;
+        }
+        let mut min_val = f64::INFINITY;
+        let mut max_val = f64::NEG_INFINITY;
+        for values in series_list {
+            if values.is_empty() || min_ix >= values.len() {
+                continue;
+            }
+            let end_ix = max_ix.min(values.len().saturating_sub(1));
+            for val in values[min_ix..=end_ix].iter().flatten() {
+                min_val = min_val.min(*val);
+                max_val = max_val.max(*val);
+            }
+        }
+        if min_val == f64::INFINITY || max_val == f64::NEG_INFINITY {
+            None
+        } else {
+            Some((min_val, max_val))
+        }
+    }
+
+    /// Reset base state
+    pub fn reset_base(&mut self) {
+        self.has_inputs = false;
+        self.count = 0;
+        self.initialized = false;
+    }
+}
+
 /// Base trait for all indicators
 pub trait Indicator: Send + Sync {
     /// Get indicator name
@@ -58,8 +150,27 @@ pub trait Indicator: Send + Sync {
     /// Get display location (main or sub chart)
     fn location(&self) -> IndicatorLocation;
 
-    /// Calculate indicator values for given bar data
-    fn calculate(&mut self, bars: &[BarData]);
+    /// Update indicator with a single bar (incremental, O(1))
+    /// Returns true if the indicator produced a new value
+    fn update(&mut self, bar: &BarData) -> bool;
+
+    /// Check if the indicator has enough data to produce values
+    fn is_ready(&self) -> bool;
+
+    /// Get the current (latest) value of the primary series
+    fn current_value(&self) -> Option<f64>;
+
+    /// Reset indicator state (clear all computed values)
+    fn reset(&mut self);
+
+    /// Calculate indicator values for given bar data.
+    /// Default implementation uses reset() + update() loop for backward compatibility.
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
+        }
+    }
 
     /// Get the number of result series
     fn series_count(&self) -> usize;
@@ -80,6 +191,8 @@ pub struct MA {
     values: Vec<Option<f64>>,
     config: IndicatorLineConfig,
     location: IndicatorLocation,
+    base: IndicatorBase,
+    window: VecDeque<f64>,
 }
 
 impl MA {
@@ -94,6 +207,8 @@ impl MA {
                 width: 1.5,
             },
             location,
+            base: IndicatorBase::new(&format!("MA{}", period), location),
+            window: VecDeque::new(),
         }
     }
 }
@@ -107,18 +222,45 @@ impl Indicator for MA {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
-        self.values.clear();
-        self.values.resize(bars.len(), None);
+    fn update(&mut self, bar: &BarData) -> bool {
+        let value = bar.close_price;
+        self.base.count += 1;
+        self.base.has_inputs = true;
 
-        if bars.is_empty() || bars.len() < self.period || self.period == 0 {
-            return;
+        self.window.push_back(value);
+        if self.window.len() > self.period {
+            self.window.pop_front();
         }
 
-        for i in (self.period - 1)..bars.len() {
-            let start_ix = i.saturating_sub(self.period - 1);
-            let sum: f64 = bars[start_ix..=i].iter().map(|b| b.close_price).sum();
-            self.values[i] = Some(sum / self.period as f64);
+        if self.window.len() >= self.period {
+            let sum: f64 = self.window.iter().sum();
+            self.values.push(Some(sum / self.period as f64));
+            self.base.check_initialized(self.period);
+        } else {
+            self.values.push(None);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.window.clear();
+        self.base.reset_base();
+    }
+
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -135,23 +277,7 @@ impl Indicator for MA {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.values.is_empty() || min_ix > max_ix || min_ix >= self.values.len() {
-            return None;
-        }
-
-        let end_ix = max_ix.min(self.values.len().saturating_sub(1));
-        let values: Vec<f64> = self.values[min_ix..=end_ix]
-            .iter()
-            .filter_map(|v| *v)
-            .collect();
-
-        if values.is_empty() {
-            return None;
-        }
-
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 }
 
@@ -161,6 +287,9 @@ pub struct EMA {
     values: Vec<Option<f64>>,
     config: IndicatorLineConfig,
     location: IndicatorLocation,
+    base: IndicatorBase,
+    prev_ema: f64,
+    initial_sum: f64,
 }
 
 impl EMA {
@@ -175,7 +304,54 @@ impl EMA {
                 width: 1.5,
             },
             location,
+            base: IndicatorBase::new(&format!("EMA{}", period), location),
+            prev_ema: 0.0,
+            initial_sum: 0.0,
         }
+    }
+
+    /// Update with a raw value (for use as a composable sub-indicator)
+    pub fn update_raw(&mut self, value: f64) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        if self.base.count == 1 {
+            self.prev_ema = value;
+            self.values.push(None);
+        } else if self.base.count <= self.period {
+            self.initial_sum += value;
+            if self.base.count == self.period {
+                let seed = (self.initial_sum + self.prev_ema) / self.period as f64;
+                self.prev_ema = seed;
+                self.values.push(Some(seed));
+                self.base.check_initialized(self.period);
+            } else {
+                self.values.push(None);
+            }
+        } else {
+            let k = 2.0 / (self.period as f64 + 1.0);
+            self.prev_ema = value * k + self.prev_ema * (1.0 - k);
+            self.values.push(Some(self.prev_ema));
+        }
+
+        self.base.initialized
+    }
+
+    /// Get current EMA value (for use as a composable sub-indicator)
+    pub fn current_ema(&self) -> Option<f64> {
+        if self.base.initialized {
+            Some(self.prev_ema)
+        } else {
+            None
+        }
+    }
+
+    /// Reset EMA state (for use as a composable sub-indicator)
+    pub fn reset_ema(&mut self) {
+        self.values.clear();
+        self.base.reset_base();
+        self.prev_ema = 0.0;
+        self.initial_sum = 0.0;
     }
 }
 
@@ -188,28 +364,26 @@ impl Indicator for EMA {
         self.location
     }
 
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.update_raw(bar.close_price)
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.reset_ema();
+    }
+
     fn calculate(&mut self, bars: &[BarData]) {
-        self.values.clear();
-        self.values.resize(bars.len(), None);
-
-        if bars.is_empty() || bars.len() < self.period || self.period == 0 {
-            return;
-        }
-
-        let multiplier = 2.0 / (self.period as f64 + 1.0);
-
-        // First EMA is a simple average
-        let initial_sum: f64 = bars[0..self.period].iter().map(|b| b.close_price).sum();
-        let mut ema = initial_sum / self.period as f64;
-        if self.period > 0 && self.period <= bars.len() {
-            self.values[self.period - 1] = Some(ema);
-        }
-
-        // Calculate subsequent EMAs
-        for (i, bar) in bars[self.period..].iter().enumerate() {
-            let i = i + self.period;
-            ema = (bar.close_price * multiplier) + (ema * (1.0 - multiplier));
-            self.values[i] = Some(ema);
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -226,23 +400,7 @@ impl Indicator for EMA {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.values.is_empty() || min_ix > max_ix || min_ix >= self.values.len() {
-            return None;
-        }
-
-        let end_ix = max_ix.min(self.values.len().saturating_sub(1));
-        let values: Vec<f64> = self.values[min_ix..=end_ix]
-            .iter()
-            .filter_map(|v| *v)
-            .collect();
-
-        if values.is_empty() {
-            return None;
-        }
-
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 }
 
@@ -257,6 +415,12 @@ pub struct BOLL {
     middle_config: IndicatorLineConfig,
     lower_config: IndicatorLineConfig,
     location: IndicatorLocation,
+    base: IndicatorBase,
+    // Incremental state: Welford's running stats for the window
+    window: VecDeque<f64>,
+    running_count: f64,
+    running_mean: f64,
+    running_m2: f64,
 }
 
 impl BOLL {
@@ -286,6 +450,11 @@ impl BOLL {
                 width: 1.0,
             },
             location,
+            base: IndicatorBase::new("BOLL", location),
+            window: VecDeque::new(),
+            running_count: 0.0,
+            running_mean: 0.0,
+            running_m2: 0.0,
         }
     }
 }
@@ -299,35 +468,82 @@ impl Indicator for BOLL {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
+    fn update(&mut self, bar: &BarData) -> bool {
+        let value = bar.close_price;
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        // Welford's online algorithm for running mean and variance
+        self.running_count += 1.0;
+        let delta = value - self.running_mean;
+        self.running_mean += delta / self.running_count;
+        let delta2 = value - self.running_mean;
+        self.running_m2 += delta * delta2;
+
+        // Keep window for exact SMA (consistent with original behavior)
+        self.window.push_back(value);
+        if self.window.len() > self.period {
+            let old = self.window.pop_front().unwrap();
+            // Remove from running stats
+            self.running_count -= 1.0;
+            if self.running_count > 0.0 {
+                let d = old - self.running_mean;
+                self.running_mean -= d / self.running_count;
+                let d2 = old - self.running_mean;
+                self.running_m2 -= d * d2;
+                // running_m2 can go slightly negative due to floating point
+                if self.running_m2 < 0.0 {
+                    self.running_m2 = 0.0;
+                }
+            }
+        }
+
+        if self.window.len() >= self.period {
+            let mid = self.running_mean;
+            let variance = if self.running_count > 1.0 {
+                self.running_m2 / (self.running_count - 1.0)
+            } else {
+                0.0
+            };
+            let std = variance.sqrt();
+            let upper = mid + self.std_dev * std;
+            let lower = mid - self.std_dev * std;
+            self.middle.push(Some(mid));
+            self.upper.push(Some(upper));
+            self.lower.push(Some(lower));
+            self.base.check_initialized(self.period);
+        } else {
+            self.middle.push(None);
+            self.upper.push(None);
+            self.lower.push(None);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.middle.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
         self.upper.clear();
         self.middle.clear();
         self.lower.clear();
+        self.window.clear();
+        self.running_count = 0.0;
+        self.running_mean = 0.0;
+        self.running_m2 = 0.0;
+        self.base.reset_base();
+    }
 
-        self.upper.resize(bars.len(), None);
-        self.middle.resize(bars.len(), None);
-        self.lower.resize(bars.len(), None);
-
-        if bars.is_empty() || bars.len() < self.period || self.period == 0 {
-            return;
-        }
-
-        for i in (self.period - 1)..bars.len() {
-            let start_ix = i.saturating_sub(self.period - 1);
-            let window = &bars[start_ix..=i];
-            let sum: f64 = window.iter().map(|b| b.close_price).sum();
-            let mean = sum / self.period as f64;
-
-            let variance: f64 = window
-                .iter()
-                .map(|b| (b.close_price - mean).powi(2))
-                .sum::<f64>()
-                / (self.period - 1) as f64;
-            let std = variance.sqrt();
-
-            self.middle[i] = Some(mean);
-            self.upper[i] = Some(mean + self.std_dev * std);
-            self.lower[i] = Some(mean - self.std_dev * std);
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -354,27 +570,11 @@ impl Indicator for BOLL {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if min_ix > max_ix {
-            return None;
-        }
-
-        let mut all_values = Vec::new();
-
-        for series in [&self.upper, &self.middle, &self.lower] {
-            if series.is_empty() || min_ix >= series.len() {
-                continue;
-            }
-            let end_ix = max_ix.min(series.len().saturating_sub(1));
-            all_values.extend(series[min_ix..=end_ix].iter().filter_map(|v| *v));
-        }
-
-        if all_values.is_empty() {
-            return None;
-        }
-
-        let min = all_values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = all_values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_multi_series(
+            &[&self.upper, &self.middle, &self.lower],
+            min_ix,
+            max_ix,
+        )
     }
 }
 
@@ -384,6 +584,8 @@ pub struct WMA {
     values: Vec<Option<f64>>,
     config: IndicatorLineConfig,
     location: IndicatorLocation,
+    base: IndicatorBase,
+    window: VecDeque<f64>,
 }
 
 impl WMA {
@@ -398,6 +600,8 @@ impl WMA {
                 width: 1.5,
             },
             location,
+            base: IndicatorBase::new(&format!("WMA{}", period), location),
+            window: VecDeque::new(),
         }
     }
 }
@@ -411,29 +615,51 @@ impl Indicator for WMA {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
-        self.values.clear();
-        self.values.resize(bars.len(), None);
+    fn update(&mut self, bar: &BarData) -> bool {
+        let value = bar.close_price;
+        self.base.count += 1;
+        self.base.has_inputs = true;
 
-        if bars.is_empty() || bars.len() < self.period || self.period == 0 {
-            return;
+        self.window.push_back(value);
+        if self.window.len() > self.period {
+            self.window.pop_front();
         }
 
-        let weights: Vec<f64> = (1..=self.period).map(|i| i as f64).collect();
-        let weight_sum: f64 = weights.iter().sum();
-
-        if weight_sum == 0.0 {
-            return;
-        }
-
-        for i in (self.period - 1)..bars.len() {
-            let start_ix = i.saturating_sub(self.period - 1);
-            let weighted_sum: f64 = bars[start_ix..=i]
+        if self.window.len() >= self.period {
+            let weight_sum: f64 = (1..=self.period).map(|i| i as f64).sum();
+            let weighted_sum: f64 = self
+                .window
                 .iter()
                 .enumerate()
-                .map(|(j, b)| b.close_price * weights[j])
+                .map(|(j, &v)| v * ((j + 1) as f64))
                 .sum();
-            self.values[i] = Some(weighted_sum / weight_sum);
+            self.values.push(Some(weighted_sum / weight_sum));
+            self.base.check_initialized(self.period);
+        } else {
+            self.values.push(None);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.window.clear();
+        self.base.reset_base();
+    }
+
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -450,23 +676,7 @@ impl Indicator for WMA {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.values.is_empty() || min_ix > max_ix || min_ix >= self.values.len() {
-            return None;
-        }
-
-        let end_ix = max_ix.min(self.values.len().saturating_sub(1));
-        let values: Vec<f64> = self.values[min_ix..=end_ix]
-            .iter()
-            .filter_map(|v| *v)
-            .collect();
-
-        if values.is_empty() {
-            return None;
-        }
-
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 }
 
@@ -475,6 +685,9 @@ pub struct VWAP {
     values: Vec<Option<f64>>,
     config: IndicatorLineConfig,
     location: IndicatorLocation,
+    base: IndicatorBase,
+    cumulative_pv: f64,
+    cumulative_v: f64,
 }
 
 impl VWAP {
@@ -488,6 +701,9 @@ impl VWAP {
                 width: 1.5,
             },
             location,
+            base: IndicatorBase::new("VWAP", location),
+            cumulative_pv: 0.0,
+            cumulative_v: 0.0,
         }
     }
 }
@@ -501,25 +717,44 @@ impl Indicator for VWAP {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
-        self.values.clear();
-        self.values.resize(bars.len(), None);
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
 
-        if bars.is_empty() {
-            return;
+        let typical_price = (bar.high_price + bar.low_price + bar.close_price) / 3.0;
+        self.cumulative_pv += typical_price * bar.volume;
+        self.cumulative_v += bar.volume;
+
+        if self.cumulative_v > 0.0 {
+            self.values
+                .push(Some(self.cumulative_pv / self.cumulative_v));
+            self.base.check_initialized(1);
+        } else {
+            self.values.push(None);
         }
 
-        let mut cumulative_pv = 0.0;
-        let mut cumulative_v = 0.0;
+        self.base.initialized
+    }
 
-        for (i, bar) in bars.iter().enumerate() {
-            let typical_price = (bar.high_price + bar.low_price + bar.close_price) / 3.0;
-            cumulative_pv += typical_price * bar.volume;
-            cumulative_v += bar.volume;
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
 
-            if cumulative_v > 0.0 {
-                self.values[i] = Some(cumulative_pv / cumulative_v);
-            }
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.cumulative_pv = 0.0;
+        self.cumulative_v = 0.0;
+        self.base.reset_base();
+    }
+
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -536,23 +771,7 @@ impl Indicator for VWAP {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.values.is_empty() || min_ix > max_ix || min_ix >= self.values.len() {
-            return None;
-        }
-
-        let end_ix = max_ix.min(self.values.len().saturating_sub(1));
-        let values: Vec<f64> = self.values[min_ix..=end_ix]
-            .iter()
-            .filter_map(|v| *v)
-            .collect();
-
-        if values.is_empty() {
-            return None;
-        }
-
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 }
 
@@ -563,6 +782,16 @@ pub struct SAR {
     location: IndicatorLocation,
     acceleration: f64,
     maximum: f64,
+    base: IndicatorBase,
+    // Incremental state
+    is_long: bool,
+    sar: f64,
+    ep: f64,
+    af: f64,
+    prev_low: Option<f64>,
+    prev_prev_low: Option<f64>,
+    prev_high: Option<f64>,
+    prev_prev_high: Option<f64>,
 }
 
 impl SAR {
@@ -583,6 +812,15 @@ impl SAR {
             location,
             acceleration,
             maximum,
+            base: IndicatorBase::new("SAR", location),
+            is_long: true,
+            sar: 0.0,
+            ep: 0.0,
+            af: acceleration,
+            prev_low: None,
+            prev_prev_low: None,
+            prev_high: None,
+            prev_prev_high: None,
         }
     }
 }
@@ -596,62 +834,109 @@ impl Indicator for SAR {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
-        self.values.clear();
-        self.values.resize(bars.len(), None);
+    fn update(&mut self, bar: &BarData) -> bool {
+        let high = bar.high_price;
+        let low = bar.low_price;
 
-        if bars.len() < 2 {
-            return;
+        if self.base.count == 0 {
+            // First bar: initialize
+            self.sar = low;
+            self.ep = high;
+            self.af = self.acceleration;
+            self.is_long = true;
+            self.values.push(Some(self.sar));
+            self.base.count += 1;
+            self.base.has_inputs = true;
+            self.base.check_initialized(2);
+            // Store for next iteration
+            self.prev_prev_low = self.prev_low;
+            self.prev_low = Some(low);
+            self.prev_prev_high = self.prev_high;
+            self.prev_high = Some(high);
+            return self.base.initialized;
         }
 
-        let mut is_long = true;
-        let mut sar = bars[0].low_price;
-        let mut ep = bars[0].high_price;
-        let mut af = self.acceleration;
+        // Compute SAR
+        self.sar = self.sar + self.af * (self.ep - self.sar);
 
-        self.values[0] = Some(sar);
-
-        for i in 1..bars.len() {
-            let high = bars[i].high_price;
-            let low = bars[i].low_price;
-
-            sar = sar + af * (ep - sar);
-
-            if is_long {
-                if i >= 2 {
-                    sar = sar.min(bars[i - 1].low_price).min(bars[i - 2].low_price);
-                } else if i >= 1 {
-                    sar = sar.min(bars[i - 1].low_price);
-                }
-
-                if low < sar {
-                    is_long = false;
-                    sar = ep;
-                    ep = low;
-                    af = self.acceleration;
-                } else if high > ep {
-                    ep = high;
-                    af = (af + self.acceleration).min(self.maximum);
-                }
-            } else {
-                if i >= 2 {
-                    sar = sar.max(bars[i - 1].high_price).max(bars[i - 2].high_price);
-                } else if i >= 1 {
-                    sar = sar.max(bars[i - 1].high_price);
-                }
-
-                if high > sar {
-                    is_long = true;
-                    sar = ep;
-                    ep = high;
-                    af = self.acceleration;
-                } else if low < ep {
-                    ep = low;
-                    af = (af + self.acceleration).min(self.maximum);
-                }
+        if self.is_long {
+            // Constrain SAR by previous lows
+            if let Some(pl) = self.prev_low {
+                self.sar = self.sar.min(pl);
+            }
+            if let Some(ppl) = self.prev_prev_low {
+                self.sar = self.sar.min(ppl);
             }
 
-            self.values[i] = Some(sar);
+            if low < self.sar {
+                // Flip to short
+                self.is_long = false;
+                self.sar = self.ep;
+                self.ep = low;
+                self.af = self.acceleration;
+            } else if high > self.ep {
+                self.ep = high;
+                self.af = (self.af + self.acceleration).min(self.maximum);
+            }
+        } else {
+            // Constrain SAR by previous highs
+            if let Some(ph) = self.prev_high {
+                self.sar = self.sar.max(ph);
+            }
+            if let Some(pph) = self.prev_prev_high {
+                self.sar = self.sar.max(pph);
+            }
+
+            if high > self.sar {
+                // Flip to long
+                self.is_long = true;
+                self.sar = self.ep;
+                self.ep = high;
+                self.af = self.acceleration;
+            } else if low < self.ep {
+                self.ep = low;
+                self.af = (self.af + self.acceleration).min(self.maximum);
+            }
+        }
+
+        self.values.push(Some(self.sar));
+        self.base.count += 1;
+        self.base.check_initialized(2);
+
+        // Shift previous values
+        self.prev_prev_low = self.prev_low;
+        self.prev_low = Some(low);
+        self.prev_prev_high = self.prev_high;
+        self.prev_high = Some(high);
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.is_long = true;
+        self.sar = 0.0;
+        self.ep = 0.0;
+        self.af = self.acceleration;
+        self.prev_low = None;
+        self.prev_prev_low = None;
+        self.prev_high = None;
+        self.prev_prev_high = None;
+        self.base.reset_base();
+    }
+
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -668,23 +953,7 @@ impl Indicator for SAR {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.values.is_empty() || min_ix > max_ix || min_ix >= self.values.len() {
-            return None;
-        }
-
-        let end_ix = max_ix.min(self.values.len().saturating_sub(1));
-        let values: Vec<f64> = self.values[min_ix..=end_ix]
-            .iter()
-            .filter_map(|v| *v)
-            .collect();
-
-        if values.is_empty() {
-            return None;
-        }
-
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 }
 
@@ -693,6 +962,7 @@ pub struct AVL {
     values: Vec<Option<f64>>,
     config: IndicatorLineConfig,
     location: IndicatorLocation,
+    base: IndicatorBase,
 }
 
 impl AVL {
@@ -706,6 +976,7 @@ impl AVL {
                 width: 1.5,
             },
             location,
+            base: IndicatorBase::new("AVL", location),
         }
     }
 }
@@ -719,18 +990,34 @@ impl Indicator for AVL {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        let avg_price = (bar.high_price + bar.low_price + bar.close_price) / 3.0;
+        self.values.push(Some(avg_price));
+        self.base.check_initialized(1);
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
         self.values.clear();
-        self.values.resize(bars.len(), None);
+        self.base.reset_base();
+    }
 
-        if bars.is_empty() {
-            return;
-        }
-
-        for (i, bar) in bars.iter().enumerate() {
-            // AVL = (High + Low + Close) / 3
-            let avg_price = (bar.high_price + bar.low_price + bar.close_price) / 3.0;
-            self.values[i] = Some(avg_price);
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -747,27 +1034,74 @@ impl Indicator for AVL {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.values.is_empty() || min_ix > max_ix || min_ix >= self.values.len() {
-            return None;
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+}
+
+/// Internal EMA state for composition (tracks state without allocating value vectors)
+struct EmaState {
+    period: usize,
+    prev_ema: f64,
+    initial_sum: f64,
+    count: usize,
+    initialized: bool,
+}
+
+impl EmaState {
+    fn new(period: usize) -> Self {
+        Self {
+            period,
+            prev_ema: 0.0,
+            initial_sum: 0.0,
+            count: 0,
+            initialized: false,
         }
+    }
 
-        let end_ix = max_ix.min(self.values.len().saturating_sub(1));
-        let values: Vec<f64> = self.values[min_ix..=end_ix]
-            .iter()
-            .filter_map(|v| *v)
-            .collect();
+    /// Returns Some(ema_value) when the EMA has enough data, None otherwise.
+    /// The returned value is the NEW EMA output (only produced after initialization).
+    fn update_raw(&mut self, value: f64) -> Option<f64> {
+        self.count += 1;
 
-        if values.is_empty() {
-            return None;
+        if self.count == 1 {
+            self.prev_ema = value;
+            None
+        } else if self.count <= self.period {
+            self.initial_sum += value;
+            if self.count == self.period {
+                let seed = (self.initial_sum + self.prev_ema) / self.period as f64;
+                self.prev_ema = seed;
+                self.initialized = true;
+                Some(seed)
+            } else {
+                None
+            }
+        } else {
+            let k = 2.0 / (self.period as f64 + 1.0);
+            self.prev_ema = value * k + self.prev_ema * (1.0 - k);
+            Some(self.prev_ema)
         }
+    }
 
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+    fn reset(&mut self) {
+        self.prev_ema = 0.0;
+        self.initial_sum = 0.0;
+        self.count = 0;
+        self.initialized = false;
+    }
+
+    #[allow(dead_code)]
+    fn current(&self) -> Option<f64> {
+        if self.initialized {
+            Some(self.prev_ema)
+        } else {
+            None
+        }
     }
 }
 
 /// Triple Exponential Smoothed Moving Average (TRIX)
+/// Uses composition: three internal EMA states + signal EMA state
 pub struct TRIX {
     values: Vec<Option<f64>>,
     signal_values: Vec<Option<f64>>,
@@ -775,7 +1109,15 @@ pub struct TRIX {
     signal_config: IndicatorLineConfig,
     location: IndicatorLocation,
     period: usize,
-    signal_period: usize,
+    _signal_period: usize,
+    base: IndicatorBase,
+    // Composition: three EMA states + signal EMA
+    ema1: EmaState,
+    ema2: EmaState,
+    ema3: EmaState,
+    signal_ema: EmaState,
+    // Track previous EMA3 output for TRIX calculation
+    prev_ema3: Option<f64>,
 }
 
 impl TRIX {
@@ -803,7 +1145,13 @@ impl TRIX {
             },
             location,
             period,
-            signal_period,
+            _signal_period: signal_period,
+            base: IndicatorBase::new("TRIX", location),
+            ema1: EmaState::new(period),
+            ema2: EmaState::new(period),
+            ema3: EmaState::new(period),
+            signal_ema: EmaState::new(signal_period),
+            prev_ema3: None,
         }
     }
 }
@@ -817,96 +1165,79 @@ impl Indicator for TRIX {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        let value = bar.close_price;
+
+        // Feed through three EMA layers (composition pattern)
+        let ema1_val = self.ema1.update_raw(value);
+
+        let ema2_val = match ema1_val {
+            Some(v1) => self.ema2.update_raw(v1),
+            None => None,
+        };
+
+        let ema3_val = match ema2_val {
+            Some(v2) => self.ema3.update_raw(v2),
+            None => None,
+        };
+
+        // TRIX = ((EMA3[i] - EMA3[i-1]) / EMA3[i-1]) * 10000
+        let trix_val = match (ema3_val, self.prev_ema3) {
+            (Some(curr), Some(prev)) if prev.abs() > 1e-10 => {
+                Some(((curr - prev) / prev) * 10000.0)
+            }
+            _ => None,
+        };
+
+        // Update prev_ema3 for next iteration
+        if ema3_val.is_some() {
+            self.prev_ema3 = ema3_val;
+        }
+
+        // Update signal line (EMA of TRIX values)
+        let signal_val = match trix_val {
+            Some(tv) => self.signal_ema.update_raw(tv),
+            None => None,
+        };
+
+        self.values.push(trix_val);
+        self.signal_values.push(signal_val);
+
+        // TRIX requires period*3 bars for first EMA3 output, plus 1 more for rate of change
+        let required = self.period * 3 + 1;
+        if trix_val.is_some() {
+            self.base.check_initialized(required);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
         self.values.clear();
-        self.values.resize(bars.len(), None);
         self.signal_values.clear();
-        self.signal_values.resize(bars.len(), None);
+        self.ema1.reset();
+        self.ema2.reset();
+        self.ema3.reset();
+        self.signal_ema.reset();
+        self.prev_ema3 = None;
+        self.base.reset_base();
+    }
 
-        if bars.is_empty() || bars.len() < self.period * 3 || self.period == 0 {
-            return;
-        }
-
-        let multiplier = 2.0 / (self.period as f64 + 1.0);
-
-        // First EMA
-        let mut ema1 = vec![None; bars.len()];
-        let first_sum: f64 = bars.iter().take(self.period).map(|b| b.close_price).sum();
-        ema1[self.period - 1] = Some(first_sum / self.period as f64);
-
-        for i in self.period..bars.len() {
-            if let Some(prev_ema) = ema1[i - 1] {
-                ema1[i] = Some((bars[i].close_price - prev_ema) * multiplier + prev_ema);
-            }
-        }
-
-        // Second EMA
-        let mut ema2 = vec![None; bars.len()];
-        let start_idx = self.period * 2 - 1;
-        if start_idx < bars.len() {
-            let second_sum: f64 = ema1[self.period - 1..self.period * 2 - 1]
-                .iter()
-                .filter_map(|v| *v)
-                .sum();
-            ema2[start_idx] = Some(second_sum / self.period as f64);
-
-            for i in (start_idx + 1)..bars.len() {
-                if let (Some(curr_ema1), Some(prev_ema2)) = (ema1[i], ema2[i - 1]) {
-                    ema2[i] = Some((curr_ema1 - prev_ema2) * multiplier + prev_ema2);
-                }
-            }
-        }
-
-        // Third EMA
-        let mut ema3 = vec![None; bars.len()];
-        let start_idx3 = self.period * 3 - 1;
-        if start_idx3 < bars.len() {
-            let third_sum: f64 = ema2[start_idx..start_idx3].iter().filter_map(|v| *v).sum();
-            ema3[start_idx3] = Some(third_sum / self.period as f64);
-
-            for i in (start_idx3 + 1)..bars.len() {
-                if let (Some(curr_ema2), Some(prev_ema3)) = (ema2[i], ema3[i - 1]) {
-                    ema3[i] = Some((curr_ema2 - prev_ema3) * multiplier + prev_ema3);
-                }
-            }
-        }
-
-        // Calculate TRIX: ((EMA3[i] - EMA3[i-1]) / EMA3[i-1]) * 10000
-        for i in (start_idx3 + 1)..bars.len() {
-            if let (Some(curr), Some(prev)) = (ema3[i], ema3[i - 1]) {
-                if prev.abs() > 1e-10 {
-                    self.values[i] = Some(((curr - prev) / prev) * 10000.0);
-                }
-            }
-        }
-
-        // Calculate signal line (EMA of TRIX)
-        if self.signal_period > 0 {
-            let signal_multiplier = 2.0 / (self.signal_period as f64 + 1.0);
-            let mut signal_start = start_idx3 + 1;
-
-            // Find first valid TRIX value for signal calculation
-            while signal_start < bars.len() && self.values[signal_start].is_none() {
-                signal_start += 1;
-            }
-
-            if signal_start + self.signal_period <= bars.len() {
-                let signal_sum: f64 = self.values[signal_start..signal_start + self.signal_period]
-                    .iter()
-                    .filter_map(|v| *v)
-                    .sum();
-                self.signal_values[signal_start + self.signal_period - 1] =
-                    Some(signal_sum / self.signal_period as f64);
-
-                for i in (signal_start + self.signal_period)..bars.len() {
-                    if let (Some(curr_trix), Some(prev_signal)) =
-                        (self.values[i], self.signal_values[i - 1])
-                    {
-                        self.signal_values[i] =
-                            Some((curr_trix - prev_signal) * signal_multiplier + prev_signal);
-                    }
-                }
-            }
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -931,30 +1262,11 @@ impl Indicator for TRIX {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.values.is_empty() || min_ix > max_ix || min_ix >= self.values.len() {
-            return None;
-        }
-
-        let end_ix = max_ix.min(self.values.len().saturating_sub(1));
-        let mut all_values = Vec::new();
-
-        // Collect TRIX values
-        all_values.extend(self.values[min_ix..=end_ix].iter().filter_map(|v| *v));
-
-        // Collect Signal values
-        all_values.extend(
-            self.signal_values[min_ix..=end_ix]
-                .iter()
-                .filter_map(|v| *v),
-        );
-
-        if all_values.is_empty() {
-            return None;
-        }
-
-        let min = all_values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = all_values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_multi_series(
+            &[&self.values, &self.signal_values],
+            min_ix,
+            max_ix,
+        )
     }
 }
 
@@ -967,6 +1279,16 @@ pub struct SUPER {
     location: IndicatorLocation,
     period: usize,
     multiplier: f64,
+    base: IndicatorBase,
+    // Incremental state
+    tr_window: VecDeque<f64>,
+    atr_value: Option<f64>,
+    // Previous bar data for TR calculation
+    prev_close: Option<f64>,
+    // Previous final bands for continuity
+    prev_final_upper: Option<f64>,
+    prev_final_lower: Option<f64>,
+    prev_direction: Option<i32>,
 }
 
 impl SUPER {
@@ -995,6 +1317,13 @@ impl SUPER {
             location,
             period,
             multiplier,
+            base: IndicatorBase::new("SUPER", location),
+            tr_window: VecDeque::new(),
+            atr_value: None,
+            prev_close: None,
+            prev_final_upper: None,
+            prev_final_lower: None,
+            prev_direction: None,
         }
     }
 }
@@ -1008,124 +1337,134 @@ impl Indicator for SUPER {
         self.location
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
-        self.trend_values.clear();
-        self.trend_values.resize(bars.len(), None);
-        self.trend_direction.clear();
-        self.trend_direction.resize(bars.len(), None);
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
 
-        if bars.is_empty() || bars.len() < self.period || self.period == 0 {
-            return;
-        }
-
-        // Calculate ATR (Average True Range)
-        let mut atr_values = vec![None; bars.len()];
-        let mut tr_values = vec![0.0; bars.len()];
-
-        for i in 0..bars.len() {
-            if i == 0 {
-                tr_values[i] = bars[i].high_price - bars[i].low_price;
-            } else {
-                let high_low = bars[i].high_price - bars[i].low_price;
-                let high_close = (bars[i].high_price - bars[i - 1].close_price).abs();
-                let low_close = (bars[i].low_price - bars[i - 1].close_price).abs();
-                tr_values[i] = high_low.max(high_close).max(low_close);
+        // Calculate True Range
+        let tr = match self.prev_close {
+            Some(pc) => {
+                let high_low = bar.high_price - bar.low_price;
+                let high_close = (bar.high_price - pc).abs();
+                let low_close = (bar.low_price - pc).abs();
+                high_low.max(high_close).max(low_close)
             }
+            None => bar.high_price - bar.low_price,
+        };
+
+        // Maintain TR window for SMA-based ATR
+        self.tr_window.push_back(tr);
+        if self.tr_window.len() > self.period {
+            self.tr_window.pop_front();
         }
 
-        // Calculate ATR using SMA
-        for i in (self.period - 1)..bars.len() {
-            let start_ix = i.saturating_sub(self.period - 1);
-            let sum: f64 = tr_values[start_ix..=i].iter().sum();
-            atr_values[i] = Some(sum / self.period as f64);
+        // Calculate ATR from window
+        self.atr_value = None;
+        if self.tr_window.len() >= self.period {
+            let sum: f64 = self.tr_window.iter().sum();
+            self.atr_value = Some(sum / self.period as f64);
         }
 
-        // Calculate basic bands
-        let mut basic_upper = vec![None; bars.len()];
-        let mut basic_lower = vec![None; bars.len()];
+        // Calculate SuperTrend if we have ATR
+        if let Some(atr) = self.atr_value {
+            let hl_avg = (bar.high_price + bar.low_price) / 2.0;
+            let basic_upper = hl_avg + self.multiplier * atr;
+            let basic_lower = hl_avg - self.multiplier * atr;
 
-        for i in (self.period - 1)..bars.len() {
-            if let Some(atr) = atr_values[i] {
-                let hl_avg = (bars[i].high_price + bars[i].low_price) / 2.0;
-                basic_upper[i] = Some(hl_avg + self.multiplier * atr);
-                basic_lower[i] = Some(hl_avg - self.multiplier * atr);
-            }
-        }
-
-        // Calculate final bands
-        let mut final_upper = vec![None; bars.len()];
-        let mut final_lower = vec![None; bars.len()];
-
-        for i in (self.period - 1)..bars.len() {
-            if let Some(bu) = basic_upper[i] {
-                if i == self.period - 1 {
-                    final_upper[i] = Some(bu);
-                } else if let Some(prev_fu) = final_upper[i - 1] {
-                    final_upper[i] = Some(if bu < prev_fu || bars[i - 1].close_price > prev_fu {
-                        bu
+            // Calculate final bands
+            let final_upper = match self.prev_final_upper {
+                Some(prev_fu) => {
+                    if basic_upper < prev_fu || self.prev_close.is_some_and(|pc| pc > prev_fu) {
+                        basic_upper
                     } else {
                         prev_fu
-                    });
-                } else {
-                    final_upper[i] = Some(bu);
+                    }
                 }
-            }
+                None => basic_upper,
+            };
 
-            if let Some(bl) = basic_lower[i] {
-                if i == self.period - 1 {
-                    final_lower[i] = Some(bl);
-                } else if let Some(prev_fl) = final_lower[i - 1] {
-                    final_lower[i] = Some(if bl > prev_fl || bars[i - 1].close_price < prev_fl {
-                        bl
+            let final_lower = match self.prev_final_lower {
+                Some(prev_fl) => {
+                    if basic_lower > prev_fl || self.prev_close.is_some_and(|pc| pc < prev_fl) {
+                        basic_lower
                     } else {
                         prev_fl
-                    });
-                } else {
-                    final_lower[i] = Some(bl);
+                    }
                 }
-            }
+                None => basic_lower,
+            };
+
+            // Determine trend direction
+            let (direction, trend_value) = match self.prev_direction {
+                Some(1) => {
+                    // Was uptrend
+                    if bar.close_price < self.prev_final_lower.unwrap_or(final_lower) {
+                        (-1, final_upper)
+                    } else {
+                        (1, final_lower)
+                    }
+                }
+                Some(-1) => {
+                    // Was downtrend
+                    if bar.close_price > self.prev_final_upper.unwrap_or(final_upper) {
+                        (1, final_lower)
+                    } else {
+                        (-1, final_upper)
+                    }
+                }
+                _ => {
+                    // Initial trend
+                    if bar.close_price > final_upper {
+                        (1, final_lower)
+                    } else {
+                        (-1, final_upper)
+                    }
+                }
+            };
+
+            self.trend_direction.push(Some(direction));
+            self.trend_values.push(Some(trend_value));
+
+            // Store state for next iteration
+            self.prev_final_upper = Some(final_upper);
+            self.prev_final_lower = Some(final_lower);
+            self.prev_direction = Some(direction);
+
+            self.base.check_initialized(self.period);
+        } else {
+            self.trend_direction.push(None);
+            self.trend_values.push(None);
         }
 
-        // Determine trend and SuperTrend values
-        // Direction: 1 = uptrend (bullish, use lower band), -1 = downtrend (bearish, use upper band)
-        for i in (self.period - 1)..bars.len() {
-            if i == self.period - 1 {
-                // Initial trend
-                if let (Some(fu), Some(fl)) = (final_upper[i], final_lower[i]) {
-                    if bars[i].close_price > fu {
-                        self.trend_direction[i] = Some(1);
-                        self.trend_values[i] = Some(fl);
-                    } else {
-                        self.trend_direction[i] = Some(-1);
-                        self.trend_values[i] = Some(fu);
-                    }
-                }
-            } else if let (Some(prev_dir), Some(prev_st), Some(fu), Some(fl)) = (
-                self.trend_direction[i - 1],
-                self.trend_values[i - 1],
-                final_upper[i],
-                final_lower[i],
-            ) {
-                if prev_dir == 1 {
-                    // Was uptrend: flip to downtrend if close < previous SuperTrend
-                    if bars[i].close_price < prev_st {
-                        self.trend_direction[i] = Some(-1);
-                        self.trend_values[i] = Some(fu);
-                    } else {
-                        self.trend_direction[i] = Some(1);
-                        self.trend_values[i] = Some(fl);
-                    }
-                } else {
-                    // Was downtrend: flip to uptrend if close > previous SuperTrend
-                    if bars[i].close_price > prev_st {
-                        self.trend_direction[i] = Some(1);
-                        self.trend_values[i] = Some(fl);
-                    } else {
-                        self.trend_direction[i] = Some(-1);
-                        self.trend_values[i] = Some(fu);
-                    }
-                }
-            }
+        self.prev_close = Some(bar.close_price);
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.trend_values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.trend_values.clear();
+        self.trend_direction.clear();
+        self.tr_window.clear();
+        self.atr_value = None;
+        self.prev_close = None;
+        self.prev_final_upper = None;
+        self.prev_final_lower = None;
+        self.prev_direction = None;
+        self.base.reset_base();
+    }
+
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
         }
     }
 
@@ -1151,24 +1490,379 @@ impl Indicator for SUPER {
     }
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
-        if self.trend_values.is_empty() || min_ix > max_ix || min_ix >= self.trend_values.len() {
-            return None;
-        }
-
-        let end_ix = max_ix.min(self.trend_values.len().saturating_sub(1));
-        let values: Vec<f64> = self.trend_values[min_ix..=end_ix]
-            .iter()
-            .filter_map(|v| *v)
-            .collect();
-
-        if values.is_empty() {
-            return None;
-        }
-
-        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Some((min, max))
+        IndicatorBase::get_y_range_for_values(&self.trend_values, min_ix, max_ix)
     }
+}
+
+/// Custom indicator built from a user-supplied expression.
+///
+/// Supported variables: `open`, `high`, `low`, `close`, `volume`
+/// Supported operators: `+`, `-`, `*`, `/`, `()` and numeric constants.
+/// Example expressions: `close * 1.02`, `(high + low) / 2`, `volume / 1000`
+pub struct CustomIndicator {
+    name: String,
+    expression: String,
+    values: Vec<Option<f64>>,
+    config: IndicatorLineConfig,
+    location: IndicatorLocation,
+    base: IndicatorBase,
+}
+
+impl CustomIndicator {
+    pub fn new(
+        name: String,
+        expression: String,
+        color: Color32,
+        location: IndicatorLocation,
+    ) -> Self {
+        Self {
+            name,
+            expression,
+            values: Vec::new(),
+            config: IndicatorLineConfig {
+                name: String::new(), // filled from self.name in Indicator::name()
+                color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            location,
+            base: IndicatorBase::new("Custom", location),
+        }
+    }
+
+    /// Evaluate the stored expression for a single bar.
+    fn evaluate_expr(&self, bar: &BarData) -> Option<f64> {
+        let tokens = match tokenize(&self.expression) {
+            Ok(t) => t,
+            Err(_) => return None,
+        };
+        let mut parser = ExprParser::new(&tokens);
+        let result = parser.parse_expr();
+        if parser.pos != tokens.len() {
+            return None; // leftover tokens → parse error
+        }
+        result.map(|node| node.eval(bar))
+    }
+}
+
+impl Indicator for CustomIndicator {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+        self.values.push(self.evaluate_expr(bar));
+        self.base.check_initialized(1);
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.base.reset_base();
+    }
+
+    fn calculate(&mut self, bars: &[BarData]) {
+        self.reset();
+        for bar in bars {
+            self.update(bar);
+        }
+    }
+
+    fn series_count(&self) -> usize {
+        1
+    }
+
+    fn get_value(&self, bar_index: usize, _series_index: usize) -> Option<f64> {
+        self.values.get(bar_index).and_then(|v| *v)
+    }
+
+    fn get_line_config(&self, _series_index: usize) -> Option<&IndicatorLineConfig> {
+        Some(&self.config)
+    }
+
+    fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Simple recursive-descent expression parser
+// ---------------------------------------------------------------------------
+
+/// Tokens produced by the lexer.
+#[derive(Debug, Clone, PartialEq)]
+enum Token {
+    Number(f64),
+    Var(String), // open, high, low, close, volume
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    LParen,
+    RParen,
+}
+
+/// Tokenise an expression string.
+fn tokenize(input: &str) -> Result<Vec<Token>, String> {
+    let mut tokens = Vec::new();
+    let mut chars = input.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            ' ' | '\t' | '\n' | '\r' => {
+                chars.next();
+            }
+            '+' => {
+                chars.next();
+                tokens.push(Token::Plus);
+            }
+            '-' => {
+                chars.next();
+                tokens.push(Token::Minus);
+            }
+            '*' => {
+                chars.next();
+                tokens.push(Token::Star);
+            }
+            '/' => {
+                chars.next();
+                tokens.push(Token::Slash);
+            }
+            '(' => {
+                chars.next();
+                tokens.push(Token::LParen);
+            }
+            ')' => {
+                chars.next();
+                tokens.push(Token::RParen);
+            }
+            '0'..='9' | '.' => {
+                let mut num_str = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_digit() || c == '.' {
+                        num_str.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let val: f64 = num_str
+                    .parse()
+                    .map_err(|_| format!("Invalid number: {}", num_str))?;
+                tokens.push(Token::Number(val));
+            }
+            'a'..='z' | 'A'..='Z' | '_' => {
+                let mut ident = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        ident.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                match ident.as_str() {
+                    "open" | "high" | "low" | "close" | "volume" => {
+                        tokens.push(Token::Var(ident));
+                    }
+                    other => return Err(format!("Unknown variable: {}", other)),
+                }
+            }
+            other => return Err(format!("Unexpected character: {}", other)),
+        }
+    }
+    Ok(tokens)
+}
+
+/// AST node for the expression.
+#[derive(Debug, Clone)]
+enum ExprNode {
+    Number(f64),
+    Var(String),
+    BinaryOp {
+        op: BinOp,
+        left: Box<ExprNode>,
+        right: Box<ExprNode>,
+    },
+    Negate(Box<ExprNode>),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl ExprNode {
+    fn eval(&self, bar: &BarData) -> f64 {
+        match self {
+            ExprNode::Number(v) => *v,
+            ExprNode::Var(name) => match name.as_str() {
+                "open" => bar.open_price,
+                "high" => bar.high_price,
+                "low" => bar.low_price,
+                "close" => bar.close_price,
+                "volume" => bar.volume,
+                _ => f64::NAN,
+            },
+            ExprNode::BinaryOp { op, left, right } => {
+                let l = left.eval(bar);
+                let r = right.eval(bar);
+                match op {
+                    BinOp::Add => l + r,
+                    BinOp::Sub => l - r,
+                    BinOp::Mul => l * r,
+                    BinOp::Div => {
+                        if r.abs() < 1e-12 {
+                            f64::NAN
+                        } else {
+                            l / r
+                        }
+                    }
+                }
+            }
+            ExprNode::Negate(inner) => -inner.eval(bar),
+        }
+    }
+}
+
+/// Recursive-descent parser.
+///
+/// Grammar (precedence low→high):
+///   expr   = term (('+' | '-') term)*
+///   term   = unary (('*' | '/') unary)*
+///   unary  = '-' unary | atom
+///   atom   = NUMBER | VAR | '(' expr ')'
+struct ExprParser<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+}
+
+impl<'a> ExprParser<'a> {
+    fn new(tokens: &'a [Token]) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
+    }
+
+    fn advance(&mut self) -> Option<&Token> {
+        let tok = self.tokens.get(self.pos);
+        self.pos += 1;
+        tok
+    }
+
+    /// Parse a full expression.
+    fn parse_expr(&mut self) -> Option<ExprNode> {
+        let mut left = self.parse_term()?;
+        while let Some(Token::Plus | Token::Minus) = self.peek() {
+            let op = match self.advance()? {
+                Token::Plus => BinOp::Add,
+                Token::Minus => BinOp::Sub,
+                _ => unreachable!(),
+            };
+            let right = self.parse_term()?;
+            left = ExprNode::BinaryOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Some(left)
+    }
+
+    fn parse_term(&mut self) -> Option<ExprNode> {
+        let mut left = self.parse_unary()?;
+        while let Some(Token::Star | Token::Slash) = self.peek() {
+            let op = match self.advance()? {
+                Token::Star => BinOp::Mul,
+                Token::Slash => BinOp::Div,
+                _ => unreachable!(),
+            };
+            let right = self.parse_unary()?;
+            left = ExprNode::BinaryOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Some(left)
+    }
+
+    fn parse_unary(&mut self) -> Option<ExprNode> {
+        if let Some(Token::Minus) = self.peek() {
+            self.advance();
+            let inner = self.parse_unary()?;
+            Some(ExprNode::Negate(Box::new(inner)))
+        } else {
+            self.parse_atom()
+        }
+    }
+
+    fn parse_atom(&mut self) -> Option<ExprNode> {
+        match self.peek()? {
+            Token::Number(_) => {
+                if let Some(Token::Number(v)) = self.advance().cloned() {
+                    Some(ExprNode::Number(v))
+                } else {
+                    None
+                }
+            }
+            Token::Var(_) => {
+                if let Some(Token::Var(name)) = self.advance().cloned() {
+                    Some(ExprNode::Var(name))
+                } else {
+                    None
+                }
+            }
+            Token::LParen => {
+                self.advance(); // consume '('
+                let node = self.parse_expr();
+                if let Some(Token::RParen) = self.peek() {
+                    self.advance(); // consume ')'
+                }
+                node
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Validate an expression string. Returns `Ok(())` if it tokenises and parses.
+pub fn validate_expression(expr: &str) -> Result<(), String> {
+    let tokens = tokenize(expr)?;
+    let mut parser = ExprParser::new(&tokens);
+    let node = parser
+        .parse_expr()
+        .ok_or_else(|| "Failed to parse expression".to_string())?;
+    if parser.pos != tokens.len() {
+        return Err("Unexpected tokens after expression".to_string());
+    }
+    // Quick-evaluate on a dummy bar to make sure variables resolve without panic.
+    let dummy = BarData::new(
+        String::new(),
+        String::new(),
+        crate::trader::constant::Exchange::Local,
+        chrono::Utc::now(),
+    );
+    let _val = node.eval(&dummy);
+    Ok(())
 }
 
 /// Indicator type enum for UI selection

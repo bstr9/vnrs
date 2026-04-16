@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use crate::chart::ChartWidget;
 use crate::trader::object::BarData;
+use crate::mcp::UICommand;
 use chrono::{Utc, Timelike, Duration, Datelike};
 
 /// Panel visibility state
@@ -171,6 +172,7 @@ impl MainWindow {
                     if let Some(chart) = self.charts.get_mut(&vt_symbol) {
                         tracing::info!("加载历史数据到图表: {} ({} 条)", vt_symbol, bars.len());
                         chart.update_history(bars);
+                        chart.set_loading_history(false);
                     }
                 }
             }
@@ -583,6 +585,21 @@ impl MainWindow {
         }
     }
     
+    /// Calculate appropriate history query duration based on interval
+    /// More granular intervals need shorter windows, coarser intervals need longer windows
+    fn history_duration_for_interval(interval: crate::trader::Interval) -> Duration {
+        match interval {
+            crate::trader::Interval::Second => Duration::hours(4),
+            crate::trader::Interval::Minute => Duration::days(3),
+            crate::trader::Interval::Minute15 => Duration::days(14),
+            crate::trader::Interval::Hour => Duration::days(30),
+            crate::trader::Interval::Hour4 => Duration::days(90),
+            crate::trader::Interval::Daily => Duration::days(365),
+            crate::trader::Interval::Weekly => Duration::days(730),
+            crate::trader::Interval::Tick => Duration::hours(1),
+        }
+    }
+    
     /// Open or focus chart window for a symbol
     pub fn open_chart(&mut self, vt_symbol: &str) {
         if !self.charts.contains_key(vt_symbol) {
@@ -619,6 +636,9 @@ impl MainWindow {
             chart.set_price_decimals(2);
             chart.set_show_volume(true);
             
+            let interval = chart.get_interval();
+            let duration = Self::history_duration_for_interval(interval);
+            
             self.charts.insert(vt_symbol.to_string(), chart);
             tracing::info!("打开K线图: {}", vt_symbol);
             
@@ -636,9 +656,9 @@ impl MainWindow {
                 let req = crate::trader::HistoryRequest {
                     symbol: sym,
                     exchange,
-                    start: Utc::now() - Duration::days(1), // Query last 24 hours
+                    start: Utc::now() - duration,
                     end: Some(Utc::now()),
-                    interval: Some(crate::trader::Interval::Minute),
+                    interval: Some(interval),
                 };
                 
                 let engine_clone = engine.clone();
@@ -666,6 +686,7 @@ impl MainWindow {
     fn show_chart_windows(&mut self, ctx: &Context) {
         let mut to_remove = Vec::new();
         let mut interval_changes: Vec<(String, crate::trader::Interval)> = Vec::new();
+        let mut need_more_history: Vec<(String, chrono::DateTime<chrono::Utc>, crate::trader::Interval)> = Vec::new();
         
         for (vt_symbol, chart) in &mut self.charts {
             let mut is_open = true;
@@ -678,6 +699,13 @@ impl MainWindow {
                     if let Some(evt) = event {
                         if evt.interval_changed {
                             interval_changes.push((vt_symbol.clone(), evt.new_interval));
+                        }
+                        if evt.need_more_history {
+                            if let Some(earliest) = chart.get_earliest_bar_time() {
+                                let interval = chart.get_interval();
+                                need_more_history.push((vt_symbol.clone(), earliest, interval));
+                                chart.set_loading_history(true);
+                            }
                         }
                     }
                 });
@@ -693,13 +721,19 @@ impl MainWindow {
         }
 
         for (vt_symbol, interval) in interval_changes {
+            // Clear old bar data before loading new interval
+            if let Some(chart) = self.charts.get_mut(&vt_symbol) {
+                chart.clear_data();
+            }
+
             if let Some(ref engine) = self.main_engine {
                 let (sym, exchange) = crate::trader::utility::extract_vt_symbol(&vt_symbol)
                     .unwrap_or((vt_symbol.clone(), crate::trader::Exchange::Binance));
+                let duration = Self::history_duration_for_interval(interval);
                 let req = crate::trader::HistoryRequest {
                     symbol: sym,
                     exchange,
-                    start: chrono::Utc::now() - chrono::Duration::days(1),
+                    start: chrono::Utc::now() - duration,
                     end: Some(chrono::Utc::now()),
                     interval: Some(interval),
                 };
@@ -729,6 +763,50 @@ impl MainWindow {
                         }
                         Err(e) => {
                             tracing::warn!("周期切换查询历史数据失败: {}", e);
+                        }
+                    }
+                });
+            }
+        }
+
+        // Handle requests for more historical data (drag-to-load)
+        for (vt_symbol, earliest_time, interval) in need_more_history {
+            if let Some(ref engine) = self.main_engine {
+                let (sym, exchange) = crate::trader::utility::extract_vt_symbol(&vt_symbol)
+                    .unwrap_or((vt_symbol.clone(), crate::trader::Exchange::Binance));
+                let duration = Self::history_duration_for_interval(interval);
+                let req = crate::trader::HistoryRequest {
+                    symbol: sym,
+                    exchange,
+                    start: earliest_time - duration,
+                    end: Some(earliest_time),
+                    interval: Some(interval),
+                };
+
+                let gateway_name = if exchange == crate::trader::Exchange::Binance {
+                    if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
+                        "BINANCE_SPOT".to_string()
+                    } else if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
+                        "BINANCE_USDT".to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
+                let engine_clone = engine.clone();
+                let pending_data = self.pending_history_data.clone();
+                let vt_sym = vt_symbol.clone();
+                tokio::spawn(async move {
+                    match engine_clone.query_history(req, &gateway_name).await {
+                        Ok(bars) => {
+                            tracing::info!("加载更多历史数据: {} 条, symbol: {}", bars.len(), vt_sym);
+                            let mut data = pending_data.lock().await;
+                            data.insert(vt_sym, bars);
+                        }
+                        Err(e) => {
+                            tracing::warn!("加载更多历史数据失败: {}", e);
                         }
                     }
                 });
@@ -783,6 +861,206 @@ impl MainWindow {
         let result = self.pending_close;
         self.pending_close = false;
         result
+    }
+    
+    /// Handle MCP command from AI assistant
+    pub fn handle_mcp_command(&mut self, cmd: UICommand) {
+        match cmd {
+            UICommand::SwitchSymbol { symbol } => {
+                // Set the symbol in trading widget - parse vt_symbol if present
+                if let Some((sym, exchange)) = crate::trader::utility::extract_vt_symbol(&symbol) {
+                    self.trading.set_symbol(&sym, exchange);
+                } else {
+                    self.trading.set_symbol(&symbol, crate::trader::Exchange::Binance);
+                }
+                // Open chart for this symbol
+                self.open_chart(&symbol);
+                tracing::info!("MCP: 切换到品种 {}", symbol);
+            }
+            
+            UICommand::SwitchInterval { interval } => {
+                // Find the active chart and switch interval
+                if let Some((_, chart)) = self.charts.iter_mut().next() {
+                    if let Ok(interval_enum) = parse_interval(&interval) {
+                        chart.set_interval(interval_enum);
+                    }
+                }
+                tracing::info!("MCP: 切换周期到 {}", interval);
+            }
+            
+            UICommand::AddIndicator { indicator_type, period } => {
+                // Add indicator to active chart
+                if let Some((_, chart)) = self.charts.iter_mut().next() {
+                    let indicator = create_indicator(&indicator_type, period.unwrap_or(20));
+                    chart.add_indicator(indicator);
+                }
+                tracing::info!("MCP: 添加指标 {} (周期: {:?})", indicator_type, period);
+            }
+            
+            UICommand::RemoveIndicator { index } => {
+                if let Some((_, chart)) = self.charts.iter_mut().next() {
+                    chart.remove_indicator(index);
+                }
+                tracing::info!("MCP: 删除指标 {}", index);
+            }
+            
+            UICommand::ClearIndicators => {
+                if let Some((_, chart)) = self.charts.iter_mut().next() {
+                    chart.clear_indicators();
+                }
+                tracing::info!("MCP: 清除所有指标");
+            }
+            
+            UICommand::NavigateTo { tab } => {
+                // Switch to the specified tab
+                match tab.as_str() {
+                    "tick" => self.central_tab = CentralTab::Tick,
+                    "order" => self.central_tab = CentralTab::Order,
+                    "active_order" => self.central_tab = CentralTab::ActiveOrder,
+                    "trade" => self.central_tab = CentralTab::Trade,
+                    "backtesting" => self.central_tab = CentralTab::Backtesting,
+                    "log" => self.bottom_tab = BottomTab::Log,
+                    "account" => self.bottom_tab = BottomTab::Account,
+                    "position" => self.bottom_tab = BottomTab::Position,
+                    _ => {}
+                }
+                tracing::info!("MCP: 切换到标签页 {}", tab);
+            }
+            
+            UICommand::ShowNotification { message, level } => {
+                // Log the notification (toast UI can be added later)
+                match level.as_str() {
+                    "error" => tracing::error!("MCP 通知: {}", message),
+                    "warn" => tracing::warn!("MCP 通知: {}", message),
+                    _ => tracing::info!("MCP 通知: {}", message),
+                }
+            }
+            
+            // Backend commands - these go through the pending system
+            UICommand::Connect { gateway_name, settings } => {
+                if let serde_json::Value::Object(map) = settings {
+                    let mut hm = std::collections::HashMap::new();
+                    for (k, v) in map {
+                        hm.insert(k, v);
+                    }
+                    self.pending_connect = Some((gateway_name, hm));
+                }
+                tracing::info!("MCP: 连接网关");
+            }
+            
+            UICommand::Subscribe { symbol, exchange, gateway_name } => {
+                let exchange_enum = parse_exchange(&exchange);
+                let req = crate::trader::SubscribeRequest::new(symbol, exchange_enum);
+                self.trading.set_subscribe_request(req, &gateway_name);
+                tracing::info!("MCP: 订阅行情");
+            }
+            
+            UICommand::SendOrder { symbol, exchange, direction, order_type, volume, price, offset, gateway_name } => {
+                let exchange_enum = parse_exchange(&exchange);
+                let direction_enum = parse_direction(&direction);
+                let order_type_enum = parse_order_type(&order_type);
+                let offset_enum = offset
+                    .as_deref()
+                    .map(parse_offset)
+                    .unwrap_or(crate::trader::Offset::None);
+                
+                let req = crate::trader::OrderRequest {
+                    symbol,
+                    exchange: exchange_enum,
+                    direction: direction_enum,
+                    order_type: order_type_enum,
+                    volume,
+                    price: price.unwrap_or(0.0),
+                    offset: offset_enum,
+                    reference: "MCP".to_string(),
+                };
+                self.trading.set_order_request(req, &gateway_name);
+                tracing::info!("MCP: 下单请求");
+            }
+            
+            UICommand::CancelOrder { order_id, symbol: _, exchange: _, gateway_name: _ } => {
+                self.pending_cancel_order = Some(order_id);
+                tracing::info!("MCP: 撤单请求");
+            }
+        }
+    }
+}
+
+/// Parse interval string to Interval enum
+fn parse_interval(s: &str) -> Result<crate::trader::Interval, String> {
+    match s.to_lowercase().as_str() {
+        "1s" | "second" => Ok(crate::trader::Interval::Second),
+        "1m" | "minute" => Ok(crate::trader::Interval::Minute),
+        "15m" => Ok(crate::trader::Interval::Minute15),
+        "1h" | "hour" => Ok(crate::trader::Interval::Hour),
+        "4h" => Ok(crate::trader::Interval::Hour4),
+        "1d" | "day" | "daily" => Ok(crate::trader::Interval::Daily),
+        "1w" | "week" | "weekly" => Ok(crate::trader::Interval::Weekly),
+        _ => Err(format!("Unknown interval: {}", s)),
+    }
+}
+
+/// Parse exchange string to Exchange enum
+fn parse_exchange(s: &str) -> crate::trader::Exchange {
+    match s.to_uppercase().as_str() {
+        "BINANCE" | "BINANCE_SPOT" => crate::trader::Exchange::Binance,
+        "BINANCE_USDM" | "BINANCE_USDT" => crate::trader::Exchange::BinanceUsdm,
+        "BINANCE_COINM" => crate::trader::Exchange::BinanceCoinm,
+        _ => crate::trader::Exchange::Local,
+    }
+}
+
+/// Parse direction string to Direction enum
+fn parse_direction(s: &str) -> crate::trader::Direction {
+    match s.to_lowercase().as_str() {
+        "long" | "buy" | "多" => crate::trader::Direction::Long,
+        "short" | "sell" | "空" => crate::trader::Direction::Short,
+        _ => crate::trader::Direction::Net,
+    }
+}
+
+/// Parse order type string to OrderType enum
+fn parse_order_type(s: &str) -> crate::trader::OrderType {
+    match s.to_lowercase().as_str() {
+        "limit" | "限价" => crate::trader::OrderType::Limit,
+        "market" | "市价" => crate::trader::OrderType::Market,
+        "fak" => crate::trader::OrderType::Fak,
+        "fok" => crate::trader::OrderType::Fok,
+        "stop" => crate::trader::OrderType::Stop,
+        _ => crate::trader::OrderType::Limit,
+    }
+}
+
+/// Parse offset string to Offset enum
+fn parse_offset(s: &str) -> crate::trader::Offset {
+    match s.to_lowercase().as_str() {
+        "open" | "开仓" | "开" => crate::trader::Offset::Open,
+        "close" | "平仓" | "平" => crate::trader::Offset::Close,
+        "closetoday" | "平今" => crate::trader::Offset::CloseToday,
+        "closeyesterday" | "平昨" => crate::trader::Offset::CloseYesterday,
+        _ => crate::trader::Offset::None,
+    }
+}
+
+/// Create an indicator Box from type string and period
+fn create_indicator(indicator_type: &str, period: usize) -> Box<dyn crate::chart::Indicator> {
+    use crate::chart::*;
+    use egui::Color32;
+    
+    let main_loc = IndicatorLocation::Main;
+    let sub_loc = IndicatorLocation::Sub;
+    
+    match indicator_type.to_uppercase().as_str() {
+        "MA" | "SMA" => Box::new(MA::new(period, Color32::YELLOW, main_loc)),
+        "EMA" => Box::new(EMA::new(period, Color32::from_rgb(0, 200, 255), main_loc)),
+        "WMA" => Box::new(WMA::new(period, Color32::from_rgb(255, 150, 0), main_loc)),
+        "BOLL" | "BOLLINGER" => Box::new(BOLL::new(period, 2.0, main_loc)),
+        "VWAP" => Box::new(VWAP::new(Color32::from_rgb(0, 255, 200), main_loc)),
+        "AVL" => Box::new(AVL::new(Color32::WHITE, main_loc)),
+        "TRIX" => Box::new(TRIX::new(period, 9, Color32::from_rgb(200, 100, 255), Color32::from_rgb(255, 100, 0), sub_loc)),
+        "SAR" => Box::new(SAR::new(0.02, 0.2, Color32::from_rgb(0, 255, 0), main_loc)),
+        "SUPER" | "SUPERTREND" => Box::new(SUPER::new(period, 3.0, Color32::GREEN, Color32::RED, main_loc)),
+        _ => Box::new(MA::new(period, Color32::YELLOW, main_loc)),
     }
 }
 

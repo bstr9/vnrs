@@ -7,6 +7,6 @@ pub mod template;
 pub mod engine;
 pub mod base;
 
-pub use template::{StrategyTemplate, StrategyContext};
+pub use template::{StrategyTemplate, StrategyContext, IndicatorRef};
 pub use engine::StrategyEngine;
 pub use base::{StrategyType, StrategyState, StopOrder, StopOrderStatus};

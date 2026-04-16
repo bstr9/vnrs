@@ -15,6 +15,8 @@ use trade_engine::gateway::binance::{BinanceSpotGateway, BinanceUsdtGateway};
 
 #[cfg(feature = "gui")]
 use trade_engine::trader::ui::MainWindow;
+#[cfg(feature = "gui")]
+use trade_engine::mcp::{TradingMcpServer, UICommand};
 
 /// Application state holding all trading components
 struct TradeEngineApp {
@@ -26,6 +28,13 @@ struct TradeEngineApp {
     /// Main window UI (GUI mode only)
     #[cfg(feature = "gui")]
     main_window: MainWindow,
+    /// MCP Server (optional, only if GUI feature enabled)
+    #[cfg(feature = "gui")]
+    #[allow(dead_code)]
+    mcp_server: Option<TradingMcpServer>,
+    /// MCP command receiver
+    #[cfg(feature = "gui")]
+    mcp_command_rx: Option<tokio::sync::mpsc::UnboundedReceiver<UICommand>>,
     /// Runtime handle for async operations
     runtime: tokio::runtime::Handle,
 }
@@ -97,6 +106,10 @@ impl TradeEngineApp {
             main_window.setup_style(&cc.egui_ctx);
         }
         
+        // Create MCP Server (after main_engine is created)
+        #[cfg(feature = "gui")]
+        let (mcp_server, mcp_command_rx) = TradingMcpServer::new(main_engine.clone());
+        
         info!("✅ Trading Engine 启动完成");
         
         Self {
@@ -104,6 +117,10 @@ impl TradeEngineApp {
             event_engine,
             #[cfg(feature = "gui")]
             main_window,
+            #[cfg(feature = "gui")]
+            mcp_server: Some(mcp_server),
+            #[cfg(feature = "gui")]
+            mcp_command_rx: Some(mcp_command_rx),
             runtime,
         }
     }
@@ -256,6 +273,13 @@ impl eframe::App for TradeEngineApp {
             // Show main window UI
             self.main_window.show(ctx);
             
+            // Process MCP commands (non-blocking)
+            if let Some(ref mut rx) = self.mcp_command_rx {
+                while let Ok(cmd) = rx.try_recv() {
+                    self.main_window.handle_mcp_command(cmd);
+                }
+            }
+            
             // Process any pending UI actions
             self.process_ui_actions();
             
@@ -342,6 +366,44 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("🚀 启动 Trade Engine...");
     info!("📦 版本: {}", trade_engine::VERSION);
     info!("🦀 Rust 版本: {}", rustc_version_runtime::version());
+    
+    // Check for MCP mode via environment variable
+    #[cfg(feature = "gui")]
+    if std::env::var("MCP_MODE").is_ok() {
+        // Run in MCP stdio mode (for Claude Desktop)
+        let event_engine = Arc::new(EventEngine::new(10));
+        let main_engine = Arc::new(MainEngine::new());
+        
+        // Register Binance gateways
+        let binance_spot = Arc::new(BinanceSpotGateway::new("BINANCE_SPOT"));
+        let binance_usdt = Arc::new(BinanceUsdtGateway::new("BINANCE_USDT"));
+        let event_sender = main_engine.get_event_sender();
+        let spot_sender = GatewayEventSender::new("BINANCE_SPOT".to_string(), event_sender.clone());
+        let usdt_sender = GatewayEventSender::new("BINANCE_USDT".to_string(), event_sender);
+        let spot = binance_spot.clone();
+        let usdt = binance_usdt.clone();
+        runtime.spawn(async move {
+            spot.set_event_sender(spot_sender).await;
+            usdt.set_event_sender(usdt_sender).await;
+        });
+        main_engine.add_gateway(binance_spot);
+        main_engine.add_gateway(binance_usdt);
+        
+        // Start event engine
+        let engine = main_engine.clone();
+        runtime.spawn(async move {
+            engine.start().await;
+        });
+        drop(event_engine);
+        
+        let (mcp_server, _) = TradingMcpServer::new(main_engine);
+        runtime.block_on(async {
+            if let Err(e) = mcp_server.serve_stdio().await {
+                tracing::error!("MCP Server error: {}", e);
+            }
+        });
+        return Ok(());
+    }
     
     // Run the application
     eframe::run_native(

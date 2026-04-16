@@ -9,7 +9,8 @@ use super::base::{
     GREY_COLOR, INFO_BOX_HEIGHT, INFO_BOX_WIDTH, MARGIN, MIN_BAR_COUNT, WHITE_COLOR,
 };
 use super::indicator::{
-    Indicator, IndicatorLocation, IndicatorType, AVL, BOLL, EMA, MA, SAR, SUPER, TRIX, VWAP, WMA,
+    validate_expression, CustomIndicator, Indicator, IndicatorLocation, IndicatorType, AVL, BOLL,
+    EMA, MA, SAR, SUPER, TRIX, VWAP, WMA,
 };
 use super::item::{CandleItem, ChartItem, TradeOverlay, VolumeItem};
 use super::manager::BarManager;
@@ -23,6 +24,8 @@ pub struct ChartEvent {
     pub interval_changed: bool,
     /// The new interval
     pub new_interval: Interval,
+    /// User scrolled/dragged to the left edge and needs more historical data
+    pub need_more_history: bool,
 }
 
 /// Main chart widget
@@ -65,6 +68,16 @@ pub struct ChartWidget {
     show_time_selector: bool,
     /// Time range filter (start, end) - None means show all
     time_range: Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>,
+    /// Show indicator manager panel
+    show_indicator_manager: bool,
+    /// Custom indicator name input
+    custom_indicator_name: String,
+    /// Custom indicator expression input
+    custom_indicator_expr: String,
+    /// Custom indicator error message
+    custom_indicator_error: Option<String>,
+    /// Whether a history load request is in progress (prevents duplicate requests)
+    loading_history: bool,
 }
 
 /// Indicator configuration state
@@ -124,6 +137,11 @@ impl ChartWidget {
             indicator_config: IndicatorConfig::default(),
             show_time_selector: false,
             time_range: None,
+            show_indicator_manager: false,
+            custom_indicator_name: String::new(),
+            custom_indicator_expr: String::new(),
+            custom_indicator_error: None,
+            loading_history: false,
         }
     }
 
@@ -152,6 +170,16 @@ impl ChartWidget {
         self.interval
     }
 
+    /// Mark that a history load is in progress
+    pub fn set_loading_history(&mut self, loading: bool) {
+        self.loading_history = loading;
+    }
+
+    /// Get the datetime of the earliest bar in the manager
+    pub fn get_earliest_bar_time(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.manager.get_earliest_time()
+    }
+
     /// Add an indicator
     pub fn add_indicator(&mut self, indicator: Box<dyn Indicator>) {
         self.indicators.push(indicator);
@@ -161,6 +189,30 @@ impl ChartWidget {
     /// Remove all indicators
     pub fn clear_indicators(&mut self) {
         self.indicators.clear();
+    }
+
+    /// Clear all bar data (used before loading new interval data)
+    pub fn clear_data(&mut self) {
+        self.manager.clear();
+        self.right_ix = 0;
+        self.loading_history = false;
+    }
+
+    /// Remove a specific indicator by index
+    pub fn remove_indicator(&mut self, index: usize) {
+        if index < self.indicators.len() {
+            self.indicators.remove(index);
+        }
+    }
+
+    /// Get the number of active indicators
+    pub fn indicator_count(&self) -> usize {
+        self.indicators.len()
+    }
+
+    /// Get indicator name by index
+    pub fn indicator_name(&self, index: usize) -> Option<&str> {
+        self.indicators.get(index).map(|ind| ind.name())
     }
 
     /// Recalculate all indicators
@@ -258,7 +310,9 @@ impl ChartWidget {
     }
 
     /// Handle mouse drag for panning
-    fn handle_drag(&mut self, response: &Response, candle_rect: Rect) {
+    /// Returns true if user dragged to the left edge and needs more historical data
+    fn handle_drag(&mut self, response: &Response, candle_rect: Rect) -> bool {
+        let mut need_more = false;
         if response.dragged() {
             let delta = response.drag_delta();
             if delta.x != 0.0 {
@@ -268,8 +322,20 @@ impl ChartWidget {
                 let count = self.manager.get_count();
                 let new_right = (self.right_ix as isize + bar_delta).max(0) as usize;
                 self.right_ix = new_right.clamp(self.bar_count, count);
+
+                // Detect if user is trying to scroll past the left edge of available data
+                let left_ix = if self.right_ix >= self.bar_count {
+                    self.right_ix - self.bar_count
+                } else {
+                    0
+                };
+                // If the leftmost visible bar is within 10 bars of the start, and we're dragging left
+                if left_ix < 10 && bar_delta > 0 && !self.loading_history {
+                    need_more = true;
+                }
             }
         }
+        need_more
     }
 
     /// Show the chart widget
@@ -293,6 +359,12 @@ impl ChartWidget {
 
                 if ui.button("配置指标").clicked() {
                     self.show_indicator_config = !self.show_indicator_config;
+                }
+
+                ui.separator();
+
+                if ui.button("指标管理").clicked() {
+                    self.show_indicator_manager = !self.show_indicator_manager;
                 }
 
                 ui.separator();
@@ -346,6 +418,7 @@ impl ChartWidget {
                                 event = Some(ChartEvent {
                                     interval_changed: true,
                                     new_interval: interval,
+                                    need_more_history: false,
                                 });
                             }
                         }
@@ -752,6 +825,113 @@ impl ChartWidget {
                         }
                     });
             }
+
+            // Show indicator manager panel
+            if self.show_indicator_manager {
+                egui::Window::new("指标管理")
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_width(320.0)
+                    .show(ui.ctx(), |ui| {
+                        // --- Active indicators list ---
+                        ui.heading("已添加指标");
+                        ui.separator();
+
+                        if self.indicators.is_empty() {
+                            ui.label("暂无指标");
+                        } else {
+                            // Collect names first to avoid borrowing issues
+                            let names: Vec<String> = self
+                                .indicators
+                                .iter()
+                                .map(|ind| ind.name().to_string())
+                                .collect();
+                            for (i, name) in names.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{}. {}", i + 1, name));
+                                    if ui.small_button("删除").clicked() {
+                                        self.remove_indicator(i);
+                                    }
+                                });
+                            }
+                        }
+
+                        ui.separator();
+
+                        if ui.button("清除所有指标").clicked() {
+                            self.clear_indicators();
+                        }
+
+                        ui.add_space(8.0);
+
+                        // --- Custom indicator builder ---
+                        ui.heading("自定义指标");
+                        ui.separator();
+
+                        ui.horizontal(|ui| {
+                            ui.label("名称:");
+                            ui.text_edit_singleline(&mut self.custom_indicator_name);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("公式:");
+                            ui.text_edit_singleline(&mut self.custom_indicator_expr);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("变量: open, high, low, close, volume");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("示例: (high + low) / 2, close * 1.02");
+                        });
+
+                        if let Some(ref err) = self.custom_indicator_error {
+                            ui.colored_label(Color32::from_rgb(255, 80, 80), err);
+                        }
+
+                        ui.horizontal(|ui| {
+                            if ui.button("添加自定义指标").clicked() {
+                                self.custom_indicator_error = None;
+                                let name = self.custom_indicator_name.trim().to_string();
+                                let expr = self.custom_indicator_expr.trim().to_string();
+
+                                if name.is_empty() {
+                                    self.custom_indicator_error =
+                                        Some("请输入指标名称".to_string());
+                                } else if expr.is_empty() {
+                                    self.custom_indicator_error = Some("请输入表达式".to_string());
+                                } else if let Err(e) = validate_expression(&expr) {
+                                    self.custom_indicator_error =
+                                        Some(format!("表达式错误: {}", e));
+                                } else {
+                                    // Pick a color based on indicator count for variety
+                                    let colors = [
+                                        Color32::from_rgb(0, 200, 255),
+                                        Color32::from_rgb(255, 128, 0),
+                                        Color32::from_rgb(128, 255, 0),
+                                        Color32::from_rgb(255, 0, 200),
+                                        Color32::from_rgb(0, 255, 200),
+                                        Color32::from_rgb(200, 200, 0),
+                                    ];
+                                    let color = colors[self.indicator_count() % colors.len()];
+                                    self.add_indicator(Box::new(CustomIndicator::new(
+                                        name,
+                                        expr,
+                                        color,
+                                        IndicatorLocation::Main,
+                                    )));
+                                    self.custom_indicator_name.clear();
+                                    self.custom_indicator_expr.clear();
+                                }
+                            }
+
+                            if ui.button("关闭").clicked() {
+                                self.show_indicator_manager = false;
+                                self.custom_indicator_error = None;
+                            }
+                        });
+                    });
+            }
         });
 
         let available_size = ui.available_size();
@@ -844,7 +1024,14 @@ impl ChartWidget {
         };
 
         // Handle drag
-        self.handle_drag(&response, candle_rect);
+        if self.handle_drag(&response, candle_rect) {
+            // User dragged to the left edge - request more history
+            event = Some(ChartEvent {
+                interval_changed: false,
+                new_interval: self.interval,
+                need_more_history: true,
+            });
+        }
 
         // Get visible range
         let (min_ix, max_ix) = self.get_visible_range();
