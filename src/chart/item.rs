@@ -15,7 +15,7 @@ pub trait ChartItem {
     ) -> (f64, f64);
 
     /// Get info text for a specific bar index
-    fn get_info_text(&self, manager: &BarManager, ix: usize) -> String;
+    fn get_info_text(&self, manager: &BarManager, ix: usize, price_decimals: usize) -> String;
 
     /// Draw the item
     #[allow(clippy::too_many_arguments)]
@@ -73,16 +73,17 @@ impl ChartItem for CandleItem {
         manager.get_price_range(min_ix, max_ix)
     }
 
-    fn get_info_text(&self, manager: &BarManager, ix: usize) -> String {
+    fn get_info_text(&self, manager: &BarManager, ix: usize, price_decimals: usize) -> String {
         if let Some(bar) = manager.get_bar(ix as f64) {
             format!(
-                "日期\n{}\n\n时间\n{}\n\n开盘\n{:.4}\n\n最高\n{:.4}\n\n最低\n{:.4}\n\n收盘\n{:.4}",
+                "日期\n{}\n\n时间\n{}\n\n开盘\n{:.prec$}\n\n最高\n{:.prec$}\n\n最低\n{:.prec$}\n\n收盘\n{:.prec$}",
                 bar.datetime.format("%Y-%m-%d"),
                 bar.datetime.format("%H:%M"),
                 bar.open_price,
                 bar.high_price,
                 bar.low_price,
-                bar.close_price
+                bar.close_price,
+                prec = price_decimals,
             )
         } else {
             String::new()
@@ -196,7 +197,7 @@ impl ChartItem for VolumeItem {
         manager.get_volume_range(min_ix, max_ix)
     }
 
-    fn get_info_text(&self, manager: &BarManager, ix: usize) -> String {
+    fn get_info_text(&self, manager: &BarManager, ix: usize, _price_decimals: usize) -> String {
         if let Some(bar) = manager.get_bar(ix as f64) {
             format!("成交量\n{:.2}", bar.volume)
         } else {
@@ -322,7 +323,7 @@ impl TradeOverlay {
         y_min: f64,
         y_max: f64,
     ) {
-        use super::base::{BUY_COLOR, LOSS_COLOR, PROFIT_COLOR, SHORT_COLOR};
+        use super::base::{BUY_COLOR, LOSS_COLOR, PROFIT_COLOR, SELL_COLOR, SHORT_COLOR};
 
         let painter = ui.painter();
         let bar_count = (max_ix - min_ix + 1) as f32;
@@ -399,7 +400,7 @@ impl TradeOverlay {
                     TradeDirection::Sell | TradeDirection::Short => {
                         // Down arrow
                         let color = if marker.direction == TradeDirection::Sell {
-                            BUY_COLOR
+                            SELL_COLOR
                         } else {
                             SHORT_COLOR
                         };

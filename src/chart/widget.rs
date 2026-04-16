@@ -6,11 +6,12 @@ use std::fs;
 
 use super::base::{
     calculate_axis_ticks, format_price, format_volume, AXIS_X_HEIGHT, AXIS_Y_WIDTH, CURSOR_COLOR,
-    GREY_COLOR, INFO_BOX_HEIGHT, INFO_BOX_WIDTH, MARGIN, MIN_BAR_COUNT, WHITE_COLOR,
+    GREY_COLOR, INFO_BOX_MIN_HEIGHT, INFO_BOX_MIN_WIDTH, MARGIN, MIN_BAR_COUNT, SCROLLBAR_HEIGHT,
+    WHITE_COLOR,
 };
 use super::indicator::{
-    validate_expression, CustomIndicator, Indicator, IndicatorLocation, IndicatorType, AVL, BOLL,
-    EMA, MA, SAR, SUPER, TRIX, VWAP, WMA,
+    validate_expression, CustomIndicator, Indicator, IndicatorLocation, IndicatorType, LineStyle,
+    AVL, BOLL, EMA, MA, SAR, SUPER, TRIX, VWAP, WMA,
 };
 use super::item::{CandleItem, ChartItem, TradeOverlay, VolumeItem};
 use super::manager::BarManager;
@@ -80,6 +81,8 @@ pub struct ChartWidget {
     custom_indicator_error: Option<String>,
     /// Whether a history load request is in progress (prevents duplicate requests)
     loading_history: bool,
+    /// Whether the mini scrollbar thumb is being dragged
+    scrollbar_dragging: bool,
 }
 
 /// Indicator configuration state
@@ -144,6 +147,7 @@ impl ChartWidget {
             custom_indicator_expr: String::new(),
             custom_indicator_error: None,
             loading_history: false,
+            scrollbar_dragging: false,
         }
     }
 
@@ -374,6 +378,11 @@ impl ChartWidget {
                 ui.separator();
 
                 ui.checkbox(&mut self.auto_scale_y, "自动缩放");
+
+                ui.separator();
+
+                // Bar count indicator
+                ui.label(format!("显示 {} 根K线", self.bar_count));
 
                 // Save/Load config buttons (only show if symbol is provided)
                 if let Some(sym) = symbol {
@@ -957,7 +966,7 @@ impl ChartWidget {
             Pos2::new(rect.left() + MARGIN, rect.top() + MARGIN),
             Pos2::new(
                 rect.right() - MARGIN - AXIS_Y_WIDTH,
-                rect.bottom() - MARGIN - AXIS_X_HEIGHT,
+                rect.bottom() - MARGIN - AXIS_X_HEIGHT - SCROLLBAR_HEIGHT,
             ),
         );
 
@@ -1072,6 +1081,9 @@ impl ChartWidget {
         let price_min = price_min - price_padding;
         let price_max = price_max + price_padding;
 
+        // Draw grid lines (before candles, so they appear behind)
+        self.draw_grid(ui, candle_rect, price_min, price_max, min_ix, max_ix);
+
         // Draw candle chart
         self.candle_item.draw(
             ui,
@@ -1093,6 +1105,9 @@ impl ChartWidget {
             price_max,
             IndicatorLocation::Main,
         );
+
+        // Draw indicator legend on main chart
+        self.draw_legend(ui, candle_rect);
 
         // Draw trade overlay
         self.trade_overlay.draw(
@@ -1221,6 +1236,9 @@ impl ChartWidget {
         // Draw X-axis (datetime)
         self.draw_x_axis(ui, chart_area, min_ix, max_ix);
 
+        // Draw mini scrollbar
+        self.draw_scrollbar(ui, chart_area, min_ix, max_ix);
+
         // Handle cursor
         if let Some(hover_pos) = response.hover_pos() {
             self.cursor.update_position(
@@ -1249,8 +1267,124 @@ impl ChartWidget {
             );
         }
 
+        // Draw loading overlay if loading history
+        if self.loading_history {
+            let overlay_rect = chart_area;
+            let painter = ui.painter();
+            // Semi-transparent background
+            painter.rect_filled(
+                overlay_rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(0, 0, 0, 120),
+            );
+            // Loading text
+            painter.text(
+                overlay_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "加载中...",
+                egui::FontId::proportional(18.0),
+                Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+            );
+        }
+
         (response, event)
     }
+
+    /// Draw mini scrollbar for quick navigation through chart history
+    fn draw_scrollbar(&mut self, ui: &mut Ui, chart_area: Rect, min_ix: usize, max_ix: usize) {
+        let total_count = self.manager.get_count();
+        if total_count == 0 {
+            return;
+        }
+
+        let painter = ui.painter();
+
+        // Scrollbar sits below the X-axis area
+        let scrollbar_rect = Rect::from_min_max(
+            Pos2::new(chart_area.left(), chart_area.bottom() + AXIS_X_HEIGHT + 2.0),
+            Pos2::new(
+                chart_area.right(),
+                chart_area.bottom() + AXIS_X_HEIGHT + 2.0 + SCROLLBAR_HEIGHT,
+            ),
+        );
+
+        // Background track
+        painter.rect_filled(
+            scrollbar_rect,
+            3.0,
+            Color32::from_rgba_unmultiplied(60, 60, 60, 180),
+        );
+
+        // Calculate thumb position
+        let thumb_start_ratio = min_ix as f32 / total_count as f32;
+        let thumb_end_ratio = (max_ix + 1) as f32 / total_count as f32;
+        let thumb_min_width = 20.0_f32;
+        let thumb_width = (thumb_end_ratio - thumb_start_ratio) * scrollbar_rect.width();
+        let thumb_width = thumb_width.max(thumb_min_width);
+
+        // If thumb would be wider than track, center it
+        let thumb_x_start = if thumb_width >= scrollbar_rect.width() {
+            scrollbar_rect.left()
+        } else {
+            scrollbar_rect.left() + thumb_start_ratio * scrollbar_rect.width()
+        };
+
+        let thumb_rect = Rect::from_min_max(
+            Pos2::new(thumb_x_start, scrollbar_rect.top() + 2.0),
+            Pos2::new(
+                (thumb_x_start + thumb_width).min(scrollbar_rect.right()),
+                scrollbar_rect.bottom() - 2.0,
+            ),
+        );
+
+        // Draw thumb
+        let thumb_color = if self.scrollbar_dragging {
+            Color32::from_rgba_unmultiplied(100, 150, 255, 220)
+        } else {
+            Color32::from_rgba_unmultiplied(80, 120, 200, 180)
+        };
+        painter.rect_filled(thumb_rect, 4.0, thumb_color);
+
+        // Handle interaction
+        let scrollbar_id = egui::Id::new("chart_scrollbar");
+        let scrollbar_response = ui.interact(scrollbar_rect, scrollbar_id, Sense::click_and_drag());
+
+        // Check if clicking on the track (not the thumb) to jump to position
+        if scrollbar_response.clicked() {
+            if let Some(pos) = scrollbar_response.hover_pos() {
+                let click_ratio = (pos.x - scrollbar_rect.left()) / scrollbar_rect.width();
+                let new_right_ix = (click_ratio * total_count as f32) as usize;
+                self.right_ix = new_right_ix.clamp(self.bar_count, total_count);
+            }
+        }
+
+        // Handle dragging the thumb
+        if scrollbar_response.dragged() {
+            self.scrollbar_dragging = true;
+            let drag_delta = scrollbar_response.drag_delta();
+            if drag_delta.x != 0.0 {
+                let delta_ratio = drag_delta.x / scrollbar_rect.width();
+                let bar_delta = (delta_ratio * total_count as f32) as isize;
+                let new_right = (self.right_ix as isize + bar_delta).max(0) as usize;
+                self.right_ix = new_right.clamp(self.bar_count, total_count);
+            }
+        }
+
+        if scrollbar_response.drag_stopped() {
+            self.scrollbar_dragging = false;
+        }
+
+        // Hover effect on thumb
+        if scrollbar_response.hovered() {
+            painter.rect_stroke(
+                thumb_rect,
+                4.0,
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(150, 200, 255, 200)),
+                StrokeKind::Inside,
+            );
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_indicators(
         &self,
@@ -1271,7 +1405,10 @@ impl ChartWidget {
 
             for series_idx in 0..indicator.series_count() {
                 if let Some(config) = indicator.get_line_config(series_idx) {
-                    let mut points = Vec::new();
+                    // Collect segments instead of single points vector
+                    // Each segment is a continuous line, gaps (None values) create new segments
+                    let mut segments: Vec<Vec<Pos2>> = Vec::new();
+                    let mut current_segment: Vec<Pos2> = Vec::new();
 
                     for ix in min_ix..=max_ix {
                         if let Some(value) = indicator.get_value(ix, series_idx) {
@@ -1289,18 +1426,188 @@ impl ChartWidget {
                             };
                             let y = chart_rect.bottom() - (normalized as f32 * chart_rect.height());
 
-                            points.push(Pos2::new(x, y));
+                            current_segment.push(Pos2::new(x, y));
+                        } else {
+                            // None value encountered - end current segment and start new one
+                            if !current_segment.is_empty() {
+                                segments.push(std::mem::take(&mut current_segment));
+                            }
                         }
                     }
 
-                    // Draw line connecting all points
-                    if points.len() > 1 {
-                        painter.add(egui::Shape::line(
-                            points,
-                            config.style.to_stroke(config.width, config.color),
-                        ));
+                    // Don't forget the last segment
+                    if !current_segment.is_empty() {
+                        segments.push(current_segment);
+                    }
+
+                    // Draw each segment separately
+                    for segment in segments {
+                        if segment.len() > 1 {
+                            match config.style {
+                                LineStyle::Solid => {
+                                    painter.add(egui::Shape::line(
+                                        segment,
+                                        egui::Stroke::new(config.width, config.color),
+                                    ));
+                                }
+                                LineStyle::Dashed => {
+                                    LineStyle::draw_dashed_line(
+                                        &painter,
+                                        &segment,
+                                        config.width,
+                                        config.color,
+                                    );
+                                }
+                                LineStyle::Dotted => {
+                                    LineStyle::draw_dotted_line(
+                                        &painter,
+                                        &segment,
+                                        config.width,
+                                        config.color,
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    /// Draw indicator legend in the top-left corner of the chart
+    fn draw_legend(&self, ui: &mut Ui, chart_rect: Rect) {
+        // Collect Main-location indicator legend entries
+        let mut entries: Vec<(String, Color32)> = Vec::new();
+        for indicator in &self.indicators {
+            if indicator.location() != IndicatorLocation::Main {
+                continue;
+            }
+            for series_idx in 0..indicator.series_count() {
+                let bar_count = self.manager.get_count();
+                let value_ix = if self.cursor.visible && self.cursor.x < bar_count {
+                    self.cursor.x
+                } else {
+                    bar_count.saturating_sub(1)
+                };
+                if let Some(value) = indicator.get_value(value_ix, series_idx) {
+                    let config_name = indicator
+                        .get_line_config(series_idx)
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("");
+                    let label = if config_name.is_empty() {
+                        format!(
+                            "{}: {}",
+                            indicator.name(),
+                            format_price(value, self.price_decimals)
+                        )
+                    } else {
+                        format!(
+                            "{}: {}",
+                            config_name,
+                            format_price(value, self.price_decimals)
+                        )
+                    };
+                    let color = indicator
+                        .get_line_config(series_idx)
+                        .map(|c| c.color)
+                        .unwrap_or(WHITE_COLOR);
+                    entries.push((label, color));
+                }
+            }
+        }
+
+        if entries.is_empty() {
+            return;
+        }
+
+        let painter = ui.painter();
+        let font_id = egui::FontId::proportional(10.0);
+        let line_height = 14.0_f32;
+        let padding = 5.0_f32;
+
+        // Measure max text width
+        let mut max_width = 0.0_f32;
+        for (label, _) in &entries {
+            let galley = painter.layout_no_wrap(label.clone(), font_id.clone(), WHITE_COLOR);
+            max_width = max_width.max(galley.size().x);
+        }
+
+        let legend_width = max_width + padding * 2.0;
+        let legend_height = entries.len() as f32 * line_height + padding * 2.0;
+
+        let legend_rect = Rect::from_min_size(
+            Pos2::new(chart_rect.left() + padding, chart_rect.top() + padding),
+            Vec2::new(legend_width, legend_height),
+        );
+
+        // Background
+        painter.rect_filled(
+            legend_rect,
+            2.0,
+            Color32::from_rgba_unmultiplied(0, 0, 0, 150),
+        );
+
+        // Text entries
+        for (i, (label, color)) in entries.iter().enumerate() {
+            let y = legend_rect.top() + padding + i as f32 * line_height;
+            painter.text(
+                Pos2::new(legend_rect.left() + padding, y),
+                egui::Align2::LEFT_TOP,
+                label,
+                font_id.clone(),
+                *color,
+            );
+        }
+    }
+
+    /// Draw grid lines on the chart
+    fn draw_grid(
+        &self,
+        ui: &mut Ui,
+        chart_rect: Rect,
+        y_min: f64,
+        y_max: f64,
+        min_ix: usize,
+        max_ix: usize,
+    ) {
+        let painter = ui.painter();
+        let grid_color = Color32::from_rgba_unmultiplied(255, 255, 255, 20);
+        let stroke = Stroke::new(1.0, grid_color);
+
+        // Horizontal grid lines at Y-axis tick positions
+        let y_ticks = calculate_axis_ticks(y_min, y_max, 5);
+        for tick in y_ticks {
+            let normalized = (tick - y_min) / (y_max - y_min);
+            let y = chart_rect.bottom() - (normalized as f32 * chart_rect.height());
+            if y > chart_rect.top() && y < chart_rect.bottom() {
+                painter.line_segment(
+                    [
+                        Pos2::new(chart_rect.left(), y),
+                        Pos2::new(chart_rect.right(), y),
+                    ],
+                    stroke,
+                );
+            }
+        }
+
+        // Vertical grid lines at X-axis tick positions
+        let bar_count = max_ix - min_ix + 1;
+        let num_ticks = (chart_rect.width() / 120.0) as usize;
+        let num_ticks = num_ticks.max(2);
+        let tick_step = bar_count / num_ticks;
+
+        for i in 0..=num_ticks {
+            let ix = min_ix + (i * tick_step).min(bar_count - 1);
+            let normalized = (ix - min_ix) as f32 / bar_count as f32;
+            let x = chart_rect.left() + normalized * chart_rect.width();
+            if x > chart_rect.left() && x < chart_rect.right() {
+                painter.line_segment(
+                    [
+                        Pos2::new(x, chart_rect.top()),
+                        Pos2::new(x, chart_rect.bottom()),
+                    ],
+                    stroke,
+                );
             }
         }
     }
@@ -1567,8 +1874,8 @@ impl ChartCursor {
         }
 
         // Draw info box
-        let info_text = candle_item.get_info_text(manager, self.x);
-        let volume_info = volume_item.get_info_text(manager, self.x);
+        let info_text = candle_item.get_info_text(manager, self.x, price_decimals);
+        let volume_info = volume_item.get_info_text(manager, self.x, price_decimals);
         let full_info = if volume_info.is_empty() {
             info_text
         } else {
@@ -1576,16 +1883,24 @@ impl ChartCursor {
         };
 
         if !full_info.is_empty() {
+            let font_id = egui::FontId::proportional(11.0);
+            let galley = painter.layout_no_wrap(full_info, font_id.clone(), WHITE_COLOR);
+            let text_size = galley.size();
+
+            let padding = 8.0_f32;
+            let info_box_width = (text_size.x + padding * 2.0).max(INFO_BOX_MIN_WIDTH);
+            let info_box_height = (text_size.y + padding * 2.0).max(INFO_BOX_MIN_HEIGHT);
+
             // Position info box on the opposite side of the cursor
             let info_x = if self.screen_pos.x < candle_rect.center().x {
-                candle_rect.right() - INFO_BOX_WIDTH - 4.0
+                candle_rect.right() - info_box_width - 4.0
             } else {
                 candle_rect.left() + 4.0
             };
 
             let info_rect = Rect::from_min_size(
                 Pos2::new(info_x, candle_rect.top() + 4.0),
-                Vec2::new(INFO_BOX_WIDTH, INFO_BOX_HEIGHT),
+                Vec2::new(info_box_width, info_box_height),
             );
 
             painter.rect_filled(
@@ -1601,10 +1916,10 @@ impl ChartCursor {
             );
 
             painter.text(
-                Pos2::new(info_rect.left() + 8.0, info_rect.top() + 8.0),
+                Pos2::new(info_rect.left() + padding, info_rect.top() + padding),
                 egui::Align2::LEFT_TOP,
-                full_info,
-                egui::FontId::proportional(11.0),
+                galley.text(),
+                font_id,
                 WHITE_COLOR,
             );
         }
@@ -1646,12 +1961,13 @@ impl ChartWidget {
                     IndicatorLocation::Sub => "Sub",
                 };
 
-                // Try to extract parameters from indicator name or use defaults
+                // Extract actual parameters from the indicator
+                let params = ind.get_parameters();
                 SerializableIndicatorConfig {
                     indicator_type: name.to_string(),
-                    period: Some(20), // Default, actual value depends on indicator
-                    multiplier: Some(2.0), // Default
-                    signal_period: Some(9), // Default
+                    period: params.get("period").map(|&v| v as usize),
+                    multiplier: params.get("multiplier").copied(),
+                    signal_period: params.get("signal_period").map(|&v| v as usize),
                     color: if let Some(config) = ind.get_line_config(0) {
                         config.color.to_array()
                     } else {

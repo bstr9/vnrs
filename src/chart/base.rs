@@ -9,7 +9,7 @@ pub const GREY_COLOR: Color32 = Color32::from_rgb(100, 100, 100);
 
 // Price movement colors (Chinese style: red up, green down)
 pub const UP_COLOR: Color32 = Color32::from_rgb(255, 75, 75); // Red for price up
-pub const DOWN_COLOR: Color32 = Color32::from_rgb(0, 255, 255); // Cyan for price down
+pub const DOWN_COLOR: Color32 = Color32::from_rgb(0, 200, 100); // Green for price down (Chinese convention)
 pub const STAY_COLOR: Color32 = Color32::from_rgb(255, 255, 255); // White for no change
 
 // Cursor color
@@ -21,7 +21,7 @@ pub const LOSS_COLOR: Color32 = Color32::from_rgb(0, 255, 0); // Green for loss
 
 // Trade marker colors
 pub const BUY_COLOR: Color32 = Color32::from_rgb(255, 255, 0); // Yellow for buy
-pub const SELL_COLOR: Color32 = Color32::from_rgb(255, 255, 0); // Yellow for sell
+pub const SELL_COLOR: Color32 = Color32::from_rgb(0, 255, 0); // Green for sell (Chinese convention)
 pub const SHORT_COLOR: Color32 = Color32::from_rgb(255, 0, 255); // Magenta for short
 pub const COVER_COLOR: Color32 = Color32::from_rgb(255, 0, 255); // Magenta for cover
 
@@ -35,8 +35,9 @@ pub const MIN_BAR_COUNT: usize = 50;
 pub const MARGIN: f32 = 5.0;
 pub const AXIS_X_HEIGHT: f32 = 32.0;
 pub const AXIS_Y_WIDTH: f32 = 80.0;
-pub const INFO_BOX_WIDTH: f32 = 100.0;
-pub const INFO_BOX_HEIGHT: f32 = 320.0;
+pub const INFO_BOX_MIN_WIDTH: f32 = 120.0;
+pub const INFO_BOX_MIN_HEIGHT: f32 = 320.0;
+pub const SCROLLBAR_HEIGHT: f32 = 20.0;
 
 /// Convert a float value to integer with rounding
 #[inline]

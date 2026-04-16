@@ -2,7 +2,7 @@
 
 use crate::trader::object::BarData;
 use egui::{Color32, Stroke};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 /// Indicator display location
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,8 +25,77 @@ impl LineStyle {
     pub fn to_stroke(&self, width: f32, color: Color32) -> Stroke {
         match self {
             LineStyle::Solid => Stroke::new(width, color),
-            LineStyle::Dashed => Stroke::new(width, color), // egui doesn't support dashed natively
-            LineStyle::Dotted => Stroke::new(width, color), // egui doesn't support dotted natively
+            LineStyle::Dashed => Stroke::new(width, color), // use draw_dashed_line instead
+            LineStyle::Dotted => Stroke::new(width, color), // use draw_dotted_line instead
+        }
+    }
+
+    /// Draw a dashed line between consecutive points
+    pub fn draw_dashed_line(
+        painter: &egui::Painter,
+        points: &[egui::Pos2],
+        width: f32,
+        color: egui::Color32,
+    ) {
+        if points.len() < 2 {
+            return;
+        }
+        let dash_len = 8.0_f32;
+        let gap_len = 4.0_f32;
+
+        for window in points.windows(2) {
+            let p1 = window[0];
+            let p2 = window[1];
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            let segment_len = dx.hypot(dy);
+            if segment_len < 0.1 {
+                continue;
+            }
+            let nx = dx / segment_len;
+            let ny = dy / segment_len;
+
+            let mut pos = 0.0_f32;
+            while pos < segment_len {
+                let dash_end = (pos + dash_len).min(segment_len);
+                let start = egui::Pos2::new(p1.x + nx * pos, p1.y + ny * pos);
+                let end = egui::Pos2::new(p1.x + nx * dash_end, p1.y + ny * dash_end);
+                painter.line_segment([start, end], egui::Stroke::new(width, color));
+                pos = dash_end + gap_len;
+            }
+        }
+    }
+
+    /// Draw a dotted line between consecutive points
+    pub fn draw_dotted_line(
+        painter: &egui::Painter,
+        points: &[egui::Pos2],
+        width: f32,
+        color: egui::Color32,
+    ) {
+        if points.len() < 2 {
+            return;
+        }
+        let dot_spacing = 4.0_f32;
+
+        for window in points.windows(2) {
+            let p1 = window[0];
+            let p2 = window[1];
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            let segment_len = dx.hypot(dy);
+            if segment_len < 0.1 {
+                continue;
+            }
+            let nx = dx / segment_len;
+            let ny = dy / segment_len;
+
+            let mut pos = 0.0_f32;
+            while pos < segment_len {
+                let center = egui::Pos2::new(p1.x + nx * pos, p1.y + ny * pos);
+                painter.circle_filled(center, width * 0.8, color);
+                pos += dot_spacing;
+            }
         }
     }
 }
@@ -183,6 +252,11 @@ pub trait Indicator: Send + Sync {
 
     /// Get Y-axis range for this indicator
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)>;
+
+    /// Get the configurable parameters of this indicator as a HashMap
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        HashMap::new()
+    }
 }
 
 /// Moving Average (MA)
@@ -278,6 +352,12 @@ impl Indicator for MA {
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params
     }
 }
 
@@ -401,6 +481,12 @@ impl Indicator for EMA {
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params
     }
 }
 
@@ -579,6 +665,13 @@ impl Indicator for BOLL {
             max_ix,
         )
     }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params.insert("multiplier".to_string(), self.std_dev);
+        params
+    }
 }
 
 /// Weighted Moving Average (WMA)
@@ -680,6 +773,12 @@ impl Indicator for WMA {
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params
     }
 }
 
@@ -957,6 +1056,13 @@ impl Indicator for SAR {
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("multiplier".to_string(), self.acceleration);
+        params.insert("max_af".to_string(), self.maximum);
+        params
     }
 }
 
@@ -1271,6 +1377,13 @@ impl Indicator for TRIX {
             max_ix,
         )
     }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params.insert("signal_period".to_string(), self._signal_period as f64);
+        params
+    }
 }
 
 /// SuperTrend Indicator
@@ -1495,6 +1608,13 @@ impl Indicator for SUPER {
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
         IndicatorBase::get_y_range_for_values(&self.trend_values, min_ix, max_ix)
     }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params.insert("multiplier".to_string(), self.multiplier);
+        params
+    }
 }
 
 /// Custom indicator built from a user-supplied expression.
@@ -1505,6 +1625,8 @@ impl Indicator for SUPER {
 pub struct CustomIndicator {
     name: String,
     expression: String,
+    /// Cached AST parsed from expression, avoids re-tokenizing/re-parsing on every bar.
+    parsed: Option<ExprNode>,
     values: Vec<Option<f64>>,
     config: IndicatorLineConfig,
     location: IndicatorLocation,
@@ -1512,15 +1634,28 @@ pub struct CustomIndicator {
 }
 
 impl CustomIndicator {
+    /// Parse the expression and cache the AST. Returns None if expression is invalid.
+    fn parse_expression(expr: &str) -> Option<ExprNode> {
+        let tokens = tokenize(expr).ok()?;
+        let mut parser = ExprParser::new(&tokens);
+        let result = parser.parse_expr();
+        if parser.pos != tokens.len() {
+            return None; // leftover tokens → parse error
+        }
+        result
+    }
+
     pub fn new(
         name: String,
         expression: String,
         color: Color32,
         location: IndicatorLocation,
     ) -> Self {
+        let parsed = Self::parse_expression(&expression);
         Self {
             name,
             expression,
+            parsed,
             values: Vec::new(),
             config: IndicatorLineConfig {
                 name: String::new(), // filled from self.name in Indicator::name()
@@ -1533,18 +1668,9 @@ impl CustomIndicator {
         }
     }
 
-    /// Evaluate the stored expression for a single bar.
+    /// Evaluate the cached AST for a single bar.
     fn evaluate_expr(&self, bar: &BarData) -> Option<f64> {
-        let tokens = match tokenize(&self.expression) {
-            Ok(t) => t,
-            Err(_) => return None,
-        };
-        let mut parser = ExprParser::new(&tokens);
-        let result = parser.parse_expr();
-        if parser.pos != tokens.len() {
-            return None; // leftover tokens → parse error
-        }
-        result.map(|node| node.eval(bar))
+        self.parsed.as_ref().map(|node| node.eval(bar))
     }
 }
 
