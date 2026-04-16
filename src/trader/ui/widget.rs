@@ -3,17 +3,81 @@
 //! This module provides various table-based widgets for displaying trading data
 //! including ticks, orders, trades, positions, accounts, and logs.
 
-use std::collections::HashMap;
-use chrono::{DateTime, Utc, Local};
+use chrono::{DateTime, Local, Utc};
 use egui::{Color32, RichText, Ui};
 use egui_extras::{Column, TableBuilder};
+use std::collections::HashMap;
 
+use super::style::*;
 use crate::trader::constant::{Direction, Status};
+use crate::trader::event::*;
 use crate::trader::object::{
     AccountData, LogData, OrderData, PositionData, QuoteData, TickData, TradeData,
 };
-use crate::trader::event::*;
-use super::style::*;
+
+/// Reusable sort state for table columns
+#[derive(Clone, Default)]
+pub struct SortState {
+    pub column: Option<usize>,
+    pub ascending: bool,
+}
+
+impl SortState {
+    pub fn new() -> Self {
+        Self {
+            column: None,
+            ascending: true,
+        }
+    }
+
+    /// Toggle sort on a column click. If same column, flip direction.
+    pub fn toggle(&mut self, col: usize) {
+        if self.column == Some(col) {
+            self.ascending = !self.ascending;
+        } else {
+            self.column = Some(col);
+            self.ascending = true;
+        }
+    }
+
+    /// Returns the sort indicator string (▲ or ▼) for a column
+    pub fn indicator(&self, col: usize) -> &'static str {
+        if self.column == Some(col) {
+            if self.ascending {
+                " ▲"
+            } else {
+                " ▼"
+            }
+        } else {
+            ""
+        }
+    }
+
+    /// Apply sort direction to a comparison result
+    pub fn apply_order(&self, cmp: std::cmp::Ordering) -> std::cmp::Ordering {
+        if self.ascending {
+            cmp
+        } else {
+            cmp.reverse()
+        }
+    }
+}
+
+/// Render a clickable sortable header cell
+fn sortable_header(ui: &mut Ui, display: &str, col: usize, sort: &mut SortState) {
+    let label = format!("{}{}", display, sort.indicator(col));
+    let response = ui.strong(&label).interact(egui::Sense::click());
+    if response.clicked() {
+        sort.toggle(col);
+    }
+    if response.hovered() {
+        ui.painter().rect_filled(
+            response.rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+        );
+    }
+}
 
 /// Cell content with optional color
 #[derive(Clone)]
@@ -48,7 +112,11 @@ pub struct HeaderDef {
 
 impl HeaderDef {
     pub const fn new(key: &'static str, display: &'static str, update: bool) -> Self {
-        Self { key, display, update }
+        Self {
+            key,
+            display,
+            update,
+        }
     }
 }
 
@@ -56,6 +124,16 @@ impl HeaderDef {
 fn format_time(dt: &DateTime<Utc>) -> String {
     let local: DateTime<Local> = dt.with_timezone(&Local);
     local.format("%H:%M:%S%.3f").to_string()
+}
+
+/// Format price based on pricetick. Defaults to 4 decimal places if pricetick not provided.
+/// Formula: decimals = -log10(pricetick).ceil()
+pub fn format_price(price: f64, pricetick: Option<f64>) -> String {
+    let decimals = pricetick
+        .filter(|&p| p > 0.0)
+        .map(|p| (-p.log10().ceil() as usize).max(0).min(8))
+        .unwrap_or(4);
+    format!("{:.1$}", price, decimals)
 }
 
 // ============================================================================
@@ -105,8 +183,7 @@ impl From<&TickData> for TickRow {
 /// Tick monitor widget for displaying market data
 pub struct TickMonitor {
     pub data: HashMap<String, TickRow>,
-    pub sorting_column: Option<usize>,
-    pub sorting_ascending: bool,
+    pub sort: SortState,
     headers: Vec<HeaderDef>,
 }
 
@@ -122,8 +199,7 @@ impl TickMonitor {
     pub fn new() -> Self {
         Self {
             data: HashMap::new(),
-            sorting_column: None,
-            sorting_ascending: true,
+            sort: SortState::new(),
             headers: vec![
                 HeaderDef::new("symbol", "代码", false),
                 HeaderDef::new("exchange", "交易所", false),
@@ -148,11 +224,94 @@ impl TickMonitor {
         self.data.insert(vt_symbol, TickRow::from(tick));
     }
 
+    /// Sort tick rows based on current sort state
+    fn sort_rows(&self, rows: &mut Vec<&TickRow>) {
+        let col = match self.sort.column {
+            Some(c) => c,
+            None => {
+                rows.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+                return;
+            }
+        };
+        let sort = &self.sort;
+        match col {
+            0 => rows.sort_by(|a, b| sort.apply_order(a.symbol.cmp(&b.symbol))),
+            1 => rows.sort_by(|a, b| sort.apply_order(a.exchange.cmp(&b.exchange))),
+            2 => rows.sort_by(|a, b| sort.apply_order(a.name.cmp(&b.name))),
+            3 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.last_price
+                        .partial_cmp(&b.last_price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            4 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.volume
+                        .partial_cmp(&b.volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            5 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.open_price
+                        .partial_cmp(&b.open_price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            6 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.high_price
+                        .partial_cmp(&b.high_price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            7 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.low_price
+                        .partial_cmp(&b.low_price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            8 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.bid_price_1
+                        .partial_cmp(&b.bid_price_1)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            9 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.bid_volume_1
+                        .partial_cmp(&b.bid_volume_1)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            10 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.ask_price_1
+                        .partial_cmp(&b.ask_price_1)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            11 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.ask_volume_1
+                        .partial_cmp(&b.ask_volume_1)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            12 => rows.sort_by(|a, b| sort.apply_order(a.datetime.cmp(&b.datetime))),
+            13 => rows.sort_by(|a, b| sort.apply_order(a.gateway_name.cmp(&b.gateway_name))),
+            _ => rows.sort_by(|a, b| a.symbol.cmp(&b.symbol)),
+        }
+    }
+
     /// Show the tick monitor and return clicked symbol if any
     pub fn show(&mut self, ui: &mut Ui) -> Option<String> {
         let available_height = ui.available_height();
         let mut clicked_symbol: Option<String> = None;
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -160,51 +319,77 @@ impl TickMonitor {
             .columns(Column::auto().at_least(60.0), self.headers.len())
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.headers {
+                for (i, h) in self.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
                 let mut rows: Vec<_> = self.data.values().collect();
-                rows.sort_by(|a, b| a.symbol.cmp(&b.symbol));
-                
+                self.sort_rows(&mut rows);
+
                 for row in rows {
                     body.row(18.0, |mut table_row| {
                         // Make the row clickable
                         let vt_symbol = format!("{}.{}", row.symbol, row.exchange);
-                        
-                        table_row.col(|ui| { 
+
+                        table_row.col(|ui| {
                             if ui.selectable_label(false, &row.symbol).clicked() {
                                 clicked_symbol = Some(vt_symbol.clone());
                             }
                         });
-                        table_row.col(|ui| { ui.label(&row.exchange); });
-                        table_row.col(|ui| { ui.label(&row.name); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.last_price)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.volume)); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.open_price)); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.high_price)); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.low_price)); });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.2}", row.bid_price_1)).color(COLOR_BID)); 
+                        table_row.col(|ui| {
+                            ui.label(&row.exchange);
                         });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.0}", row.bid_volume_1)).color(COLOR_BID)); 
+                        table_row.col(|ui| {
+                            ui.label(&row.name);
                         });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.2}", row.ask_price_1)).color(COLOR_ASK)); 
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.last_price, None));
                         });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.0}", row.ask_volume_1)).color(COLOR_ASK)); 
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.volume));
                         });
-                        table_row.col(|ui| { ui.label(&row.datetime); });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.open_price, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.high_price, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.low_price, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format_price(row.bid_price_1, None)).color(COLOR_BID),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format!("{:.0}", row.bid_volume_1)).color(COLOR_BID),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format_price(row.ask_price_1, None)).color(COLOR_ASK),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format!("{:.0}", row.ask_volume_1)).color(COLOR_ASK),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.datetime);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
-        
+
         clicked_symbol
     }
 }
@@ -248,7 +433,10 @@ impl From<&OrderData> for OrderRow {
             volume: order.volume,
             traded: order.traded,
             status: order.status,
-            datetime: order.datetime.map(|dt| format_time(&dt)).unwrap_or_default(),
+            datetime: order
+                .datetime
+                .map(|dt| format_time(&dt))
+                .unwrap_or_default(),
             gateway_name: order.gateway_name.clone(),
             is_active: order.is_active(),
         }
@@ -259,6 +447,7 @@ impl From<&OrderData> for OrderRow {
 pub struct OrderMonitor {
     pub data: HashMap<String, OrderRow>,
     pub selected: Option<String>,
+    pub sort: SortState,
     headers: Vec<HeaderDef>,
 }
 
@@ -275,6 +464,7 @@ impl OrderMonitor {
         Self {
             data: HashMap::new(),
             selected: None,
+            sort: SortState::new(),
             headers: vec![
                 HeaderDef::new("orderid", "委托号", false),
                 HeaderDef::new("reference", "来源", false),
@@ -298,12 +488,61 @@ impl OrderMonitor {
         self.data.insert(vt_orderid, OrderRow::from(order));
     }
 
+    /// Sort order rows based on current sort state
+    fn sort_rows(&self, rows: &mut Vec<&OrderRow>) {
+        let col = match self.sort.column {
+            Some(c) => c,
+            None => {
+                rows.sort_by(|a, b| b.datetime.cmp(&a.datetime));
+                return;
+            }
+        };
+        let sort = &self.sort;
+        match col {
+            0 => rows.sort_by(|a, b| sort.apply_order(a.orderid.cmp(&b.orderid))),
+            1 => rows.sort_by(|a, b| sort.apply_order(a.reference.cmp(&b.reference))),
+            2 => rows.sort_by(|a, b| sort.apply_order(a.symbol.cmp(&b.symbol))),
+            3 => rows.sort_by(|a, b| sort.apply_order(a.exchange.cmp(&b.exchange))),
+            4 => rows.sort_by(|a, b| sort.apply_order(a.order_type.cmp(&b.order_type))),
+            5 => rows.sort_by(|a, b| {
+                sort.apply_order(a.direction.to_string().cmp(&b.direction.to_string()))
+            }),
+            6 => rows.sort_by(|a, b| sort.apply_order(a.offset.cmp(&b.offset))),
+            7 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.price
+                        .partial_cmp(&b.price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            8 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.volume
+                        .partial_cmp(&b.volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            9 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.traded
+                        .partial_cmp(&b.traded)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            10 => rows
+                .sort_by(|a, b| sort.apply_order(a.status.to_string().cmp(&b.status.to_string()))),
+            11 => rows.sort_by(|a, b| sort.apply_order(a.datetime.cmp(&b.datetime))),
+            12 => rows.sort_by(|a, b| sort.apply_order(a.gateway_name.cmp(&b.gateway_name))),
+            _ => rows.sort_by(|a, b| b.datetime.cmp(&a.datetime)),
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui) -> Option<String> {
         let mut cancel_orderid = None;
         let available_height = ui.available_height();
-        
+
         ui.label("双击委托行撤单");
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -311,42 +550,66 @@ impl OrderMonitor {
             .columns(Column::auto().at_least(60.0), self.headers.len())
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.headers {
+                for (i, h) in self.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
                 let mut rows: Vec<_> = self.data.values().collect();
-                rows.sort_by(|a, b| b.datetime.cmp(&a.datetime));
-                
+                self.sort_rows(&mut rows);
+
                 for row in rows {
                     body.row(18.0, |mut table_row| {
-                        table_row.col(|ui| { 
-                            if ui.selectable_label(false, &row.orderid).double_clicked() && row.is_active {
+                        table_row.col(|ui| {
+                            if ui.selectable_label(false, &row.orderid).double_clicked()
+                                && row.is_active
+                            {
                                 cancel_orderid = Some(row.vt_orderid.clone());
                             }
                         });
-                        table_row.col(|ui| { ui.label(&row.reference); });
-                        table_row.col(|ui| { ui.label(&row.symbol); });
-                        table_row.col(|ui| { ui.label(&row.exchange); });
-                        table_row.col(|ui| { ui.label(&row.order_type); });
-                        table_row.col(|ui| { 
+                        table_row.col(|ui| {
+                            ui.label(&row.reference);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.symbol);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.exchange);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.order_type);
+                        });
+                        table_row.col(|ui| {
                             let color = get_direction_color(row.direction == Direction::Long);
                             ui.label(RichText::new(row.direction.to_string()).color(color));
                         });
-                        table_row.col(|ui| { ui.label(&row.offset); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.price)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.volume)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.traded)); });
-                        table_row.col(|ui| { ui.label(row.status.to_string()); });
-                        table_row.col(|ui| { ui.label(&row.datetime); });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.label(&row.offset);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.price, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.volume));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.traded));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(row.status.to_string());
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.datetime);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
-        
+
         cancel_orderid
     }
 }
@@ -354,6 +617,7 @@ impl OrderMonitor {
 /// Active order monitor - shows only active orders
 pub struct ActiveOrderMonitor {
     inner: OrderMonitor,
+    pub sort: SortState,
 }
 
 impl Default for ActiveOrderMonitor {
@@ -366,6 +630,7 @@ impl ActiveOrderMonitor {
     pub fn new() -> Self {
         Self {
             inner: OrderMonitor::new(),
+            sort: SortState::new(),
         }
     }
 
@@ -373,12 +638,61 @@ impl ActiveOrderMonitor {
         self.inner.update(order);
     }
 
+    /// Sort active order rows based on current sort state
+    fn sort_rows(&self, rows: &mut Vec<&OrderRow>) {
+        let col = match self.sort.column {
+            Some(c) => c,
+            None => {
+                rows.sort_by(|a, b| b.datetime.cmp(&a.datetime));
+                return;
+            }
+        };
+        let sort = &self.sort;
+        match col {
+            0 => rows.sort_by(|a, b| sort.apply_order(a.orderid.cmp(&b.orderid))),
+            1 => rows.sort_by(|a, b| sort.apply_order(a.reference.cmp(&b.reference))),
+            2 => rows.sort_by(|a, b| sort.apply_order(a.symbol.cmp(&b.symbol))),
+            3 => rows.sort_by(|a, b| sort.apply_order(a.exchange.cmp(&b.exchange))),
+            4 => rows.sort_by(|a, b| sort.apply_order(a.order_type.cmp(&b.order_type))),
+            5 => rows.sort_by(|a, b| {
+                sort.apply_order(a.direction.to_string().cmp(&b.direction.to_string()))
+            }),
+            6 => rows.sort_by(|a, b| sort.apply_order(a.offset.cmp(&b.offset))),
+            7 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.price
+                        .partial_cmp(&b.price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            8 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.volume
+                        .partial_cmp(&b.volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            9 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.traded
+                        .partial_cmp(&b.traded)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            10 => rows
+                .sort_by(|a, b| sort.apply_order(a.status.to_string().cmp(&b.status.to_string()))),
+            11 => rows.sort_by(|a, b| sort.apply_order(a.datetime.cmp(&b.datetime))),
+            12 => rows.sort_by(|a, b| sort.apply_order(a.gateway_name.cmp(&b.gateway_name))),
+            _ => rows.sort_by(|a, b| b.datetime.cmp(&a.datetime)),
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui) -> Option<String> {
         let mut cancel_orderid = None;
         let available_height = ui.available_height();
-        
+
         ui.label("双击委托行撤单（仅显示活动委托）");
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -386,44 +700,64 @@ impl ActiveOrderMonitor {
             .columns(Column::auto().at_least(60.0), self.inner.headers.len())
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.inner.headers {
+                for (i, h) in self.inner.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
-                let mut rows: Vec<_> = self.inner.data.values()
-                    .filter(|r| r.is_active)
-                    .collect();
-                rows.sort_by(|a, b| b.datetime.cmp(&a.datetime));
-                
+                let mut rows: Vec<_> = self.inner.data.values().filter(|r| r.is_active).collect();
+                self.sort_rows(&mut rows);
+
                 for row in rows {
                     body.row(18.0, |mut table_row| {
-                        table_row.col(|ui| { 
+                        table_row.col(|ui| {
                             if ui.selectable_label(false, &row.orderid).double_clicked() {
                                 cancel_orderid = Some(row.vt_orderid.clone());
                             }
                         });
-                        table_row.col(|ui| { ui.label(&row.reference); });
-                        table_row.col(|ui| { ui.label(&row.symbol); });
-                        table_row.col(|ui| { ui.label(&row.exchange); });
-                        table_row.col(|ui| { ui.label(&row.order_type); });
-                        table_row.col(|ui| { 
+                        table_row.col(|ui| {
+                            ui.label(&row.reference);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.symbol);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.exchange);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.order_type);
+                        });
+                        table_row.col(|ui| {
                             let color = get_direction_color(row.direction == Direction::Long);
                             ui.label(RichText::new(row.direction.to_string()).color(color));
                         });
-                        table_row.col(|ui| { ui.label(&row.offset); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.price)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.volume)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.traded)); });
-                        table_row.col(|ui| { ui.label(row.status.to_string()); });
-                        table_row.col(|ui| { ui.label(&row.datetime); });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.label(&row.offset);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.price, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.volume));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.traded));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(row.status.to_string());
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.datetime);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
-        
+
         cancel_orderid
     }
 }
@@ -458,7 +792,10 @@ impl From<&TradeData> for TradeRow {
             offset: trade.offset.to_string(),
             price: trade.price,
             volume: trade.volume,
-            datetime: trade.datetime.map(|dt| format_time(&dt)).unwrap_or_default(),
+            datetime: trade
+                .datetime
+                .map(|dt| format_time(&dt))
+                .unwrap_or_default(),
             gateway_name: trade.gateway_name.clone(),
         }
     }
@@ -467,6 +804,7 @@ impl From<&TradeData> for TradeRow {
 /// Trade monitor widget
 pub struct TradeMonitor {
     pub data: Vec<TradeRow>,
+    pub sort: SortState,
     headers: Vec<HeaderDef>,
 }
 
@@ -482,6 +820,7 @@ impl TradeMonitor {
     pub fn new() -> Self {
         Self {
             data: Vec::new(),
+            sort: SortState::new(),
             headers: vec![
                 HeaderDef::new("tradeid", "成交号", false),
                 HeaderDef::new("orderid", "委托号", false),
@@ -501,9 +840,45 @@ impl TradeMonitor {
         self.data.insert(0, TradeRow::from(trade));
     }
 
+    /// Sort trade rows based on current sort state
+    fn sort_rows(&self, rows: &mut Vec<&TradeRow>) {
+        let col = match self.sort.column {
+            Some(c) => c,
+            None => return, // Keep insertion order (newest first)
+        };
+        let sort = &self.sort;
+        match col {
+            0 => rows.sort_by(|a, b| sort.apply_order(a.tradeid.cmp(&b.tradeid))),
+            1 => rows.sort_by(|a, b| sort.apply_order(a.orderid.cmp(&b.orderid))),
+            2 => rows.sort_by(|a, b| sort.apply_order(a.symbol.cmp(&b.symbol))),
+            3 => rows.sort_by(|a, b| sort.apply_order(a.exchange.cmp(&b.exchange))),
+            4 => rows.sort_by(|a, b| {
+                sort.apply_order(a.direction.to_string().cmp(&b.direction.to_string()))
+            }),
+            5 => rows.sort_by(|a, b| sort.apply_order(a.offset.cmp(&b.offset))),
+            6 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.price
+                        .partial_cmp(&b.price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            7 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.volume
+                        .partial_cmp(&b.volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            8 => rows.sort_by(|a, b| sort.apply_order(a.datetime.cmp(&b.datetime))),
+            9 => rows.sort_by(|a, b| sort.apply_order(a.gateway_name.cmp(&b.gateway_name))),
+            _ => {}
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui) {
         let available_height = ui.available_height();
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -511,28 +886,49 @@ impl TradeMonitor {
             .columns(Column::auto().at_least(60.0), self.headers.len())
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.headers {
+                for (i, h) in self.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
-                for row in &self.data {
+                let mut rows: Vec<_> = self.data.iter().collect();
+                self.sort_rows(&mut rows);
+
+                for row in rows {
                     body.row(18.0, |mut table_row| {
-                        table_row.col(|ui| { ui.label(&row.tradeid); });
-                        table_row.col(|ui| { ui.label(&row.orderid); });
-                        table_row.col(|ui| { ui.label(&row.symbol); });
-                        table_row.col(|ui| { ui.label(&row.exchange); });
-                        table_row.col(|ui| { 
+                        table_row.col(|ui| {
+                            ui.label(&row.tradeid);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.orderid);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.symbol);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.exchange);
+                        });
+                        table_row.col(|ui| {
                             let color = get_direction_color(row.direction == Direction::Long);
                             ui.label(RichText::new(row.direction.to_string()).color(color));
                         });
-                        table_row.col(|ui| { ui.label(&row.offset); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.price)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.volume)); });
-                        table_row.col(|ui| { ui.label(&row.datetime); });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.label(&row.offset);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.price, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.volume));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.datetime);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
@@ -579,6 +975,7 @@ impl From<&PositionData> for PositionRow {
 pub struct PositionMonitor {
     pub data: HashMap<String, PositionRow>,
     pub selected: Option<String>,
+    pub sort: SortState,
     headers: Vec<HeaderDef>,
 }
 
@@ -595,6 +992,7 @@ impl PositionMonitor {
         Self {
             data: HashMap::new(),
             selected: None,
+            sort: SortState::new(),
             headers: vec![
                 HeaderDef::new("symbol", "代码", false),
                 HeaderDef::new("exchange", "交易所", false),
@@ -614,12 +1012,68 @@ impl PositionMonitor {
         self.data.insert(vt_positionid, PositionRow::from(position));
     }
 
+    /// Sort position rows based on current sort state
+    fn sort_rows(&self, rows: &mut Vec<&PositionRow>) {
+        let col = match self.sort.column {
+            Some(c) => c,
+            None => {
+                rows.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+                return;
+            }
+        };
+        let sort = &self.sort;
+        match col {
+            0 => rows.sort_by(|a, b| sort.apply_order(a.symbol.cmp(&b.symbol))),
+            1 => rows.sort_by(|a, b| sort.apply_order(a.exchange.cmp(&b.exchange))),
+            2 => rows.sort_by(|a, b| {
+                sort.apply_order(a.direction.to_string().cmp(&b.direction.to_string()))
+            }),
+            3 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.volume
+                        .partial_cmp(&b.volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            4 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.yd_volume
+                        .partial_cmp(&b.yd_volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            5 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.frozen
+                        .partial_cmp(&b.frozen)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            6 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.price
+                        .partial_cmp(&b.price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            7 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.pnl
+                        .partial_cmp(&b.pnl)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            8 => rows.sort_by(|a, b| sort.apply_order(a.gateway_name.cmp(&b.gateway_name))),
+            _ => rows.sort_by(|a, b| a.symbol.cmp(&b.symbol)),
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui) -> Option<PositionRow> {
         let mut selected_position = None;
         let available_height = ui.available_height();
-        
+
         ui.label("双击持仓行快速平仓");
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -627,41 +1081,53 @@ impl PositionMonitor {
             .columns(Column::auto().at_least(60.0), self.headers.len())
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.headers {
+                for (i, h) in self.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
                 let mut rows: Vec<_> = self.data.values().collect();
-                rows.sort_by(|a, b| a.symbol.cmp(&b.symbol));
-                
+                self.sort_rows(&mut rows);
+
                 for row in rows {
                     body.row(18.0, |mut table_row| {
-                        table_row.col(|ui| { 
+                        table_row.col(|ui| {
                             if ui.selectable_label(false, &row.symbol).double_clicked() {
                                 selected_position = Some(row.clone());
                             }
                         });
-                        table_row.col(|ui| { ui.label(&row.exchange); });
-                        table_row.col(|ui| { 
+                        table_row.col(|ui| {
+                            ui.label(&row.exchange);
+                        });
+                        table_row.col(|ui| {
                             let color = get_direction_color(row.direction == Direction::Long);
                             ui.label(RichText::new(row.direction.to_string()).color(color));
                         });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.volume)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.yd_volume)); });
-                        table_row.col(|ui| { ui.label(format!("{:.0}", row.frozen)); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.price)); });
-                        table_row.col(|ui| { 
-                            let color = get_pnl_color(row.pnl);
-                            ui.label(RichText::new(format!("{:.2}", row.pnl)).color(color));
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.volume));
                         });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.yd_volume));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format!("{:.0}", row.frozen));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.price, None));
+                        });
+                        table_row.col(|ui| {
+                            let color = get_pnl_color(row.pnl);
+                            ui.label(RichText::new(format_price(row.pnl, None)).color(color));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
-        
+
         selected_position
     }
 }
@@ -697,6 +1163,7 @@ impl From<&AccountData> for AccountRow {
 /// Account monitor widget
 pub struct AccountMonitor {
     pub data: HashMap<String, AccountRow>,
+    pub sort: SortState,
     headers: Vec<HeaderDef>,
 }
 
@@ -712,6 +1179,7 @@ impl AccountMonitor {
     pub fn new() -> Self {
         Self {
             data: HashMap::new(),
+            sort: SortState::new(),
             headers: vec![
                 HeaderDef::new("accountid", "账号", false),
                 HeaderDef::new("balance", "余额", true),
@@ -727,9 +1195,47 @@ impl AccountMonitor {
         self.data.insert(vt_accountid, AccountRow::from(account));
     }
 
+    /// Sort account rows based on current sort state
+    fn sort_rows(&self, rows: &mut Vec<&AccountRow>) {
+        let col = match self.sort.column {
+            Some(c) => c,
+            None => {
+                rows.sort_by(|a, b| a.accountid.cmp(&b.accountid));
+                return;
+            }
+        };
+        let sort = &self.sort;
+        match col {
+            0 => rows.sort_by(|a, b| sort.apply_order(a.accountid.cmp(&b.accountid))),
+            1 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.balance
+                        .partial_cmp(&b.balance)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            2 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.frozen
+                        .partial_cmp(&b.frozen)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            3 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.available
+                        .partial_cmp(&b.available)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            4 => rows.sort_by(|a, b| sort.apply_order(a.gateway_name.cmp(&b.gateway_name))),
+            _ => rows.sort_by(|a, b| a.accountid.cmp(&b.accountid)),
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui) {
         let available_height = ui.available_height();
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -737,23 +1243,33 @@ impl AccountMonitor {
             .columns(Column::auto().at_least(80.0), self.headers.len())
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.headers {
+                for (i, h) in self.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
                 let mut rows: Vec<_> = self.data.values().collect();
-                rows.sort_by(|a, b| a.accountid.cmp(&b.accountid));
-                
+                self.sort_rows(&mut rows);
+
                 for row in rows {
                     body.row(18.0, |mut table_row| {
-                        table_row.col(|ui| { ui.label(&row.accountid); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.balance)); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.frozen)); });
-                        table_row.col(|ui| { ui.label(format!("{:.2}", row.available)); });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.label(&row.accountid);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.balance, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.frozen, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(format_price(row.available, None));
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
@@ -788,6 +1304,7 @@ impl From<&LogData> for LogRow {
 pub struct LogMonitor {
     pub data: Vec<LogRow>,
     pub max_rows: usize,
+    pub sort: SortState,
     headers: Vec<HeaderDef>,
     /// Number of logs already synced from engine
     synced_count: usize,
@@ -806,6 +1323,7 @@ impl LogMonitor {
         Self {
             data: Vec::new(),
             max_rows: 1000,
+            sort: SortState::new(),
             headers: vec![
                 HeaderDef::new("time", "时间", false),
                 HeaderDef::new("msg", "信息", false),
@@ -832,7 +1350,7 @@ impl LogMonitor {
                 self.data.insert(0, LogRow::from(log));
             }
             self.synced_count = new_count;
-            
+
             if self.data.len() > self.max_rows {
                 self.data.truncate(self.max_rows);
             }
@@ -841,7 +1359,7 @@ impl LogMonitor {
 
     pub fn show(&mut self, ui: &mut Ui) {
         let available_height = ui.available_height();
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -851,22 +1369,50 @@ impl LogMonitor {
             .column(Column::auto().at_least(60.0))
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.headers {
+                for (i, h) in self.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
-                for row in &self.data {
+                // Build index list for sorting
+                let mut indices: Vec<usize> = (0..self.data.len()).collect();
+                if let Some(col) = self.sort.column {
+                    let sort = &self.sort;
+                    match col {
+                        0 => indices.sort_by(|&a, &b| {
+                            sort.apply_order(self.data[a].time.cmp(&self.data[b].time))
+                        }),
+                        1 => indices.sort_by(|&a, &b| {
+                            sort.apply_order(self.data[a].msg.cmp(&self.data[b].msg))
+                        }),
+                        2 => indices.sort_by(|&a, &b| {
+                            sort.apply_order(
+                                self.data[a].gateway_name.cmp(&self.data[b].gateway_name),
+                            )
+                        }),
+                        _ => {}
+                    }
+                }
+
+                for idx in indices {
+                    let row = &self.data[idx];
                     body.row(18.0, |mut table_row| {
-                        table_row.col(|ui| { ui.label(&row.time); });
-                        table_row.col(|ui| { 
-                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                ui.label(&row.msg);
-                            });
+                        table_row.col(|ui| {
+                            ui.label(&row.time);
                         });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.with_layout(
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.label(&row.msg);
+                                },
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
@@ -911,7 +1457,10 @@ impl From<&QuoteData> for QuoteRow {
             ask_volume: quote.ask_volume as f64,
             ask_offset: quote.ask_offset.to_string(),
             status: quote.status,
-            datetime: quote.datetime.map(|dt| format_time(&dt)).unwrap_or_default(),
+            datetime: quote
+                .datetime
+                .map(|dt| format_time(&dt))
+                .unwrap_or_default(),
             gateway_name: quote.gateway_name.clone(),
         }
     }
@@ -920,6 +1469,7 @@ impl From<&QuoteData> for QuoteRow {
 /// Quote monitor widget
 pub struct QuoteMonitor {
     pub data: HashMap<String, QuoteRow>,
+    pub sort: SortState,
     headers: Vec<HeaderDef>,
 }
 
@@ -935,6 +1485,7 @@ impl QuoteMonitor {
     pub fn new() -> Self {
         Self {
             data: HashMap::new(),
+            sort: SortState::new(),
             headers: vec![
                 HeaderDef::new("quoteid", "报价号", false),
                 HeaderDef::new("reference", "来源", false),
@@ -958,12 +1509,65 @@ impl QuoteMonitor {
         self.data.insert(vt_quoteid, QuoteRow::from(quote));
     }
 
+    /// Sort quote rows based on current sort state
+    fn sort_rows(&self, rows: &mut Vec<&QuoteRow>) {
+        let col = match self.sort.column {
+            Some(c) => c,
+            None => {
+                rows.sort_by(|a, b| b.datetime.cmp(&a.datetime));
+                return;
+            }
+        };
+        let sort = &self.sort;
+        match col {
+            0 => rows.sort_by(|a, b| sort.apply_order(a.quoteid.cmp(&b.quoteid))),
+            1 => rows.sort_by(|a, b| sort.apply_order(a.reference.cmp(&b.reference))),
+            2 => rows.sort_by(|a, b| sort.apply_order(a.symbol.cmp(&b.symbol))),
+            3 => rows.sort_by(|a, b| sort.apply_order(a.exchange.cmp(&b.exchange))),
+            4 => rows.sort_by(|a, b| sort.apply_order(a.bid_offset.cmp(&b.bid_offset))),
+            5 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.bid_volume
+                        .partial_cmp(&b.bid_volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            6 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.bid_price
+                        .partial_cmp(&b.bid_price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            7 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.ask_price
+                        .partial_cmp(&b.ask_price)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            8 => rows.sort_by(|a, b| {
+                sort.apply_order(
+                    a.ask_volume
+                        .partial_cmp(&b.ask_volume)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+            }),
+            9 => rows.sort_by(|a, b| sort.apply_order(a.ask_offset.cmp(&b.ask_offset))),
+            10 => rows
+                .sort_by(|a, b| sort.apply_order(a.status.to_string().cmp(&b.status.to_string()))),
+            11 => rows.sort_by(|a, b| sort.apply_order(a.datetime.cmp(&b.datetime))),
+            12 => rows.sort_by(|a, b| sort.apply_order(a.gateway_name.cmp(&b.gateway_name))),
+            _ => rows.sort_by(|a, b| b.datetime.cmp(&a.datetime)),
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui) -> Option<String> {
         let mut cancel_quoteid = None;
         let available_height = ui.available_height();
-        
+
         ui.label("双击报价行撤销");
-        
+
         TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -971,47 +1575,71 @@ impl QuoteMonitor {
             .columns(Column::auto().at_least(60.0), self.headers.len())
             .min_scrolled_height(available_height)
             .header(20.0, |mut header| {
-                for h in &self.headers {
+                for (i, h) in self.headers.iter().enumerate() {
                     header.col(|ui| {
-                        ui.strong(h.display);
+                        sortable_header(ui, h.display, i, &mut self.sort);
                     });
                 }
             })
             .body(|mut body| {
                 let mut rows: Vec<_> = self.data.values().collect();
-                rows.sort_by(|a, b| b.datetime.cmp(&a.datetime));
-                
+                self.sort_rows(&mut rows);
+
                 for row in rows {
                     body.row(18.0, |mut table_row| {
-                        table_row.col(|ui| { 
+                        table_row.col(|ui| {
                             if ui.selectable_label(false, &row.quoteid).double_clicked() {
                                 cancel_quoteid = Some(row.vt_quoteid.clone());
                             }
                         });
-                        table_row.col(|ui| { ui.label(&row.reference); });
-                        table_row.col(|ui| { ui.label(&row.symbol); });
-                        table_row.col(|ui| { ui.label(&row.exchange); });
-                        table_row.col(|ui| { ui.label(&row.bid_offset); });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.0}", row.bid_volume)).color(COLOR_BID));
+                        table_row.col(|ui| {
+                            ui.label(&row.reference);
                         });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.2}", row.bid_price)).color(COLOR_BID));
+                        table_row.col(|ui| {
+                            ui.label(&row.symbol);
                         });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.2}", row.ask_price)).color(COLOR_ASK));
+                        table_row.col(|ui| {
+                            ui.label(&row.exchange);
                         });
-                        table_row.col(|ui| { 
-                            ui.label(RichText::new(format!("{:.0}", row.ask_volume)).color(COLOR_ASK));
+                        table_row.col(|ui| {
+                            ui.label(&row.bid_offset);
                         });
-                        table_row.col(|ui| { ui.label(&row.ask_offset); });
-                        table_row.col(|ui| { ui.label(row.status.to_string()); });
-                        table_row.col(|ui| { ui.label(&row.datetime); });
-                        table_row.col(|ui| { ui.label(&row.gateway_name); });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format!("{:.0}", row.bid_volume)).color(COLOR_BID),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format_price(row.bid_price, None)).color(COLOR_BID),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format_price(row.ask_price, None)).color(COLOR_ASK),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(
+                                RichText::new(format!("{:.0}", row.ask_volume)).color(COLOR_ASK),
+                            );
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.ask_offset);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(row.status.to_string());
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.datetime);
+                        });
+                        table_row.col(|ui| {
+                            ui.label(&row.gateway_name);
+                        });
                     });
                 }
             });
-        
+
         cancel_quoteid
     }
 }

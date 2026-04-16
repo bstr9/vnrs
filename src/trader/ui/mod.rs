@@ -10,6 +10,8 @@ pub mod dialogs;
 pub mod main_window;
 pub mod style;
 pub mod backtesting_panel;
+pub mod strategy_panel;
+pub mod dashboard;
 
 // Re-export commonly used types
 pub use widget::*;
@@ -18,3 +20,5 @@ pub use dialogs::*;
 pub use main_window::MainWindow;
 pub use style::*;
 pub use backtesting_panel::BacktestingPanel;
+pub use strategy_panel::StrategyPanel;
+pub use dashboard::{DashboardPanel, DashboardAction};

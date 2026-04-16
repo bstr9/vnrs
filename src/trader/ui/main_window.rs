@@ -3,14 +3,17 @@
 //! This module implements the main application window with dock panels
 //! for various trading monitors and widgets.
 
-use egui::{Context, Ui, TopBottomPanel, SidePanel, CentralPanel};
+use egui::{Context, Ui, TopBottomPanel, SidePanel, CentralPanel, RichText};
 use egui::containers::menu::MenuBar;
 
 use super::widget::*;
 use super::trading::TradingWidget;
 use super::dialogs::*;
 use super::style::*;
+use super::style::{ToastManager, ToastType};
 use super::backtesting_panel::BacktestingPanel;
+use super::dashboard::{DashboardPanel, DashboardAction};
+use super::strategy_panel::StrategyPanel;
 use std::sync::Arc;
 use std::collections::HashMap;
 use crate::chart::ChartWidget;
@@ -52,11 +55,13 @@ impl PanelState {
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum CentralTab {
     #[default]
+    Dashboard,
     Tick,
     Order,
     ActiveOrder,
     Trade,
     Quote,
+    Strategy,
     Backtesting,
 }
 
@@ -80,6 +85,12 @@ pub struct MainWindow {
     pub central_tab: CentralTab,
     pub bottom_tab: BottomTab,
     
+    // Theme
+    pub dark_mode: bool,
+    
+    // Focus request for symbol input
+    pub focus_symbol_input: bool,
+    
     // Trading widget
     pub trading: TradingWidget,
     
@@ -93,12 +104,17 @@ pub struct MainWindow {
     pub log_monitor: LogMonitor,
     pub quote_monitor: QuoteMonitor,
     pub backtesting_panel: BacktestingPanel,
+    pub strategy_panel: StrategyPanel,
+    pub dashboard_panel: DashboardPanel,
     
     // Dialogs
     pub connect_dialogs: Vec<ConnectDialog>,
     pub about_dialog: AboutDialog,
     pub global_settings: GlobalSettingsDialog,
     pub contract_manager: ContractManagerDialog,
+    
+    // Toast notifications
+    pub toast_manager: ToastManager,
     
     // Gateway list for menu
     pub gateway_names: Vec<String>,
@@ -133,6 +149,8 @@ impl MainWindow {
             panels: PanelState::new(),
             central_tab: CentralTab::default(),
             bottom_tab: BottomTab::default(),
+            dark_mode: true,
+            focus_symbol_input: false,
             trading: TradingWidget::new(),
             tick_monitor: TickMonitor::new(),
             order_monitor: OrderMonitor::new(),
@@ -143,10 +161,13 @@ impl MainWindow {
             log_monitor: LogMonitor::new(),
             quote_monitor: QuoteMonitor::new(),
             backtesting_panel: BacktestingPanel::new(),
+            strategy_panel: StrategyPanel::new(),
+            dashboard_panel: DashboardPanel::new(),
             connect_dialogs: Vec::new(),
             about_dialog: AboutDialog::new(),
             global_settings: GlobalSettingsDialog::new(),
             contract_manager: ContractManagerDialog::new(),
+            toast_manager: ToastManager::new(),
             gateway_names: Vec::new(),
             charts: HashMap::new(),
             tick_aggregators: HashMap::new(),
@@ -186,9 +207,13 @@ impl MainWindow {
                 let vt_symbol = tick.vt_symbol();
                 if self.charts.contains_key(&vt_symbol) {
                     // Get or create aggregator for this symbol
+                    // Use the chart's current interval instead of hardcoded Minute
+                    let interval = self.charts.get(&vt_symbol)
+                        .map(|c| c.get_interval())
+                        .unwrap_or(crate::trader::Interval::Minute);
                     let aggregator = self.tick_aggregators
                         .entry(vt_symbol.clone())
-                        .or_insert_with(|| TickBarAggregator::new(crate::trader::Interval::Minute));
+                        .or_insert_with(|| TickBarAggregator::new(interval));
                     
                     // Update with tick and check if bar is completed
                     if let Some(bar) = aggregator.update_tick(&tick) {
@@ -250,6 +275,92 @@ impl MainWindow {
             let all_contracts = engine.get_all_contracts();
             self.trading.set_contracts(all_contracts);
         }
+        
+        // Update dashboard panel data (separate borrow scope - clone Arc to avoid borrow conflict)
+        if let Some(engine_arc) = self.main_engine.clone() {
+            self.update_dashboard_data(&*engine_arc);
+        }
+    }
+    
+    /// Update dashboard panel with current engine data
+    fn update_dashboard_data(&mut self, engine: &crate::trader::MainEngine) {
+        use super::dashboard::{PositionSummary, GatewayStatus, NotificationItem};
+        
+        // Account summary
+        let accounts = engine.get_all_accounts();
+        if let Some(account) = accounts.first() {
+            self.dashboard_panel.update_account(
+                account.balance,
+                account.available(),
+                account.frozen,
+                "USDT", // Default currency for crypto
+            );
+        }
+        
+        // Positions summary
+        let positions: Vec<PositionSummary> = engine.get_all_positions()
+            .iter()
+            .filter(|p| p.volume > 0.0)
+            .map(|p| {
+                PositionSummary {
+                    vt_symbol: p.vt_symbol(),
+                    direction: format!("{}", p.direction),
+                    volume: p.volume,
+                    avg_price: p.price,
+                    pnl: p.pnl,
+                    pnl_percent: if p.price > 0.0 { p.pnl / (p.price * p.volume) * 100.0 } else { 0.0 },
+                }
+            })
+            .collect();
+        self.dashboard_panel.update_positions(positions);
+        
+        // Today's PnL from positions (simplified: use position pnl as proxy)
+        let today_pnl: f64 = engine.get_all_positions().iter()
+            .map(|p| p.pnl)
+            .sum();
+        
+        // Count positions with positive/negative pnl as win/loss proxy
+        let win_count = engine.get_all_positions().iter().filter(|p| p.pnl > 0.0).count();
+        let loss_count = engine.get_all_positions().iter().filter(|p| p.pnl < 0.0).count();
+        let win_amount: f64 = engine.get_all_positions().iter().filter(|p| p.pnl > 0.0).map(|p| p.pnl).sum();
+        let loss_amount: f64 = engine.get_all_positions().iter().filter(|p| p.pnl < 0.0).map(|p| p.pnl.abs()).sum();
+        
+        self.dashboard_panel.update_today_pnl(
+            today_pnl,
+            win_count,
+            loss_count,
+            win_amount,
+            loss_amount,
+        );
+        
+        // System status (gateways)
+        let gateway_names = self.gateway_names.clone();
+        let gateway_status: Vec<GatewayStatus> = gateway_names.iter()
+            .map(|name| {
+                let connected = engine.get_gateway(name).is_some();
+                GatewayStatus {
+                    name: name.clone(),
+                    connected,
+                    reconnecting: false,
+                    latency_ms: 0,
+                    reconnect_attempts: 0,
+                }
+            })
+            .collect();
+        
+        // Recent notifications from logs
+        let notifications: Vec<NotificationItem> = engine.get_all_logs()
+            .iter()
+            .rev()
+            .take(5)
+            .map(|log| NotificationItem {
+                time: log.time.format("%H:%M:%S").to_string(),
+                message: log.msg.clone(),
+                level: super::dashboard::NotificationLevel::Info,
+            })
+            .collect();
+        
+        self.dashboard_panel.update_system_status(gateway_status, notifications);
     }
     
     /// Set available gateways
@@ -301,27 +412,80 @@ impl MainWindow {
         }
     }
     
-    /// Apply dark theme
+    /// Apply theme based on dark_mode setting
     pub fn setup_style(&self, ctx: &Context) {
-        apply_dark_theme(ctx);
+        if self.dark_mode {
+            apply_dark_theme(ctx);
+        } else {
+            apply_light_theme(ctx);
+        }
+    }
+    
+    /// Handle keyboard shortcuts
+    fn handle_keyboard_shortcuts(&mut self, ctx: &Context) {
+        let ctrl = ctx.input(|i| i.modifiers.ctrl);
+        
+        // Ctrl+1 through Ctrl+7: Switch central tabs
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num1)) {
+            self.central_tab = CentralTab::Tick;
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num2)) {
+            self.central_tab = CentralTab::Order;
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num3)) {
+            self.central_tab = CentralTab::ActiveOrder;
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num4)) {
+            self.central_tab = CentralTab::Trade;
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num5)) {
+            self.central_tab = CentralTab::Quote;
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num6)) {
+            self.central_tab = CentralTab::Backtesting;
+        }
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num7)) {
+            self.central_tab = CentralTab::Strategy;
+        }
+        
+        // Ctrl+L: Log tab
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::L)) {
+            self.bottom_tab = BottomTab::Log;
+        }
+        // Ctrl+B: Account tab
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::B)) {
+            self.bottom_tab = BottomTab::Account;
+        }
+        // Ctrl+P: Position tab
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::P)) {
+            self.bottom_tab = BottomTab::Position;
+        }
+        // Ctrl+N: Focus symbol input
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::N)) {
+            self.focus_symbol_input = true;
+        }
+        // Escape: Close dialogs
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.connect_dialogs.iter_mut().for_each(|d| d.close());
+            self.about_dialog.close();
+            self.global_settings.close();
+            self.contract_manager.close();
+        }
     }
     
     /// Show the main window UI
     pub fn show(&mut self, ctx: &Context) {
+        // Apply theme every frame
+        self.setup_style(ctx);
+        
+        // Handle keyboard shortcuts
+        self.handle_keyboard_shortcuts(ctx);
+        
         // Top menu bar
         self.show_menu_bar(ctx);
         
-        // Left panel - trading widget
-        if self.panels.show_trading {
-            SidePanel::left("trading_panel")
-                .resizable(true)
-                .default_width(300.0)
-                .show(ctx, |ui| {
-                    ui.heading("交易");
-                    ui.separator();
-                    self.trading.show(ui);
-                });
-        }
+        // Left panel - trading widget (with toast feedback)
+        self.show_trading_panel(ctx);
         
         // Bottom panel - log, account, position
         TopBottomPanel::bottom("bottom_panel")
@@ -344,6 +508,9 @@ impl MainWindow {
         
         // Process pending actions
         self.process_pending_actions();
+        
+        // Show toast notifications (after all other UI)
+        self.toast_manager.show(ctx);
     }
     
     fn show_menu_bar(&mut self, ctx: &Context) {
@@ -381,6 +548,10 @@ impl MainWindow {
                     ui.checkbox(&mut self.panels.show_account, "资金");
                     ui.checkbox(&mut self.panels.show_log, "日志");
                     ui.checkbox(&mut self.panels.show_quote, "报价");
+                    
+                    ui.separator();
+                    
+                    ui.checkbox(&mut self.dark_mode, "深色主题");
                 });
                 
                 // Settings
@@ -412,6 +583,32 @@ impl MainWindow {
                     
                     ui.separator();
                     
+                    ui.menu_button("快捷键", |ui| {
+                        ui.label(RichText::new("中心标签页").strong());
+                        ui.label("Ctrl+1  行情");
+                        ui.label("Ctrl+2  委托");
+                        ui.label("Ctrl+3  活动");
+                        ui.label("Ctrl+4  成交");
+                        ui.label("Ctrl+5  报价");
+                        ui.label("Ctrl+6  回测");
+                        ui.label("Ctrl+7  策略");
+                        
+                        ui.separator();
+                        
+                        ui.label(RichText::new("底部标签页").strong());
+                        ui.label("Ctrl+L  日志");
+                        ui.label("Ctrl+B  资金");
+                        ui.label("Ctrl+P  持仓");
+                        
+                        ui.separator();
+                        
+                        ui.label(RichText::new("其他").strong());
+                        ui.label("Ctrl+N  聚焦代码输入");
+                        ui.label("Esc     关闭对话框");
+                    });
+                    
+                    ui.separator();
+                    
                     if ui.button("关于").clicked() {
                         self.about_dialog.open();
                         ui.close();
@@ -424,6 +621,7 @@ impl MainWindow {
     fn show_central_tabs(&mut self, ui: &mut Ui) {
         // Tab buttons
         ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.central_tab, CentralTab::Dashboard, "仪表盘");
             if self.panels.show_tick {
                 ui.selectable_value(&mut self.central_tab, CentralTab::Tick, "行情");
             }
@@ -439,6 +637,7 @@ impl MainWindow {
             if self.panels.show_quote {
                 ui.selectable_value(&mut self.central_tab, CentralTab::Quote, "报价");
             }
+            ui.selectable_value(&mut self.central_tab, CentralTab::Strategy, "策略");
             ui.selectable_value(&mut self.central_tab, CentralTab::Backtesting, "回测");
         });
         
@@ -446,6 +645,10 @@ impl MainWindow {
         
         // Tab content
         match self.central_tab {
+            CentralTab::Dashboard => {
+                let action = self.dashboard_panel.show(ui);
+                self.handle_dashboard_action(action);
+            }
             CentralTab::Tick => {
                 if let Some(vt_symbol) = self.tick_monitor.show(ui) {
                     // Open chart window for the clicked symbol
@@ -455,11 +658,13 @@ impl MainWindow {
             CentralTab::Order => {
                 if let Some(vt_orderid) = self.order_monitor.show(ui) {
                     self.pending_cancel_order = Some(vt_orderid);
+                    self.toast_manager.add("撤单已提交", ToastType::Info);
                 }
             }
             CentralTab::ActiveOrder => {
                 if let Some(vt_orderid) = self.active_order_monitor.show(ui) {
                     self.pending_cancel_order = Some(vt_orderid);
+                    self.toast_manager.add("撤单已提交", ToastType::Info);
                 }
             }
             CentralTab::Trade => {
@@ -468,7 +673,11 @@ impl MainWindow {
             CentralTab::Quote => {
                 if let Some(vt_quoteid) = self.quote_monitor.show(ui) {
                     self.pending_cancel_quote = Some(vt_quoteid);
+                    self.toast_manager.add("撤销报价已提交", ToastType::Info);
                 }
+            }
+            CentralTab::Strategy => {
+                self.strategy_panel.show(ui);
             }
             CentralTab::Backtesting => {
                 let ctx = ui.ctx().clone();
@@ -582,6 +791,66 @@ impl MainWindow {
         // Cancel all from trading widget
         if self.trading.take_cancel_all() {
             // This will be handled by the app
+        }
+    }
+    
+    /// Handle dashboard card click actions
+    fn handle_dashboard_action(&mut self, action: DashboardAction) {
+        match action {
+            DashboardAction::None => {}
+            DashboardAction::NavigateToAccount => {
+                self.bottom_tab = BottomTab::Account;
+            }
+            DashboardAction::NavigateToPositions => {
+                self.bottom_tab = BottomTab::Position;
+            }
+            DashboardAction::NavigateToTrades => {
+                self.central_tab = CentralTab::Trade;
+            }
+            DashboardAction::NavigateToStrategies => {
+                self.central_tab = CentralTab::Strategy;
+            }
+            DashboardAction::NavigateToNotifications => {
+                self.bottom_tab = BottomTab::Log;
+            }
+            DashboardAction::StartAllStrategies => {
+                self.toast_manager.add("批量启动策略", ToastType::Info);
+            }
+            DashboardAction::StopAllStrategies => {
+                self.toast_manager.add("批量停止策略", ToastType::Info);
+            }
+            DashboardAction::OpenChart(vt_symbol) => {
+                self.open_chart(&vt_symbol);
+            }
+        }
+    }
+    
+    /// Show the trading panel and capture order submissions for toast feedback
+    fn show_trading_panel(&mut self, ctx: &Context) {
+        // Pass focus request to trading widget
+        if self.focus_symbol_input {
+            self.trading.focus_symbol_input = true;
+            self.focus_symbol_input = false;
+        }
+        
+        if self.panels.show_trading {
+            SidePanel::left("trading_panel")
+                .resizable(true)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    self.trading.show(ui);
+                });
+        }
+        
+        // Check if an order was submitted from the trading widget
+        if self.trading.pending_order.is_some() {
+            self.toast_manager.add("委托已提交", ToastType::Success);
+        }
+        
+        // Check for order submission errors
+        if let Some(ref err) = self.trading.last_order_error {
+            self.toast_manager.add(err, ToastType::Error);
+            self.trading.last_order_error = None;
         }
     }
     
@@ -924,6 +1193,7 @@ impl MainWindow {
                     "active_order" => self.central_tab = CentralTab::ActiveOrder,
                     "trade" => self.central_tab = CentralTab::Trade,
                     "backtesting" => self.central_tab = CentralTab::Backtesting,
+                    "strategy" => self.central_tab = CentralTab::Strategy,
                     "log" => self.bottom_tab = BottomTab::Log,
                     "account" => self.bottom_tab = BottomTab::Account,
                     "position" => self.bottom_tab = BottomTab::Position,

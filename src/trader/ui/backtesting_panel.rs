@@ -2,8 +2,8 @@
 //!
 //! Provides GUI interface for backtesting configuration and result visualization
 
-use chrono::{DateTime, NaiveDateTime, Utc};
-use egui::{Context, Grid, ScrollArea, Ui};
+use chrono::{DateTime, Datelike, NaiveDateTime, Utc};
+use egui::{Color32, Context, Grid, Id, Pos2, Rect, ScrollArea, Stroke, Ui, Vec2};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -13,13 +13,220 @@ use crate::trader::{Exchange, Interval};
 #[cfg(feature = "python")]
 use crate::python::load_strategies_from_directory;
 
+/// Simple date picker widget with popup calendar
+#[derive(Clone)]
+pub struct DatePicker {
+    year: i32,
+    month: u32,
+    day: u32,
+    show_popup: bool,
+}
+
+impl DatePicker {
+    pub fn new(year: i32, month: u32, day: u32) -> Self {
+        Self {
+            year,
+            month: month.clamp(1, 12),
+            day: day.clamp(1, 31),
+            show_popup: false,
+        }
+    }
+
+    /// Create from chrono::NaiveDate
+    pub fn from_date(date: chrono::NaiveDate) -> Self {
+        Self::new(date.year(), date.month(), date.day())
+    }
+
+    /// Show the date picker widget
+    pub fn show(&mut self, ui: &mut Ui, label: &str, popup_id: Id) {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            let text = format!("{:04}-{:02}-{:02}", self.year, self.month, self.day);
+            let response = ui.button(&text);
+            if response.clicked() {
+                self.show_popup = !self.show_popup;
+            }
+        });
+
+        if self.show_popup {
+            egui::Area::new(popup_id)
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(220.0);
+
+                        // Year / Month navigation
+                        ui.horizontal(|ui| {
+                            if ui.button("◀").clicked() {
+                                self.month -= 1;
+                                if self.month == 0 {
+                                    self.month = 12;
+                                    self.year -= 1;
+                                }
+                            }
+                            ui.label(format!("{:04}年 {:02}月", self.year, self.month));
+                            if ui.button("▶").clicked() {
+                                self.month += 1;
+                                if self.month > 12 {
+                                    self.month = 1;
+                                    self.year += 1;
+                                }
+                            }
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Day-of-week header
+                        ui.horizontal(|ui| {
+                            for day_name in &["日", "一", "二", "三", "四", "五", "六"] {
+                                ui.allocate_ui_with_layout(
+                                    Vec2::new(28.0, 16.0),
+                                    egui::Layout::centered_and_justified(
+                                        egui::Direction::TopDown,
+                                    ),
+                                    |ui| {
+                                        ui.label(egui::RichText::new(*day_name).small().strong());
+                                    },
+                                );
+                            }
+                        });
+
+                        // Calendar grid
+                        let first_day = chrono::NaiveDate::from_ymd_opt(self.year, self.month, 1);
+                        let days_in_month = first_day
+                            .and_then(|d| {
+                                (d + chrono::Duration::days(32))
+                                    .with_day(1)
+                                    .map(|next| (next - d).num_days() as u32)
+                            })
+                            .unwrap_or(30);
+                        let mut weekday_offset = first_day
+                            .map(|d| d.weekday().num_days_from_sunday())
+                            .unwrap_or(0);
+
+                        let mut day_counter: u32 = 0;
+                        for _week in 0..6 {
+                            if day_counter >= days_in_month {
+                                break;
+                            }
+                            ui.horizontal(|ui| {
+                                for _weekday in 0..7 {
+                                    ui.allocate_ui_with_layout(
+                                        Vec2::new(28.0, 22.0),
+                                        egui::Layout::centered_and_justified(
+                                            egui::Direction::TopDown,
+                                        ),
+                                        |ui| {
+                                            if day_counter >= days_in_month {
+                                                return;
+                                            }
+                                            if weekday_offset > 0 {
+                                                weekday_offset -= 1;
+                                                return;
+                                            }
+                                            day_counter += 1;
+                                            let is_selected = day_counter == self.day;
+                                            if is_selected {
+                                                ui.painter().circle_filled(
+                                                    ui.available_rect_before_wrap().center(),
+                                                    10.0,
+                                                    ui.style().visuals.selection.bg_fill,
+                                                );
+                                            }
+                                            let text_color = if is_selected {
+                                                ui.style().visuals.selection.stroke.color
+                                            } else {
+                                                ui.style().visuals.text_color()
+                                            };
+                                            ui.label(
+                                                egui::RichText::new(format!("{}", day_counter))
+                                                    .color(text_color),
+                                            );
+                                            if ui.allocate_response(
+                                                Vec2::splat(22.0),
+                                                egui::Sense::click(),
+                                            ).clicked()
+                                            {
+                                                self.day = day_counter;
+                                                self.show_popup = false;
+                                            }
+                                        },
+                                    );
+                                }
+                            });
+                        }
+
+                        ui.add_space(4.0);
+
+                        // Manual entry row
+                        ui.horizontal(|ui| {
+                            ui.label("日期:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.year)
+                                    .speed(1.0)
+                                    .range(2020..=2030)
+                                    .custom_formatter(|n, _| format!("{:.0}", n)),
+                            );
+                            ui.label("-");
+                            ui.add(
+                                egui::DragValue::new(&mut self.month)
+                                    .speed(0.1)
+                                    .range(1..=12)
+                                    .custom_formatter(|n, _| format!("{:02.0}", n)),
+                            );
+                            ui.label("-");
+                            ui.add(
+                                egui::DragValue::new(&mut self.day)
+                                    .speed(0.1)
+                                    .range(1..=31)
+                                    .custom_formatter(|n, _| format!("{:02.0}", n)),
+                            );
+                        });
+
+                        if ui.button("确定").clicked() {
+                            self.show_popup = false;
+                        }
+                    });
+                });
+
+            // Close popup when clicking elsewhere
+            if ui.ctx().input(|i| i.pointer.any_click()) {
+                // Let the popup content handle its own clicks; close only on outside clicks
+                // This is handled naturally by egui's area system
+            }
+        }
+    }
+
+    /// Convert to datetime string format expected by backtesting engine
+    pub fn to_datetime_string(&self) -> String {
+        format!(
+            "{:04}-{:02}-{:02} 00:00:00",
+            self.year, self.month, self.day
+        )
+    }
+
+    /// Convert to end-of-day datetime string
+    pub fn to_end_datetime_string(&self) -> String {
+        format!(
+            "{:04}-{:02}-{:02} 23:59:59",
+            self.year, self.month, self.day
+        )
+    }
+
+    /// Convert to YYYYMMDD format
+    #[allow(dead_code)]
+    pub fn to_date_string(&self) -> String {
+        format!("{:04}{:02}{:02}", self.year, self.month, self.day)
+    }
+}
+
 /// Backtesting panel state
 pub struct BacktestingPanel {
     // Configuration
     vt_symbol: String,
     interval: Interval,
-    start_date: String,
-    end_date: String,
+    start_date_picker: DatePicker,
+    end_date_picker: DatePicker,
     rate: String,
     slippage: String,
     capital: String,
@@ -52,11 +259,15 @@ pub struct BacktestingPanel {
 
 impl Default for BacktestingPanel {
     fn default() -> Self {
+        let now = chrono::Local::now();
+        let end_date = now.date_naive();
+        let start_date = end_date - chrono::Duration::days(365);
+
         Self {
             vt_symbol: "BTCUSDT.BINANCE".to_string(),
             interval: Interval::Minute,
-            start_date: "2024-01-01 00:00:00".to_string(),
-            end_date: "2024-12-31 23:59:59".to_string(),
+            start_date_picker: DatePicker::from_date(start_date),
+            end_date_picker: DatePicker::from_date(end_date),
             rate: "0.0003".to_string(),
             slippage: "0.0001".to_string(),
             capital: "100000.0".to_string(),
@@ -144,11 +355,11 @@ impl BacktestingPanel {
                 ui.end_row();
 
                 ui.label("开始时间:");
-                ui.text_edit_singleline(&mut self.start_date);
+                self.start_date_picker.show(ui, "", ui.auto_id_with("start_date_popup"));
                 ui.end_row();
 
                 ui.label("结束时间:");
-                ui.text_edit_singleline(&mut self.end_date);
+                self.end_date_picker.show(ui, "", ui.auto_id_with("end_date_popup"));
                 ui.end_row();
 
                 ui.label("手续费率:");
@@ -340,10 +551,193 @@ impl BacktestingPanel {
 
             ui.add_space(10.0);
 
-            // Chart would go here if egui plot is available
+            // Equity curve and drawdown charts
             if !self.daily_pnl.is_empty() {
-                ui.heading("每日盈亏曲线");
-                ui.label(format!("共 {} 个数据点", self.daily_pnl.len()));
+                // --- 净值曲线 ---
+                ui.heading("净值曲线");
+                let available_width = ui.available_width();
+                let chart_height = 200.0;
+                let response = ui.allocate_response(
+                    Vec2::new(available_width, chart_height),
+                    egui::Sense::hover(),
+                );
+                let rect = response.rect;
+
+                // Compute cumulative equity from daily PnL
+                let mut equity_curve: Vec<f64> = Vec::new();
+                let mut cumulative = 0.0;
+                for (_, pnl) in &self.daily_pnl {
+                    cumulative += pnl;
+                    equity_curve.push(cumulative);
+                }
+
+                let painter = ui.painter_at(rect);
+                {
+                    // Background
+                    painter.rect_filled(rect, 2.0, Color32::from_rgb(30, 30, 30));
+                    painter.rect_stroke(rect, 2.0, Stroke::new(1.0, Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Inside);
+
+                    if equity_curve.len() > 1 {
+                        let min_val = equity_curve.iter().cloned().fold(f64::INFINITY, f64::min);
+                        let max_val = equity_curve.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                        let range = (max_val - min_val).max(1.0);
+
+                        let padding = 5.0;
+                        let chart_rect = Rect::from_min_max(
+                            Pos2::new(rect.left() + padding, rect.top() + padding),
+                            Pos2::new(rect.right() - padding, rect.bottom() - padding),
+                        );
+
+                        // Zero line
+                        if min_val < 0.0 && max_val > 0.0 {
+                            let zero_y = chart_rect.bottom()
+                                - ((0.0 - min_val) / range) as f32 * chart_rect.height();
+                            painter.line_segment(
+                                [
+                                    Pos2::new(chart_rect.left(), zero_y),
+                                    Pos2::new(chart_rect.right(), zero_y),
+                                ],
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 40)),
+                            );
+                        }
+
+                        // Equity curve line
+                        let points: Vec<Pos2> = equity_curve
+                            .iter()
+                            .enumerate()
+                            .map(|(i, v)| {
+                                let x = chart_rect.left()
+                                    + (i as f32 / (equity_curve.len() - 1) as f32)
+                                        * chart_rect.width();
+                                let y = chart_rect.bottom()
+                                    - ((v - min_val) / range) as f32 * chart_rect.height();
+                                Pos2::new(x, y)
+                            })
+                            .collect();
+
+                        if points.len() > 1 {
+                            let line_color =
+                                if equity_curve.last().copied().unwrap_or(0.0) >= 0.0 {
+                                    Color32::from_rgb(255, 80, 80) // 红色=盈利
+                                } else {
+                                    Color32::from_rgb(80, 200, 80) // 绿色=亏损
+                                };
+                            painter.add(egui::Shape::line(points, Stroke::new(1.5, line_color)));
+                        }
+
+                        // Labels
+                        painter.text(
+                            Pos2::new(chart_rect.left(), chart_rect.top()),
+                            egui::Align2::LEFT_TOP,
+                            format!("最高: {:.2}", max_val),
+                            egui::FontId::proportional(10.0),
+                            Color32::from_rgb(160, 160, 160),
+                        );
+                        painter.text(
+                            Pos2::new(chart_rect.left(), chart_rect.bottom()),
+                            egui::Align2::LEFT_BOTTOM,
+                            format!("最低: {:.2}", min_val),
+                            egui::FontId::proportional(10.0),
+                            Color32::from_rgb(160, 160, 160),
+                        );
+                    }
+                }
+
+                ui.add_space(10.0);
+
+                // --- 回撤曲线 ---
+                ui.heading("回撤曲线");
+                let dd_response = ui.allocate_response(
+                    Vec2::new(available_width, chart_height),
+                    egui::Sense::hover(),
+                );
+                let dd_rect = dd_response.rect;
+
+                // Compute drawdown from equity curve
+                let mut drawdown_curve: Vec<f64> = Vec::new();
+                let mut peak = 0.0_f64;
+                for &val in &equity_curve {
+                    peak = peak.max(val);
+                    let dd = if peak > 0.0 { (val - peak) / peak } else { 0.0 };
+                    drawdown_curve.push(dd * 100.0); // as percentage
+                }
+
+                let dd_painter = ui.painter_at(dd_rect);
+                {
+                    // Background
+                    dd_painter.rect_filled(dd_rect, 2.0, Color32::from_rgb(30, 30, 30));
+                    dd_painter.rect_stroke(
+                        dd_rect,
+                        2.0,
+                        Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
+                        egui::StrokeKind::Inside,
+                    );
+
+                    if drawdown_curve.len() > 1 {
+                        let min_dd = drawdown_curve.iter().cloned().fold(f64::INFINITY, f64::min);
+                        let max_dd = drawdown_curve.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                        // Range from min_dd (most negative) to 0
+                        let dd_max = 0.0_f64.max(max_dd);
+                        let dd_min = min_dd.min(0.0);
+                        let dd_range = (dd_max - dd_min).max(0.01);
+
+                        let padding = 5.0;
+                        let chart_rect = Rect::from_min_max(
+                            Pos2::new(dd_rect.left() + padding, dd_rect.top() + padding),
+                            Pos2::new(dd_rect.right() - padding, dd_rect.bottom() - padding),
+                        );
+
+                        // Zero line (top area since drawdowns are negative)
+                        let zero_y = chart_rect.bottom()
+                            - ((dd_max - dd_min) / dd_range) as f32 * chart_rect.height();
+                        if zero_y >= chart_rect.top() && zero_y <= chart_rect.bottom() {
+                            dd_painter.line_segment(
+                                [
+                                    Pos2::new(chart_rect.left(), zero_y),
+                                    Pos2::new(chart_rect.right(), zero_y),
+                                ],
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 40)),
+                            );
+                        }
+
+                        // Drawdown curve
+                        let points: Vec<Pos2> = drawdown_curve
+                            .iter()
+                            .enumerate()
+                            .map(|(i, v)| {
+                                let x = chart_rect.left()
+                                    + (i as f32 / (drawdown_curve.len() - 1) as f32)
+                                        * chart_rect.width();
+                                let y = chart_rect.bottom()
+                                    - ((v - dd_min) / dd_range) as f32 * chart_rect.height();
+                                Pos2::new(x, y)
+                            })
+                            .collect();
+
+                        if points.len() > 1 {
+                            dd_painter.add(egui::Shape::line(
+                                points,
+                                Stroke::new(1.5, Color32::from_rgb(80, 200, 80)),
+                            ));
+                        }
+
+                        // Labels
+                        dd_painter.text(
+                            Pos2::new(chart_rect.left(), chart_rect.top()),
+                            egui::Align2::LEFT_TOP,
+                            format!("0.00%"),
+                            egui::FontId::proportional(10.0),
+                            Color32::from_rgb(160, 160, 160),
+                        );
+                        dd_painter.text(
+                            Pos2::new(chart_rect.left(), chart_rect.bottom()),
+                            egui::Align2::LEFT_BOTTOM,
+                            format!("最大回撤: {:.2}%", min_dd),
+                            egui::FontId::proportional(10.0),
+                            Color32::from_rgb(160, 160, 160),
+                        );
+                    }
+                }
             }
         }
     }
@@ -363,11 +757,14 @@ impl BacktestingPanel {
         let mode = self.mode;
 
         // Parse dates
-        let start = NaiveDateTime::parse_from_str(&self.start_date, "%Y-%m-%d %H:%M:%S")
+        let start_str = self.start_date_picker.to_datetime_string();
+        let end_str = self.end_date_picker.to_end_datetime_string();
+
+        let start = NaiveDateTime::parse_from_str(&start_str, "%Y-%m-%d %H:%M:%S")
             .map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc))
             .unwrap_or(Utc::now());
 
-        let end = NaiveDateTime::parse_from_str(&self.end_date, "%Y-%m-%d %H:%M:%S")
+        let end = NaiveDateTime::parse_from_str(&end_str, "%Y-%m-%d %H:%M:%S")
             .map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc))
             .unwrap_or(Utc::now());
 
@@ -778,11 +1175,10 @@ impl BacktestingPanel {
                     self.strategy_file.clone()
                 }
             } else {
-                // Default directories to try
+                // Default directories to try (project-relative paths)
                 let default_dirs = [
-                    r"D:\Code\quant\vnpy_ctastrategy\vnpy_ctastrategy\strategies",
-                    "./examples",
-                    "../vnpy_ctastrategy/vnpy_ctastrategy/strategies",
+                    "./strategies",      // Project strategies directory (migrated from vnpy)
+                    "./examples",        // Example strategies
                 ];
 
                 // Find first existing directory
@@ -790,7 +1186,7 @@ impl BacktestingPanel {
                     .iter()
                     .find(|d| Path::new(d).is_dir())
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| "./examples".to_string())
+                    .unwrap_or_else(|| "./strategies".to_string())
             };
 
             match load_strategies_from_directory(&dir) {

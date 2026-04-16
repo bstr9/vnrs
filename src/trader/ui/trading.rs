@@ -1,6 +1,6 @@
 //! Trading widget for manual order entry and market depth display.
 
-use egui::{ComboBox, RichText, Ui};
+use egui::{Color32, ComboBox, RichText, Ui};
 
 use super::style::*;
 use crate::trader::constant::{Direction, Exchange, Offset, OrderType};
@@ -120,6 +120,10 @@ pub struct TradingWidget {
     pub pending_subscribe: Option<SubscribeRequest>,
     pub pending_order: Option<OrderRequest>,
     pub pending_cancel_all: bool,
+    /// Last order error message (set when order submission fails validation)
+    pub last_order_error: Option<String>,
+    /// Whether to focus the symbol input on next frame
+    pub focus_symbol_input: bool,
 }
 
 impl Default for TradingWidget {
@@ -162,6 +166,8 @@ impl TradingWidget {
             pending_subscribe: None,
             pending_order: None,
             pending_cancel_all: false,
+            last_order_error: None,
+            focus_symbol_input: false,
         }
     }
 
@@ -274,6 +280,9 @@ impl TradingWidget {
         ui.set_min_width(280.0);
 
         // Order entry section
+        // Track popup state to render it outside the Grid (avoids clipping)
+        let mut popup_info: Option<(egui::Rect, Vec<ContractData>)> = None;
+
         ui.group(|ui| {
             ui.heading("交易");
             ui.separator();
@@ -310,9 +319,18 @@ impl TradingWidget {
                     ui.label("代码");
 
                     // Text input for symbol
+                    let symbol_id = egui::Id::new("symbol_text_edit");
                     let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.symbol).hint_text("输入合约代码..."),
+                        egui::TextEdit::singleline(&mut self.symbol)
+                            .id(symbol_id)
+                            .hint_text("输入合约代码..."),
                     );
+
+                    // Focus symbol input if requested
+                    if self.focus_symbol_input {
+                        response.request_focus();
+                        self.focus_symbol_input = false;
+                    }
 
                     // Check if user is typing (filter contracts)
                     let input_lower = self.symbol.to_lowercase();
@@ -328,79 +346,12 @@ impl TradingWidget {
                             .collect()
                     };
 
-                    // Show autocomplete dropdown below the text edit
+                    // Save popup info to render AFTER the grid (avoids clipping by parent containers)
                     if response.has_focus() && !filtered_contracts.is_empty() {
-                        let popup_id = egui::Id::new("contract_autocomplete");
-
-                        egui::Area::new(popup_id)
-                            .pivot(egui::Align2::LEFT_TOP)
-                            .fixed_pos(response.rect.left_bottom())
-                            .order(egui::Order::Foreground)
-                            .show(ui.ctx(), |ui| {
-                                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                    ui.set_max_width(220.0);
-                                    ui.set_max_height(200.0);
-
-                                    egui::ScrollArea::vertical()
-                                        .max_height(180.0)
-                                        .show(ui, |ui| {
-                                            for contract in filtered_contracts {
-                                                let label = format!(
-                                                    "{} ({})",
-                                                    contract.symbol.to_uppercase(),
-                                                    contract.name
-                                                );
-
-                                                // Highlight if exact match
-                                                let is_exact =
-                                                    contract.symbol.to_lowercase() == input_lower;
-
-                                                if ui.selectable_label(is_exact, label).clicked() {
-                                                    // User selected this contract
-                                                    self.symbol = contract.symbol.clone();
-                                                    self.name = contract.name.clone();
-                                                    self.price_digits =
-                                                        get_digits(contract.pricetick);
-
-                                                    // Find matching exchange index
-                                                    if let Some(idx) = self
-                                                        .exchanges
-                                                        .iter()
-                                                        .position(|e| *e == contract.exchange)
-                                                    {
-                                                        self.exchange_index = idx;
-                                                    }
-
-                                                    // Find matching gateway index
-                                                    if let Some(idx) = self
-                                                        .gateways
-                                                        .iter()
-                                                        .position(|g| g == &contract.gateway_name)
-                                                    {
-                                                        self.gateway_index = idx;
-                                                    }
-
-                                                    self.contract = Some(contract.clone());
-
-                                                    // Update vt_symbol and request subscription
-                                                    let new_vt_symbol = contract.vt_symbol();
-                                                    if new_vt_symbol != self.vt_symbol {
-                                                        self.vt_symbol = new_vt_symbol;
-                                                        self.depth = MarketDepth::default();
-                                                        self.price.clear();
-                                                        self.volume.clear();
-
-                                                        self.pending_subscribe =
-                                                            Some(SubscribeRequest {
-                                                                symbol: contract.symbol.clone(),
-                                                                exchange: contract.exchange,
-                                                            });
-                                                    }
-                                                }
-                                            }
-                                        });
-                                });
-                            });
+                        popup_info = Some((
+                            response.rect,
+                            filtered_contracts.into_iter().cloned().collect(),
+                        ));
                     }
 
                     // Subscribe on Enter key
@@ -501,6 +452,82 @@ impl TradingWidget {
                     ui.end_row();
                 });
 
+            // Render autocomplete popup AFTER the grid, outside its clip region
+            // This prevents the dropdown from being clipped by the Grid/Group containers
+            if let Some((widget_rect, filtered_contracts)) = popup_info {
+                let popup_id = egui::Id::new("contract_autocomplete");
+                let input_lower = self.symbol.to_lowercase();
+
+                egui::Area::new(popup_id)
+                    .pivot(egui::Align2::LEFT_TOP)
+                    .fixed_pos(widget_rect.left_bottom())
+                    .order(egui::Order::Foreground)
+                    .interactable(true)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.set_max_width(220.0);
+                            ui.set_max_height(200.0);
+
+                            egui::ScrollArea::vertical()
+                                .max_height(180.0)
+                                .show(ui, |ui| {
+                                    for contract in &filtered_contracts {
+                                        let label = format!(
+                                            "{} ({})",
+                                            contract.symbol.to_uppercase(),
+                                            contract.name
+                                        );
+
+                                        // Highlight if exact match
+                                        let is_exact =
+                                            contract.symbol.to_lowercase() == input_lower;
+
+                                        if ui.selectable_label(is_exact, label).clicked() {
+                                            // User selected this contract
+                                            self.symbol = contract.symbol.clone();
+                                            self.name = contract.name.clone();
+                                            self.price_digits = get_digits(contract.pricetick);
+
+                                            // Find matching exchange index
+                                            if let Some(idx) = self
+                                                .exchanges
+                                                .iter()
+                                                .position(|e| *e == contract.exchange)
+                                            {
+                                                self.exchange_index = idx;
+                                            }
+
+                                            // Find matching gateway index
+                                            if let Some(idx) = self
+                                                .gateways
+                                                .iter()
+                                                .position(|g| g == &contract.gateway_name)
+                                            {
+                                                self.gateway_index = idx;
+                                            }
+
+                                            self.contract = Some(contract.clone());
+
+                                            // Update vt_symbol and request subscription
+                                            let new_vt_symbol = contract.vt_symbol();
+                                            if new_vt_symbol != self.vt_symbol {
+                                                self.vt_symbol = new_vt_symbol;
+                                                self.depth = MarketDepth::default();
+                                                self.price.clear();
+                                                self.volume.clear();
+
+                                                self.pending_subscribe = Some(SubscribeRequest {
+                                                    symbol: contract.symbol.clone(),
+                                                    exchange: contract.exchange,
+                                                });
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+                    });
+            }
+
             ui.separator();
 
             // Buttons
@@ -523,11 +550,40 @@ impl TradingWidget {
 
             let prec = self.price_digits;
 
+            // Calculate max volume across all 10 levels for bar scaling
+            let max_volume = {
+                let ask_max = self.depth.ask_levels[0..5]
+                    .iter()
+                    .map(|l| l.volume)
+                    .fold(0.0_f64, f64::max);
+                let bid_max = self.depth.bid_levels[0..5]
+                    .iter()
+                    .map(|l| l.volume)
+                    .fold(0.0_f64, f64::max);
+                ask_max.max(bid_max).max(1.0) // avoid division by zero
+            };
+
+            // Bar colors (semi-transparent)
+            let ask_bar_color = Color32::from_rgba_unmultiplied(160, 255, 160, 80);
+            let bid_bar_color = Color32::from_rgba_unmultiplied(255, 174, 201, 80);
+
             // Ask levels (reversed, 5 to 1)
             for i in (0..5).rev() {
                 let level = &self.depth.ask_levels[i];
                 if level.price > 0.0 {
                     ui.horizontal(|ui| {
+                        let row_width = ui.available_width();
+                        let bar_width = (level.volume / max_volume) as f32 * row_width;
+                        let rect = ui.available_rect_before_wrap();
+                        // Draw bar from right to left (background)
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(rect.right() - bar_width, rect.top()),
+                                egui::pos2(rect.right(), rect.bottom()),
+                            ),
+                            0.0,
+                            ask_bar_color,
+                        );
                         ui.label(
                             RichText::new(format!("{:.prec$}", level.price, prec = prec))
                                 .color(COLOR_ASK),
@@ -569,6 +625,18 @@ impl TradingWidget {
                 let level = &self.depth.bid_levels[i];
                 if level.price > 0.0 {
                     ui.horizontal(|ui| {
+                        let row_width = ui.available_width();
+                        let bar_width = (level.volume / max_volume) as f32 * row_width;
+                        let rect = ui.available_rect_before_wrap();
+                        // Draw bar from right to left (background)
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(rect.right() - bar_width, rect.top()),
+                                egui::pos2(rect.right(), rect.bottom()),
+                            ),
+                            0.0,
+                            bid_bar_color,
+                        );
                         ui.label(
                             RichText::new(format!("{:.prec$}", level.price, prec = prec))
                                 .color(COLOR_BID),
@@ -594,12 +662,16 @@ impl TradingWidget {
     /// Create and queue an order request
     fn send_order(&mut self) {
         if self.symbol.is_empty() {
+            self.last_order_error = Some("代码不能为空".to_string());
             return;
         }
 
         let volume: f64 = match self.volume.parse() {
             Ok(v) if v > 0.0 => v,
-            _ => return,
+            _ => {
+                self.last_order_error = Some("数量无效".to_string());
+                return;
+            }
         };
 
         let price: f64 = self.price.parse().unwrap_or(0.0);
@@ -629,6 +701,7 @@ impl TradingWidget {
             _ => OrderType::Fok,
         };
 
+        self.last_order_error = None;
         self.pending_order = Some(OrderRequest {
             symbol: self.symbol.clone(),
             exchange,

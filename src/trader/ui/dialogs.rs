@@ -1,7 +1,7 @@
 //! Dialog windows for the trading platform.
 
+use egui::{Context, Window};
 use std::collections::HashMap;
-use egui::{Window, Context};
 
 /// Connection dialog for gateway configuration
 pub struct ConnectDialog {
@@ -38,11 +38,11 @@ impl ConnectDialog {
             should_connect: false,
         }
     }
-    
+
     /// Set default settings from gateway
     pub fn set_default_settings(&mut self, defaults: HashMap<String, serde_json::Value>) {
         self.settings.clear();
-        
+
         for (key, value) in defaults {
             let field = match value {
                 serde_json::Value::String(s) => {
@@ -90,7 +90,7 @@ impl ConnectDialog {
             self.settings.insert(key, field);
         }
     }
-    
+
     /// Load saved settings
     pub fn load_settings(&mut self, saved: HashMap<String, serde_json::Value>) {
         for (key, value) in saved {
@@ -104,15 +104,15 @@ impl ConnectDialog {
             }
         }
     }
-    
+
     /// Show the dialog
     pub fn show(&mut self, ctx: &Context) {
         if !self.is_open {
             return;
         }
-        
+
         let title = format!("连接 {}", self.gateway_name);
-        
+
         Window::new(title)
             .collapsible(false)
             .resizable(false)
@@ -123,17 +123,20 @@ impl ConnectDialog {
                     .show(ui, |ui| {
                         let mut keys: Vec<_> = self.settings.keys().cloned().collect();
                         keys.sort();
-                        
+
                         for key in keys {
                             if let Some(field) = self.settings.get_mut(&key) {
                                 ui.label(&key);
-                                
+
                                 match field.field_type {
                                     FieldType::String | FieldType::Int | FieldType::Float => {
                                         ui.text_edit_singleline(&mut field.value);
                                     }
                                     FieldType::Password => {
-                                        ui.add(egui::TextEdit::singleline(&mut field.value).password(true));
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut field.value)
+                                                .password(true),
+                                        );
                                     }
                                     FieldType::Bool => {
                                         let mut checked = field.value == "true";
@@ -146,7 +149,11 @@ impl ConnectDialog {
                                             .selected_text(&field.value)
                                             .show_ui(ui, |ui| {
                                                 for option in &field.options {
-                                                    ui.selectable_value(&mut field.value, option.clone(), option);
+                                                    ui.selectable_value(
+                                                        &mut field.value,
+                                                        option.clone(),
+                                                        option,
+                                                    );
                                                 }
                                             });
                                     }
@@ -155,9 +162,9 @@ impl ConnectDialog {
                             }
                         }
                     });
-                
+
                 ui.separator();
-                
+
                 ui.horizontal(|ui| {
                     if ui.button("连接").clicked() {
                         self.should_connect = true;
@@ -169,11 +176,11 @@ impl ConnectDialog {
                 });
             });
     }
-    
+
     /// Get settings as JSON-compatible HashMap
     pub fn get_settings(&self) -> HashMap<String, serde_json::Value> {
         let mut result = HashMap::new();
-        
+
         for (key, field) in &self.settings {
             let value = match field.field_type {
                 FieldType::Int => {
@@ -190,28 +197,31 @@ impl ConnectDialog {
                         serde_json::Value::String(field.value.clone())
                     }
                 }
-                FieldType::Bool => {
-                    serde_json::Value::Bool(field.value == "true")
-                }
+                FieldType::Bool => serde_json::Value::Bool(field.value == "true"),
                 _ => serde_json::Value::String(field.value.clone()),
             };
             result.insert(key.clone(), value);
         }
-        
+
         result
     }
-    
+
     /// Open the dialog
     pub fn open(&mut self) {
         self.is_open = true;
         self.should_connect = false;
     }
-    
+
     /// Check if should connect and reset flag
     pub fn take_connect(&mut self) -> bool {
         let result = self.should_connect;
         self.should_connect = false;
         result
+    }
+
+    /// Close the dialog
+    pub fn close(&mut self) {
+        self.is_open = false;
     }
 }
 
@@ -230,16 +240,20 @@ impl AboutDialog {
     pub fn new() -> Self {
         Self { is_open: false }
     }
-    
+
     pub fn open(&mut self) {
         self.is_open = true;
     }
-    
+
+    pub fn close(&mut self) {
+        self.is_open = false;
+    }
+
     pub fn show(&mut self, ctx: &Context) {
         if !self.is_open {
             return;
         }
-        
+
         Window::new("关于 Trade Engine")
             .collapsible(false)
             .resizable(false)
@@ -247,17 +261,17 @@ impl AboutDialog {
                 ui.vertical_centered(|ui| {
                     ui.heading("Trade Engine");
                     ui.add_space(10.0);
-                    
+
                     ui.label("By Traders, For Traders.");
                     ui.add_space(10.0);
-                    
+
                     ui.label(format!("Version: {}", env!("CARGO_PKG_VERSION")));
                     ui.label(format!("Rust: {}", rustc_version_runtime::version()));
                     ui.add_space(10.0);
-                    
+
                     ui.label("License: MIT");
                     ui.add_space(20.0);
-                    
+
                     if ui.button("关闭").clicked() {
                         self.is_open = false;
                     }
@@ -287,7 +301,7 @@ impl GlobalSettingsDialog {
             should_save: false,
         }
     }
-    
+
     pub fn open(&mut self, settings: HashMap<String, serde_json::Value>) {
         self.is_open = true;
         self.should_save = false;
@@ -304,12 +318,12 @@ impl GlobalSettingsDialog {
             })
             .collect();
     }
-    
+
     pub fn show(&mut self, ctx: &Context) {
         if !self.is_open {
             return;
         }
-        
+
         Window::new("全局配置")
             .collapsible(false)
             .resizable(true)
@@ -324,7 +338,7 @@ impl GlobalSettingsDialog {
                             .show(ui, |ui| {
                                 let mut keys: Vec<_> = self.settings.keys().cloned().collect();
                                 keys.sort();
-                                
+
                                 for key in keys {
                                     if let Some(value) = self.settings.get_mut(&key) {
                                         ui.label(&key);
@@ -334,9 +348,9 @@ impl GlobalSettingsDialog {
                                 }
                             });
                     });
-                
+
                 ui.separator();
-                
+
                 ui.horizontal(|ui| {
                     if ui.button("确定").clicked() {
                         self.should_save = true;
@@ -346,11 +360,11 @@ impl GlobalSettingsDialog {
                         self.is_open = false;
                     }
                 });
-                
+
                 ui.label("注意：配置修改需要重启后生效");
             });
     }
-    
+
     /// Get settings as JSON-compatible HashMap
     pub fn get_settings(&self) -> HashMap<String, serde_json::Value> {
         self.settings
@@ -372,12 +386,17 @@ impl GlobalSettingsDialog {
             })
             .collect()
     }
-    
+
     /// Check if should save and reset flag
     pub fn take_save(&mut self) -> bool {
         let result = self.should_save;
         self.should_save = false;
         result
+    }
+
+    /// Close the dialog
+    pub fn close(&mut self) {
+        self.is_open = false;
     }
 }
 
@@ -418,37 +437,42 @@ impl ContractManagerDialog {
             filtered_contracts: Vec::new(),
         }
     }
-    
+
     pub fn open(&mut self) {
         self.is_open = true;
         self.filter.clear();
         self.update_filter();
     }
-    
+
+    pub fn close(&mut self) {
+        self.is_open = false;
+    }
+
     pub fn set_contracts(&mut self, contracts: Vec<ContractRow>) {
         self.contracts = contracts;
         self.update_filter();
     }
-    
+
     fn update_filter(&mut self) {
         let filter_lower = self.filter.to_lowercase();
-        self.filtered_contracts = self.contracts
+        self.filtered_contracts = self
+            .contracts
             .iter()
             .enumerate()
             .filter(|(_, c)| {
-                self.filter.is_empty() 
+                self.filter.is_empty()
                     || c.vt_symbol.to_lowercase().contains(&filter_lower)
                     || c.name.to_lowercase().contains(&filter_lower)
             })
             .map(|(i, _)| i)
             .collect();
     }
-    
+
     pub fn show(&mut self, ctx: &Context) {
         if !self.is_open {
             return;
         }
-        
+
         Window::new("合约查询")
             .collapsible(true)
             .resizable(true)
@@ -462,9 +486,9 @@ impl ContractManagerDialog {
                     }
                     ui.label(format!("共 {} 条", self.filtered_contracts.len()));
                 });
-                
+
                 ui.separator();
-                
+
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -473,46 +497,82 @@ impl ContractManagerDialog {
                             .resizable(true)
                             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                             .column(egui_extras::Column::auto().at_least(120.0)) // vt_symbol
-                            .column(egui_extras::Column::auto().at_least(80.0))  // symbol
-                            .column(egui_extras::Column::auto().at_least(80.0))  // exchange
+                            .column(egui_extras::Column::auto().at_least(80.0)) // symbol
+                            .column(egui_extras::Column::auto().at_least(80.0)) // exchange
                             .column(egui_extras::Column::auto().at_least(100.0)) // name
-                            .column(egui_extras::Column::auto().at_least(60.0))  // product
-                            .column(egui_extras::Column::auto().at_least(60.0))  // size
-                            .column(egui_extras::Column::auto().at_least(80.0))  // pricetick
-                            .column(egui_extras::Column::auto().at_least(60.0))  // min_volume
-                            .column(egui_extras::Column::auto().at_least(80.0))  // gateway
+                            .column(egui_extras::Column::auto().at_least(60.0)) // product
+                            .column(egui_extras::Column::auto().at_least(60.0)) // size
+                            .column(egui_extras::Column::auto().at_least(80.0)) // pricetick
+                            .column(egui_extras::Column::auto().at_least(60.0)) // min_volume
+                            .column(egui_extras::Column::auto().at_least(80.0)) // gateway
                             .header(20.0, |mut header| {
-                                header.col(|ui| { ui.strong("本地代码"); });
-                                header.col(|ui| { ui.strong("代码"); });
-                                header.col(|ui| { ui.strong("交易所"); });
-                                header.col(|ui| { ui.strong("名称"); });
-                                header.col(|ui| { ui.strong("类型"); });
-                                header.col(|ui| { ui.strong("乘数"); });
-                                header.col(|ui| { ui.strong("价格跳动"); });
-                                header.col(|ui| { ui.strong("最小量"); });
-                                header.col(|ui| { ui.strong("接口"); });
+                                header.col(|ui| {
+                                    ui.strong("本地代码");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("代码");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("交易所");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("名称");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("类型");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("乘数");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("价格跳动");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("最小量");
+                                });
+                                header.col(|ui| {
+                                    ui.strong("接口");
+                                });
                             })
                             .body(|mut body| {
                                 for &idx in &self.filtered_contracts {
                                     if let Some(row) = self.contracts.get(idx) {
                                         body.row(18.0, |mut table_row| {
-                                            table_row.col(|ui| { ui.label(&row.vt_symbol); });
-                                            table_row.col(|ui| { ui.label(&row.symbol); });
-                                            table_row.col(|ui| { ui.label(&row.exchange); });
-                                            table_row.col(|ui| { ui.label(&row.name); });
-                                            table_row.col(|ui| { ui.label(&row.product); });
-                                            table_row.col(|ui| { ui.label(format!("{:.0}", row.size)); });
-                                            table_row.col(|ui| { ui.label(format!("{}", row.pricetick)); });
-                                            table_row.col(|ui| { ui.label(format!("{:.0}", row.min_volume)); });
-                                            table_row.col(|ui| { ui.label(&row.gateway_name); });
+                                            table_row.col(|ui| {
+                                                ui.label(&row.vt_symbol);
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(&row.symbol);
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(&row.exchange);
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(&row.name);
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(&row.product);
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(format!("{:.0}", row.size));
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(format!("{}", row.pricetick));
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(format!("{:.0}", row.min_volume));
+                                            });
+                                            table_row.col(|ui| {
+                                                ui.label(&row.gateway_name);
+                                            });
                                         });
                                     }
                                 }
                             });
                     });
-                
+
                 ui.separator();
-                
+
                 if ui.button("关闭").clicked() {
                     self.is_open = false;
                 }
