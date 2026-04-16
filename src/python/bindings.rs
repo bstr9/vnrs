@@ -1,4 +1,5 @@
-use crate::python::{PythonEngine, PythonStrategy};
+use crate::python::{OrderFactory, PyOrder, PythonEngine, Strategy};
+use crate::trader::constant::{Direction, Offset, OrderType};
 use crate::trader::MainEngine;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -7,13 +8,30 @@ use tokio::runtime::Runtime;
 /// Python module for the trading engine
 #[pymodule]
 fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PythonStrategy>()?;
+    m.add_class::<Strategy>()?;
     m.add_class::<PythonEngineWrapper>()?;
+    m.add_class::<PyOrder>()?;
+    m.add_class::<OrderFactory>()?;
     m.add_function(wrap_pyfunction!(create_main_engine, m)?)?;
     m.add_function(wrap_pyfunction!(run_event_loop, m)?)?;
 
     // Register backtesting module
     crate::python::backtesting_bindings::register_backtesting_module(m)?;
+
+    // Register portfolio facade module
+    crate::python::portfolio::register_portfolio_module(m)?;
+
+    // Register message bus module
+    crate::python::message_bus::register_message_bus_module(m)?;
+
+    // Register risk manager module
+    crate::python::risk_manager::register_risk_module(m)?;
+
+    // Register deprecated strategy classes (kept for backward compatibility)
+    #[allow(deprecated)]
+    {
+        crate::python::strategy_bindings::register_strategy_module(m)?;
+    }
 
     Ok(())
 }
@@ -42,7 +60,7 @@ impl PythonEngineWrapper {
     fn add_strategy(
         slf: &Bound<'_, Self>,
         py: Python,
-        strategy: Bound<'_, PythonStrategy>,
+        strategy: Bound<'_, Strategy>,
     ) -> PyResult<()> {
         let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
         slf.borrow()
@@ -170,6 +188,76 @@ impl PythonEngineWrapper {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .send_email(&msg);
+    }
+
+    /// Send a typed order (called by PyOrder.submit()).
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     direction_str: "BUY" or "SELL"
+    ///     offset_str: "NONE", "OPEN", "CLOSE", "CLOSE_TODAY", "CLOSE_YESTERDAY"
+    ///     price: Order price (0.0 for market orders)
+    ///     volume: Order quantity
+    ///     order_type_str: "MARKET", "LIMIT", "STOP"
+    #[pyo3(signature = (vt_symbol, direction_str, offset_str, price, volume, order_type_str))]
+    fn send_order_typed(
+        &self,
+        vt_symbol: &str,
+        direction_str: &str,
+        offset_str: &str,
+        price: f64,
+        volume: f64,
+        order_type_str: &str,
+    ) -> PyResult<Vec<String>> {
+        let direction = match direction_str.to_uppercase().as_str() {
+            "BUY" | "LONG" => Direction::Long,
+            "SELL" | "SHORT" => Direction::Short,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid direction '{}'",
+                    direction_str
+                )));
+            }
+        };
+
+        let offset = match offset_str.to_uppercase().as_str() {
+            "NONE" => Offset::None,
+            "OPEN" => Offset::Open,
+            "CLOSE" => Offset::Close,
+            "CLOSE_TODAY" => Offset::CloseToday,
+            "CLOSE_YESTERDAY" => Offset::CloseYesterday,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid offset '{}'",
+                    offset_str
+                )));
+            }
+        };
+
+        let order_type = match order_type_str.to_uppercase().as_str() {
+            "MARKET" => OrderType::Market,
+            "LIMIT" => OrderType::Limit,
+            "STOP" | "STOP_LIMIT" => OrderType::Stop,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid order_type '{}'",
+                    order_type_str
+                )));
+            }
+        };
+
+        let result = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send_order(vt_symbol, direction, offset, price, volume, order_type);
+        Ok(result)
+    }
+
+    /// Create an OrderFactory bound to this engine.
+    fn create_order_factory(slf: &Bound<'_, Self>) -> PyResult<OrderFactory> {
+        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
+        Ok(OrderFactory::from_engine(engine_ref, ""))
     }
 }
 

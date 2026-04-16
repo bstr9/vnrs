@@ -43,7 +43,7 @@ impl PythonStrategyAdapter {
         class_name: &str,
         strategy_name: String,
         vt_symbols: Vec<String>,
-        parameters: Option<pyo3::Py<PyDict>>,
+        setting: Option<pyo3::Py<PyDict>>,
     ) -> Result<Self, String> {
         Python::attach(|py| {
             // Read Python file
@@ -67,27 +67,63 @@ impl PythonStrategyAdapter {
                 .getattr(class_name)
                 .map_err(|e| format!("Strategy class '{}' not found: {}", class_name, e))?;
 
-            // Create strategy instance
-            let py_instance = if let Some(params) = parameters {
-                let args_tuple = (strategy_name.clone(), vt_symbols.clone());
-                let inst = strategy_class
-                    .call1(args_tuple)
-                    .map_err(|e| format!("Failed to create strategy instance: {}", e))?;
+            // Try to instantiate the strategy.
+            // Support two constructor signatures:
+            //   1. vnpy CtaTemplate: __init__(self, engine, strategy_name, vt_symbol, setting)
+            //   2. Local CtaTemplate: __init__(self, strategy_name, vt_symbols, strategy_type="spot")
+            //
+            // We try vnpy-style first (4 args), then fall back to local-style (2 args).
 
-                // Set custom parameters if provided
-                let params_dict = params.bind(py);
-                for (key, value) in params_dict.iter() {
-                    let key_str = key
-                        .extract::<String>()
-                        .map_err(|e| format!("Failed to extract parameter key: {}", e))?;
-                    inst.setattr(key_str.as_str(), value)
-                        .map_err(|e| format!("Failed to set parameter: {}", e))?;
+            let vt_symbol = vt_symbols.first().cloned().unwrap_or_default();
+            let py_instance = if let Some(ref params) = setting {
+                // vnpy-style: (engine, strategy_name, vt_symbol, setting)
+                match strategy_class.call1((
+                    py.None(),
+                    strategy_name.clone(),
+                    vt_symbol.clone(),
+                    params.bind(py),
+                )) {
+                    Ok(inst) => inst,
+                    Err(_) => {
+                        // Fallback: local CtaTemplate (strategy_name, vt_symbols)
+                        // Then set parameters as attributes
+                        let inst = strategy_class
+                            .call1((strategy_name.clone(), vt_symbols.clone()))
+                            .map_err(|e| {
+                                format!(
+                                    "Failed to create strategy instance with both vnpy and local signatures: {}",
+                                    e
+                                )
+                            })?;
+                        let params_dict = params.bind(py);
+                        for (key, value) in params_dict.iter() {
+                            let key_str = key
+                                .extract::<String>()
+                                .map_err(|e| format!("Failed to extract parameter key: {}", e))?;
+                            inst.setattr(key_str.as_str(), value).map_err(|e| {
+                                format!("Failed to set parameter '{}': {}", key_str, e)
+                            })?;
+                        }
+                        inst
+                    }
                 }
-                inst
             } else {
-                strategy_class
-                    .call1((strategy_name.clone(), vt_symbols.clone()))
-                    .map_err(|e| format!("Failed to create strategy instance: {}", e))?
+                // No setting dict provided - try vnpy-style with empty dict first
+                let empty_setting = PyDict::new(py);
+                match strategy_class.call1((
+                    py.None(),
+                    strategy_name.clone(),
+                    vt_symbol.clone(),
+                    empty_setting,
+                )) {
+                    Ok(inst) => inst,
+                    Err(_) => {
+                        // Fallback: local CtaTemplate (strategy_name, vt_symbols)
+                        strategy_class
+                            .call1((strategy_name.clone(), vt_symbols.clone()))
+                            .map_err(|e| format!("Failed to create strategy instance: {}", e))?
+                    }
+                }
             };
 
             Ok(Self {

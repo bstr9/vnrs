@@ -7,15 +7,17 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::backtesting::{BacktestingEngine, BacktestingMode, BacktestingStatistics};
+use crate::python::{OrderFactory, PortfolioFacade, PortfolioState};
 use crate::trader::{BarData, Direction, Exchange, Interval, Offset, OrderRequest, OrderType};
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Python wrapper for BacktestingEngine
 #[pyclass]
 pub struct PyBacktestingEngine {
     engine: Mutex<BacktestingEngine>,
     runtime: tokio::runtime::Runtime,
+    portfolio_state: Arc<Mutex<PortfolioState>>,
 }
 
 #[pymethods]
@@ -27,6 +29,7 @@ impl PyBacktestingEngine {
         Ok(Self {
             engine: Mutex::new(BacktestingEngine::new()),
             runtime: rt,
+            portfolio_state: Arc::new(Mutex::new(PortfolioState::default())),
         })
     }
 
@@ -131,9 +134,9 @@ impl PyBacktestingEngine {
         })
     }
 
-    /// Get current position
+    /// Get current position (signed quantity)
     fn get_position(&self) -> f64 {
-        self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_position()
+        self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_pos()
     }
 
     /// Calculate backtesting result
@@ -162,21 +165,87 @@ impl PyBacktestingEngine {
         Ok(PyBacktestingStatistics { inner: stats })
     }
 
-    /// Add strategy
+    /// Add strategy from an already-instantiated Python object
     fn add_strategy(
-        &self,
-        _py: Python,
-        strategy_class: Py<PyAny>,
+        slf: &Bound<'_, Self>,
+        py: Python,
+        strategy_instance: Py<PyAny>,
         strategy_name: String,
         vt_symbols: Vec<String>,
-        _setting: Py<PyAny>,
     ) -> PyResult<()> {
         use crate::python::strategy_adapter::PythonStrategyAdapter;
 
-        let adapter =
-            PythonStrategyAdapter::from_py_object(strategy_class, strategy_name, vt_symbols);
+        // Inject PortfolioFacade
+        let portfolio_facade = PortfolioFacade::from_state(slf.borrow().portfolio_state.clone());
+        let portfolio_py = Py::new(py, portfolio_facade)?;
+        strategy_instance.setattr(py, "portfolio", portfolio_py)?;
 
-        self.engine.lock().unwrap_or_else(|e| e.into_inner()).add_strategy(Box::new(adapter));
+        // Inject OrderFactory with engine reference to PyBacktestingEngine
+        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
+        let order_factory = OrderFactory::from_engine(engine_ref, "");
+        let factory_py = Py::new(py, order_factory)?;
+        strategy_instance.setattr(py, "order_factory", factory_py)?;
+
+        let adapter =
+            PythonStrategyAdapter::from_py_object(strategy_instance, strategy_name, vt_symbols);
+
+        slf.borrow()
+            .engine
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .add_strategy(Box::new(adapter));
+        Ok(())
+    }
+
+    /// Add strategy by instantiating a class with vnpy CtaTemplate signature
+    /// vnpy CtaTemplate: __init__(self, engine, strategy_name, vt_symbol, setting)
+    fn add_strategy_with_class(
+        slf: &Bound<'_, Self>,
+        py: Python,
+        strategy_class: Py<PyAny>,
+        strategy_name: String,
+        vt_symbols: Vec<String>,
+        setting: Py<PyDict>,
+    ) -> PyResult<()> {
+        use crate::python::strategy_adapter::PythonStrategyAdapter;
+
+        // Use load_from_file logic but with a class instead of file path
+        // vnpy signature: (engine, strategy_name, vt_symbol, setting)
+        let vt_symbol = vt_symbols.first().cloned().unwrap_or_default();
+        
+        let py_instance = strategy_class.call1(py, (
+            py.None(),  // engine placeholder (vnpy expects engine object)
+            strategy_name.clone(),
+            vt_symbol,
+            setting.bind(py),
+        )).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                format!("Failed to create strategy instance with vnpy signature (engine, strategy_name, vt_symbol, setting): {}", e)
+            )
+        })?;
+
+        // Inject PortfolioFacade
+        let portfolio_facade = PortfolioFacade::from_state(slf.borrow().portfolio_state.clone());
+        let portfolio_py = Py::new(py, portfolio_facade)?;
+        py_instance.setattr(py, "portfolio", portfolio_py)?;
+
+        // Inject OrderFactory with engine reference to PyBacktestingEngine
+        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
+        let order_factory = OrderFactory::from_engine(engine_ref, "");
+        let factory_py = Py::new(py, order_factory)?;
+        py_instance.setattr(py, "order_factory", factory_py)?;
+
+        let adapter = PythonStrategyAdapter::from_py_object(
+            py_instance,
+            strategy_name,
+            vt_symbols,
+        );
+
+        slf.borrow()
+            .engine
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .add_strategy(Box::new(adapter));
         Ok(())
     }
 

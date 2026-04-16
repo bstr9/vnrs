@@ -2,21 +2,23 @@
 //! Handles the execution and communication between Rust and Python
 
 use crate::python::data_converter;
-use crate::python::strategy::PythonStrategy;
+use crate::python::strategy::Strategy;
+use crate::python::{OrderFactory, PortfolioFacade, PortfolioState};
 use crate::trader::{
     BarData, CancelRequest, Direction, Exchange, MainEngine, Offset, OrderData, OrderType,
     OrderRequest, SubscribeRequest, TickData, TradeData,
 };
 use pyo3::prelude::*;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use crate::trader::utility::extract_vt_symbol;
 
 #[pyclass]
 pub struct PythonEngine {
     main_engine: Arc<MainEngine>,
-    strategies: HashMap<String, Py<PythonStrategy>>,
+    strategies: HashMap<String, Py<Strategy>>,
     symbol_strategy_map: HashMap<String, String>,
+    portfolio_state: Arc<Mutex<PortfolioState>>,
 }
 
 impl PythonEngine {
@@ -25,13 +27,14 @@ impl PythonEngine {
             main_engine: Arc::new(main_engine),
             strategies: HashMap::new(),
             symbol_strategy_map: HashMap::new(),
+            portfolio_state: Arc::new(Mutex::new(PortfolioState::default())),
         }
     }
 
     pub fn add_strategy(
         &mut self,
-        _py: Python,
-        strategy: Bound<'_, PythonStrategy>,
+        py: Python,
+        strategy: Bound<'_, Strategy>,
         engine_ref: Py<PyAny>,
     ) -> PyResult<()> {
         let strategy_ref = strategy.borrow();
@@ -39,7 +42,18 @@ impl PythonEngine {
         let vt_symbols = strategy_ref.vt_symbols.clone();
         drop(strategy_ref);
 
-        strategy.borrow_mut().engine = Some(engine_ref);
+        // Set engine reference
+        strategy.borrow_mut().engine = Some(engine_ref.clone_ref(py));
+
+        // Create and inject PortfolioFacade
+        let portfolio_facade = PortfolioFacade::from_state(self.portfolio_state.clone());
+        let portfolio_py = Py::new(py, portfolio_facade)?;
+        strategy.borrow_mut().portfolio = Some(portfolio_py);
+
+        // Create and inject OrderFactory
+        let order_factory = OrderFactory::from_engine(engine_ref, "");
+        let factory_py = Py::new(py, order_factory)?;
+        strategy.borrow_mut().order_factory = Some(factory_py);
 
         self.strategies
             .insert(strategy_name.clone(), strategy.clone().unbind());
@@ -74,21 +88,28 @@ impl PythonEngine {
 
     pub fn init_strategy(&self, py: Python, strategy_name: &str) -> PyResult<()> {
         if let Some(strategy_obj) = self.strategies.get(strategy_name) {
-            let strategy = strategy_obj.bind(py);
-            strategy.borrow().on_init(py)?;
+            // Call on_init via Python method dispatch (supports subclass overrides)
+            strategy_obj.call_method0(py, "on_init")?;
+            strategy_obj.bind(py).borrow_mut().set_inited();
         }
         Ok(())
     }
 
-    pub fn start_strategy(&self, _py: Python, strategy_name: &str) -> PyResult<()> {
-        println!("Starting strategy: {}", strategy_name);
+    pub fn start_strategy(&self, py: Python, strategy_name: &str) -> PyResult<()> {
+        if let Some(strategy_obj) = self.strategies.get(strategy_name) {
+            // Call on_start via Python method dispatch (supports subclass overrides)
+            strategy_obj.call_method0(py, "on_start")?;
+            strategy_obj.bind(py).borrow_mut().set_trading();
+            tracing::info!("Started strategy: {}", strategy_name);
+        }
         Ok(())
     }
 
     pub fn stop_strategy(&self, py: Python, strategy_name: &str) -> PyResult<()> {
         if let Some(strategy_obj) = self.strategies.get(strategy_name) {
-            let strategy = strategy_obj.bind(py);
-            strategy.borrow().on_stop(py)?;
+            // Call on_stop via Python method dispatch (supports subclass overrides)
+            strategy_obj.call_method0(py, "on_stop")?;
+            strategy_obj.bind(py).borrow_mut().set_stopped();
         }
         Ok(())
     }
@@ -98,9 +119,9 @@ impl PythonEngine {
 
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
-                let strategy = strategy_obj.bind(py);
                 let tick_py = data_converter::tick_to_py(py, tick)?;
-                strategy.borrow().on_tick(py, tick_py.unbind().into())?;
+                // Call on_tick via Python method dispatch
+                strategy_obj.call_method1(py, "on_tick", (tick_py,))?;
             }
         }
 
@@ -112,7 +133,6 @@ impl PythonEngine {
 
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
-                let strategy = strategy_obj.bind(py);
                 let bar_dict = pyo3::types::PyDict::new(py);
                 bar_dict.set_item("datetime", bar.datetime.to_rfc3339())?;
                 bar_dict.set_item("open", bar.open_price)?;
@@ -124,7 +144,8 @@ impl PythonEngine {
                 let bars_dict = pyo3::types::PyDict::new(py);
                 bars_dict.set_item(&vt_symbol, bar_dict)?;
 
-                strategy.borrow().on_bars(py, bars_dict.unbind().into())?;
+                // Call on_bars via Python method dispatch
+                strategy_obj.call_method1(py, "on_bars", (bars_dict,))?;
             }
         }
 
@@ -136,7 +157,6 @@ impl PythonEngine {
 
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
-                let strategy = strategy_obj.bind(py);
                 let trade_dict = pyo3::types::PyDict::new(py);
                 trade_dict.set_item("symbol", &trade.symbol)?;
                 trade_dict.set_item("exchange", format!("{:?}", trade.exchange))?;
@@ -151,7 +171,8 @@ impl PythonEngine {
                 }
                 trade_dict.set_item("gateway_name", &trade.gateway_name)?;
 
-                strategy.borrow().on_trade(py, trade_dict.unbind().into())?;
+                // Call on_trade via Python method dispatch
+                strategy_obj.call_method1(py, "on_trade", (trade_dict,))?;
             }
         }
 
@@ -163,7 +184,6 @@ impl PythonEngine {
 
         if let Some(strategy_name) = self.symbol_strategy_map.get(&vt_symbol) {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
-                let strategy = strategy_obj.bind(py);
                 let order_dict = pyo3::types::PyDict::new(py);
                 order_dict.set_item("symbol", &order.symbol)?;
                 order_dict.set_item("exchange", format!("{:?}", order.exchange))?;
@@ -179,7 +199,8 @@ impl PythonEngine {
                 }
                 order_dict.set_item("gateway_name", &order.gateway_name)?;
 
-                strategy.borrow().on_order(py, order_dict.unbind().into())?;
+                // Call on_order via Python method dispatch
+                strategy_obj.call_method1(py, "on_order", (order_dict,))?;
             }
         }
 
@@ -337,13 +358,14 @@ impl PythonEngine {
             main_engine: Arc::new(MainEngine::new()),
             strategies: HashMap::new(),
             symbol_strategy_map: HashMap::new(),
+            portfolio_state: Arc::new(Mutex::new(PortfolioState::default())),
         }
     }
 
     pub fn add_strategy_py(
         &mut self,
         _py: Python,
-        strategy: Bound<'_, PythonStrategy>,
+        strategy: Bound<'_, Strategy>,
         engine_ref: Py<PyAny>,
     ) -> PyResult<()> {
         self.add_strategy(_py, strategy, engine_ref)

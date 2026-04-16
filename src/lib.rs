@@ -37,6 +37,9 @@ pub mod backtesting;
 #[cfg(feature = "gui")]
 pub mod chart;
 
+#[cfg(feature = "gui")]
+pub mod mcp;
+
 #[cfg(feature = "python")]
 pub mod python;
 
@@ -47,7 +50,7 @@ pub use alpha::{AlphaLab, AlphaDataset, AlphaModel, AlphaStrategy, Segment, logg
 pub use strategy::{StrategyEngine, StrategyTemplate, StrategyContext, StrategyType, StrategyState};
 pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode, DailyResult, BacktestingResult};
 #[cfg(feature = "python")]
-pub use python::{PythonStrategy, PythonEngine};
+pub use python::{Strategy, PythonEngine};
 pub use trader::{
     // Constants
     Direction, Exchange, Interval, Offset, OrderType, Product, Status,
@@ -59,6 +62,8 @@ pub use trader::{
     MainEngine, OmsEngine, BaseEngine,
     // Gateway
     BaseGateway, GatewayEvent, GatewaySettings,
+    // Typed identifiers
+    ClientOrderId, InstrumentId, PositionId, StrategyId,
     // Utilities
     ArrayManager, BarGenerator,
 };
