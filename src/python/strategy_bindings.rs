@@ -11,6 +11,14 @@ use tokio::runtime::Runtime;
 use crate::strategy::StrategyEngine;
 
 /// Python strategy wrapper
+///
+/// **Deprecated**: Use the unified `Strategy` base class from `strategy` module instead.
+/// `Strategy` supports Python subclassing directly (e.g., `class MyStrategy(Strategy): ...`)
+/// and does not require manual callback registration via `set_on_*` methods.
+#[deprecated(
+    since = "0.5.0",
+    note = "Use the unified `Strategy` base class instead. See `trade_engine.Strategy`."
+)]
 #[pyclass]
 pub struct PyStrategy {
     #[pyo3(get, set)]
@@ -232,6 +240,12 @@ impl PyStrategy {
 }
 
 /// Python Strategy Engine wrapper
+///
+/// **Deprecated**: Use the unified `Strategy` base class and `PythonEngineWrapper` instead.
+#[deprecated(
+    since = "0.5.0",
+    note = "Use the unified `Strategy` base class and `PythonEngineWrapper` instead."
+)]
 #[pyclass]
 pub struct PyStrategyEngine {
     engine: Arc<StrategyEngine>,
