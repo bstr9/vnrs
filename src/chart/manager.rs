@@ -98,6 +98,20 @@ impl BarManager {
         self.ordered_bars.len()
     }
 
+    /// Clear all bar data
+    pub fn clear(&mut self) {
+        self.bars.clear();
+        self.datetime_index_map.clear();
+        self.index_datetime_map.clear();
+        self.ordered_bars.clear();
+        self.clear_cache();
+    }
+
+    /// Get the datetime of the earliest bar
+    pub fn get_earliest_time(&self) -> Option<DateTime<Utc>> {
+        self.ordered_bars.first().map(|b| b.datetime)
+    }
+
     /// Get index for a datetime
     pub fn get_index(&self, dt: DateTime<Utc>) -> Option<usize> {
         self.datetime_index_map.get(&dt).copied()

@@ -20,10 +20,12 @@ mod base;
 mod indicator;
 mod item;
 mod manager;
+mod sync_bar_generator;
 mod widget;
 
 pub use base::*;
 pub use indicator::*;
 pub use item::{CandleItem, ChartItem, VolumeItem};
 pub use manager::BarManager;
+pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use widget::{ChartCursor, ChartEvent, ChartWidget};
