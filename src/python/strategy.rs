@@ -6,8 +6,18 @@
 
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::python::{MessageBus, OrderFactory, PortfolioFacade};
+
+/// A pending order queued by the strategy during on_bar (to avoid mutex deadlock)
+#[derive(Clone)]
+pub struct PendingOrder {
+    pub vt_symbol: String,
+    pub direction: String, // "buy", "sell", "short", "cover"
+    pub price: f64,
+    pub volume: f64,
+}
 
 /// Strategy state as a string property for Python consumers.
 /// Maps to the Rust StrategyState enum:
@@ -68,16 +78,19 @@ pub struct Strategy {
     pub engine: Option<Py<PyAny>>,
 
     /// Portfolio facade for querying account/position state
-    #[pyo3(get)]
+    #[pyo3(get, set)]
     pub portfolio: Option<Py<PortfolioFacade>>,
 
     /// Order factory for typed order creation
-    #[pyo3(get)]
+    #[pyo3(get, set)]
     pub order_factory: Option<Py<OrderFactory>>,
 
     /// Message bus for inter-strategy communication
-    #[pyo3(get)]
+    #[pyo3(get, set)]
     pub message_bus: Option<Py<MessageBus>>,
+
+    /// Pending orders queued during on_bar (to avoid mutex deadlock on BacktestingEngine)
+    pending_orders: Arc<Mutex<Vec<PendingOrder>>>,
 }
 
 #[pymethods]
@@ -99,6 +112,7 @@ impl Strategy {
             portfolio: None,
             order_factory: None,
             message_bus: None,
+            pending_orders: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -173,40 +187,51 @@ impl Strategy {
         self.stopped = true;
     }
 
-    /// Inject the portfolio facade (called by the engine when adding the strategy)
-    pub fn set_portfolio(&mut self, portfolio: Py<PortfolioFacade>) {
-        self.portfolio = Some(portfolio);
-    }
-
-    /// Inject the order factory (called by the engine when adding the strategy)
-    pub fn set_order_factory(&mut self, factory: Py<OrderFactory>) {
-        self.order_factory = Some(factory);
-    }
-
-    // ---- Convenience methods (delegate to engine) ----
+    // ---- Convenience methods ----
+    // These queue orders on the Strategy object itself. The orders are drained
+    // by PythonStrategyAdapter.drain_pending_orders() after each on_bar callback.
+    // This avoids the mutex deadlock that would occur if we called back into
+    // PyBacktestingEngine (which holds the engine mutex during the backtest loop).
 
     /// Buy (long open)
-    fn buy(&self, py: Python, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        if let Some(ref engine) = self.engine {
-            let result = engine.call_method1(py, "buy", (vt_symbol, price, volume))?;
-            Ok(result.extract(py)?)
-        } else {
-            Ok(vec![])
+    fn buy(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        if volume <= 0.0 {
+            return Ok(vec![]);
         }
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(PendingOrder {
+                vt_symbol: vt_symbol.to_string(),
+                direction: "buy".to_string(),
+                price,
+                volume,
+            });
+        Ok(vec![])
     }
 
     /// Sell (long close)
-    fn sell(&self, py: Python, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        if let Some(ref engine) = self.engine {
-            let result = engine.call_method1(py, "sell", (vt_symbol, price, volume))?;
-            Ok(result.extract(py)?)
-        } else {
-            Ok(vec![])
+    fn sell(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        if volume <= 0.0 {
+            return Ok(vec![]);
         }
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(PendingOrder {
+                vt_symbol: vt_symbol.to_string(),
+                direction: "sell".to_string(),
+                price,
+                volume,
+            });
+        Ok(vec![])
     }
 
     /// Short (short open, futures only)
-    fn short(&self, py: Python, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+    fn short(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        if volume <= 0.0 {
+            return Ok(vec![]);
+        }
         if self.strategy_type == "spot" {
             tracing::warn!(
                 "[{}] Short not supported for spot trading",
@@ -214,16 +239,23 @@ impl Strategy {
             );
             return Ok(vec![]);
         }
-        if let Some(ref engine) = self.engine {
-            let result = engine.call_method1(py, "short", (vt_symbol, price, volume))?;
-            Ok(result.extract(py)?)
-        } else {
-            Ok(vec![])
-        }
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(PendingOrder {
+                vt_symbol: vt_symbol.to_string(),
+                direction: "short".to_string(),
+                price,
+                volume,
+            });
+        Ok(vec![])
     }
 
     /// Cover (short close, futures only)
-    fn cover(&self, py: Python, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+    fn cover(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        if volume <= 0.0 {
+            return Ok(vec![]);
+        }
         if self.strategy_type == "spot" {
             tracing::warn!(
                 "[{}] Cover not supported for spot trading",
@@ -231,45 +263,66 @@ impl Strategy {
             );
             return Ok(vec![]);
         }
-        if let Some(ref engine) = self.engine {
-            let result = engine.call_method1(py, "cover", (vt_symbol, price, volume))?;
-            Ok(result.extract(py)?)
-        } else {
-            Ok(vec![])
-        }
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(PendingOrder {
+                vt_symbol: vt_symbol.to_string(),
+                direction: "cover".to_string(),
+                price,
+                volume,
+            });
+        Ok(vec![])
     }
 
     /// Cancel order
-    fn cancel_order(&self, py: Python, vt_orderid: &str) -> PyResult<()> {
+    fn cancel_order(&self, vt_orderid: &str) -> PyResult<()> {
         if let Some(ref engine) = self.engine {
-            engine.call_method1(py, "cancel_order", (vt_orderid,))?;
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "cancel_order", (vt_orderid,));
+            });
         }
         Ok(())
     }
 
-    /// Get position for a symbol
-    fn get_pos(&self, py: Python, vt_symbol: &str) -> PyResult<f64> {
-        if let Some(ref engine) = self.engine {
-            let result = engine.call_method1(py, "get_pos", (vt_symbol,))?;
-            Ok(result.extract(py)?)
-        } else {
-            Ok(0.0)
-        }
+    /// Get position for a symbol.
+    ///
+    /// Reads from the local `pos_data` cache which is updated by `on_trade()`.
+    /// This avoids calling engine.get_pos() which would deadlock during
+    /// backtesting (the engine mutex is held while calling strategy callbacks).
+    fn get_pos(&self, vt_symbol: &str) -> PyResult<f64> {
+        Ok(self.pos_data.get(vt_symbol).copied().unwrap_or(0.0))
+    }
+
+    /// Set position for a symbol (called by the engine after trade fills).
+    ///
+    /// This is the mechanism by which `pos_data` stays in sync with the
+    /// engine's position tracking during backtesting.
+    fn set_pos(&mut self, vt_symbol: &str, position: f64) -> PyResult<()> {
+        self.pos_data.insert(vt_symbol.to_string(), position);
+        Ok(())
     }
 
     /// Write log message
-    fn write_log(&self, py: Python, msg: &str) -> PyResult<()> {
-        if let Some(ref engine) = self.engine {
-            engine.call_method1(py, "write_log", (msg,))?;
-        }
+    fn write_log(&self, msg: &str) -> PyResult<()> {
+        println!("[Strategy Log] {}", msg);
         Ok(())
     }
 
     /// Send email notification
-    fn send_email(&self, py: Python, msg: &str) -> PyResult<()> {
+    fn send_email(&self, msg: &str) -> PyResult<()> {
         if let Some(ref engine) = self.engine {
-            engine.call_method1(py, "send_email", (msg,))?;
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "send_email", (msg,));
+            });
         }
         Ok(())
+    }
+}
+
+impl Strategy {
+    /// Get the pending orders queue (for PythonStrategyAdapter to drain)
+    pub fn pending_orders_arc(&self) -> Arc<Mutex<Vec<PendingOrder>>> {
+        Arc::clone(&self.pending_orders)
     }
 }

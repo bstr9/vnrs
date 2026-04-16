@@ -29,7 +29,7 @@ pub mod risk_manager;
 pub mod sync_bar_bindings;
 
 #[cfg(feature = "python")]
-pub use strategy::Strategy;
+pub use strategy::{Strategy, PendingOrder};
 #[cfg(feature = "python")]
 pub use engine::PythonEngine;
 #[cfg(feature = "python")]
