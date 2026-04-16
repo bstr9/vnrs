@@ -374,6 +374,7 @@ impl PyRiskManager {
     ///
     /// Returns:
     ///     RiskCheckResult indicating approval or rejection with reason.
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (vt_symbol, direction, offset, price, volume, order_type, position_qty=0.0, active_orders=0))]
     pub fn check_order(
         &self,

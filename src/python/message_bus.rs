@@ -66,7 +66,8 @@ impl PyMessage {
     fn data(&self, py: Python) -> Py<PyDict> {
         let dict = PyDict::new(py);
         for (k, v) in &self.inner.data {
-            dict.set_item(k, v).unwrap();
+            dict.set_item(k, v)
+                .expect("setting string key-value in PyDict should not fail");
         }
         dict.into()
     }
@@ -86,15 +87,21 @@ impl PyMessage {
     /// Convert to a Python dict for convenient access.
     fn to_dict(&self, py: Python) -> Py<PyDict> {
         let dict = PyDict::new(py);
-        dict.set_item("topic", &self.inner.topic).unwrap();
-        dict.set_item("sender", &self.inner.sender).unwrap();
-        dict.set_item("timestamp", self.timestamp()).unwrap();
+        dict.set_item("topic", &self.inner.topic)
+            .expect("setting str key in PyDict should not fail");
+        dict.set_item("sender", &self.inner.sender)
+            .expect("setting str key in PyDict should not fail");
+        dict.set_item("timestamp", self.timestamp())
+            .expect("setting str key in PyDict should not fail");
 
         let data_dict = PyDict::new(py);
         for (k, v) in &self.inner.data {
-            data_dict.set_item(k, v).unwrap();
+            data_dict
+                .set_item(k, v)
+                .expect("setting string key-value in PyDict should not fail");
         }
-        dict.set_item("data", data_dict).unwrap();
+        dict.set_item("data", data_dict)
+            .expect("setting dict key in PyDict should not fail");
         dict.into()
     }
 
@@ -120,21 +127,12 @@ impl PyMessage {
 // ---------------------------------------------------------------------------
 
 /// Inner state of the message bus.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MessageBusInner {
     /// Topic → list of strategy names subscribed to that topic.
     pub subscribers: HashMap<String, Vec<String>>,
     /// Pending messages awaiting retrieval.
     pub queue: VecDeque<Message>,
-}
-
-impl Default for MessageBusInner {
-    fn default() -> Self {
-        Self {
-            subscribers: HashMap::new(),
-            queue: VecDeque::new(),
-        }
-    }
 }
 
 impl MessageBusInner {

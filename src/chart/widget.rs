@@ -326,11 +326,7 @@ impl ChartWidget {
                 self.right_ix = new_right.clamp(self.bar_count, count);
 
                 // Detect if user is trying to scroll past the left edge of available data
-                let left_ix = if self.right_ix >= self.bar_count {
-                    self.right_ix - self.bar_count
-                } else {
-                    0
-                };
+                let left_ix = self.right_ix.saturating_sub(self.bar_count);
                 // If the leftmost visible bar is within 10 bars of the start, and we're dragging left
                 if left_ix < 10 && bar_delta > 0 && !self.loading_history {
                     need_more = true;

@@ -98,7 +98,10 @@ impl SynchronizedBarGenerator {
 
         // Check whether this timestamp is now complete.
         if entry.len() == self.vt_symbols.len() {
-            let bars = self.buffer.remove(&dt).unwrap();
+            let bars = self
+                .buffer
+                .remove(&dt)
+                .expect("entry just confirmed to exist in buffer");
             Some(SynchronizedBars { datetime: dt, bars })
         } else {
             None

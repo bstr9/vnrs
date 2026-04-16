@@ -2,7 +2,7 @@
 //!
 //! 本模块实现了完整的 MCP Server，包含：
 //! - **Tools**: 后端交易操作（connect / subscribe / send_order / cancel_order / query_history / list_contracts）
-//!              前端 UI 操作（switch_symbol / switch_interval / add_indicator / remove_indicator / clear_indicators / navigate_to / show_notification）
+//!   前端 UI 操作（switch_symbol / switch_interval / add_indicator / remove_indicator / clear_indicators / navigate_to / show_notification）
 //! - **Resources**: 实时交易数据和 UI 状态查询
 //! - **Server**: TradingMcpServer 主服务器，支持 stdio 模式
 //!

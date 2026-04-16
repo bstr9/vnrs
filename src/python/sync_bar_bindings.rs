@@ -111,12 +111,18 @@ impl PyBarInfo {
 
     fn to_py_dict(&self, py: Python) -> Py<PyDict> {
         let dict = PyDict::new(py);
-        dict.set_item("datetime", &self.datetime).unwrap();
-        dict.set_item("open", self.open_price).unwrap();
-        dict.set_item("high", self.high_price).unwrap();
-        dict.set_item("low", self.low_price).unwrap();
-        dict.set_item("close", self.close_price).unwrap();
-        dict.set_item("volume", self.volume).unwrap();
+        dict.set_item("datetime", &self.datetime)
+            .expect("setting str key in PyDict should not fail");
+        dict.set_item("open", self.open_price)
+            .expect("setting str key in PyDict should not fail");
+        dict.set_item("high", self.high_price)
+            .expect("setting str key in PyDict should not fail");
+        dict.set_item("low", self.low_price)
+            .expect("setting str key in PyDict should not fail");
+        dict.set_item("close", self.close_price)
+            .expect("setting str key in PyDict should not fail");
+        dict.set_item("volume", self.volume)
+            .expect("setting str key in PyDict should not fail");
         dict.into()
     }
 }
@@ -246,7 +252,7 @@ impl PySyncBarGenerator {
 fn dict_to_bar(vt_symbol: &str, dict: &Bound<'_, PyDict>) -> PyResult<BarData> {
     let parts: Vec<&str> = vt_symbol.split('.').collect();
     let symbol = parts.first().unwrap_or(&"").to_string();
-    let exchange = match parts.get(1).map(|s| *s) {
+    let exchange = match parts.get(1).copied() {
         Some("BINANCE") => crate::trader::constant::Exchange::Binance,
         Some("BINANCE_USDM") => crate::trader::constant::Exchange::BinanceUsdm,
         _ => crate::trader::constant::Exchange::Local,

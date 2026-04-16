@@ -483,7 +483,10 @@ impl Indicator for BOLL {
         // Keep window for exact SMA (consistent with original behavior)
         self.window.push_back(value);
         if self.window.len() > self.period {
-            let old = self.window.pop_front().unwrap();
+            let old = self
+                .window
+                .pop_front()
+                .expect("window guaranteed non-empty since len > period");
             // Remove from running stats
             self.running_count -= 1.0;
             if self.running_count > 0.0 {
