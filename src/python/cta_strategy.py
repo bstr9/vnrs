@@ -44,7 +44,7 @@ class CtaStrategy(Strategy):
     ``CtaTemplate`` to ``CtaStrategy``.
     """
 
-    def __init__(self, engine, strategy_name, vt_symbol, setting=None):
+    def __new__(cls, engine, strategy_name, vt_symbol, setting=None):
         """
         vnpy CtaTemplate-compatible constructor.
 
@@ -79,17 +79,25 @@ class CtaStrategy(Strategy):
                 elif exchange in ("BINANCE_USDM", "BINANCE_COINM"):
                     strategy_type = "futures"
 
-        # Call the Strategy base class constructor
-        super().__init__(strategy_name, vt_symbols, strategy_type)
+        # Call PyO3 Strategy.__new__ to create the instance
+        instance = Strategy.__new__(cls, strategy_name, vt_symbols, strategy_type)
 
         # Store the primary instrument for self.vt_symbol / self.pos
-        self._vt_symbol = vt_symbols[0] if vt_symbols else ""
+        instance._vt_symbol = vt_symbols[0] if vt_symbols else ""
+        instance._engine_arg = engine
+        instance._setting = setting
 
+        return instance
+
+    def __init__(self, engine, strategy_name, vt_symbol, setting=None):
+        # Don't call super().__init__() - PyO3 handles this via __new__
         # vnpy-compatible: set setting keys as instance attributes
-        if setting and isinstance(setting, dict):
-            for key, value in setting.items():
-                if not hasattr(self, key) or key in setting:
+        if self._setting and isinstance(self._setting, dict):
+            for key, value in self._setting.items():
+                if not hasattr(self, key) or key in self._setting:
                     setattr(self, key, value)
+        # Clean up temporary attrs
+        delattr(self, "_setting")
 
     # ------------------------------------------------------------------
     # vnpy CtaTemplate compatibility properties
@@ -158,6 +166,57 @@ class CtaStrategy(Strategy):
     def load_tick(self, days, callback=None, use_database=False):
         """Load historical tick data (vnpy compat stub)."""
         pass
+
+    def cancel_all(self):
+        """Cancel all active orders for this strategy (vnpy compat).
+
+        Cancels every order ID tracked in ``self.active_orderids``.
+        Falls back to no-op if the engine is not available.
+        """
+        for vt_orderid in list(self.active_orderids):
+            try:
+                self.cancel_order(vt_orderid)
+            except Exception:
+                pass
+        self.active_orderids.clear()
+
+    def get_capital(self):
+        """Get initial capital from engine (vnpy compat stub).
+
+        Returns 0 if the engine does not expose this method.
+        """
+        try:
+            if self.engine:
+                result = self.engine.call_method("get_capital")
+                if result and result > 0:
+                    return result
+        except Exception:
+            pass
+        return 0
+
+    def get_slippage(self):
+        """Get slippage from engine (vnpy compat stub).
+
+        Returns 0 if the engine does not expose this method.
+        """
+        try:
+            if self.engine:
+                return self.engine.call_method("get_slippage")
+        except Exception:
+            pass
+        return 0
+
+    def get_pricetick(self):
+        """Get price tick from engine (vnpy compat stub).
+
+        Returns 0 if the engine does not expose this method.
+        """
+        try:
+            if self.engine:
+                return self.engine.call_method("get_pricetick")
+        except Exception:
+            pass
+        return 0
 
     def put_event(self):
         """Update strategy UI (vnpy compat stub).

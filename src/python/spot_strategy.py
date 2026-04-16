@@ -40,7 +40,7 @@ class SpotStrategy(Strategy):
         ``__init__(self, strategy_name, vt_symbols, setting=None)``
     """
 
-    def __init__(self, strategy_name, vt_symbols, setting=None):
+    def __new__(cls, strategy_name, vt_symbols, setting=None):
         """
         SpotStrategy constructor.
 
@@ -57,13 +57,20 @@ class SpotStrategy(Strategy):
         else:
             vt_symbols = list(vt_symbols) if vt_symbols else []
 
-        # Call the Strategy base class constructor with "spot" type
-        super().__init__(strategy_name, vt_symbols, "spot")
+        # Call PyO3 Strategy.__new__ to create the instance with "spot" type
+        instance = Strategy.__new__(cls, strategy_name, vt_symbols, "spot")
+        instance._setting = setting
 
+        return instance
+
+    def __init__(self, strategy_name, vt_symbols, setting=None):
+        # Don't call super().__init__() - PyO3 handles this via __new__
         # vnpy-compatible: set setting keys as instance attributes
-        if setting and isinstance(setting, dict):
-            for key, value in setting.items():
+        if self._setting and isinstance(self._setting, dict):
+            for key, value in self._setting.items():
                 setattr(self, key, value)
+        # Clean up temporary attrs
+        delattr(self, "_setting")
 
     # ------------------------------------------------------------------
     # Position helpers
