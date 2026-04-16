@@ -8,8 +8,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::python::strategy::PendingOrder;
 use crate::strategy::{StrategyContext, StrategyState, StrategyTemplate, StrategyType};
-use crate::trader::{BarData, OrderData, TickData, TradeData};
+use crate::trader::{
+    BarData, Direction, Exchange, Offset, OrderData, OrderRequest, OrderType, TickData, TradeData,
+};
 
 /// Python strategy adapter that implements StrategyTemplate
 pub struct PythonStrategyAdapter {
@@ -34,6 +37,9 @@ pub struct PythonStrategyAdapter {
     /// Parameters and variables
     parameters: Arc<Mutex<HashMap<String, String>>>,
     variables: Arc<Mutex<HashMap<String, String>>>,
+
+    /// Pending orders from Python strategy (shared with Strategy.pending_orders)
+    pending_orders: Option<Arc<Mutex<Vec<PendingOrder>>>>,
 }
 
 impl PythonStrategyAdapter {
@@ -135,6 +141,7 @@ impl PythonStrategyAdapter {
                 positions: Arc::new(Mutex::new(HashMap::new())),
                 parameters: Arc::new(Mutex::new(HashMap::new())),
                 variables: Arc::new(Mutex::new(HashMap::new())),
+                pending_orders: None, // Will be set if the instance is a Strategy
             })
         })
     }
@@ -145,6 +152,16 @@ impl PythonStrategyAdapter {
         strategy_name: String,
         vt_symbols: Vec<String>,
     ) -> Self {
+        // Try to get the pending_orders Arc from the Strategy instance
+        // by downcasting the PyAny to the Rust Strategy type
+        let pending_orders = Python::attach(|py| {
+            use crate::python::Strategy;
+            py_strategy
+                .cast_bound::<Strategy>(py)
+                .ok()
+                .map(|bound| bound.borrow().pending_orders_arc())
+        });
+
         Self {
             py_strategy: Arc::new(Mutex::new(py_strategy)),
             strategy_name,
@@ -154,6 +171,7 @@ impl PythonStrategyAdapter {
             positions: Arc::new(Mutex::new(HashMap::new())),
             parameters: Arc::new(Mutex::new(HashMap::new())),
             variables: Arc::new(Mutex::new(HashMap::new())),
+            pending_orders,
         }
     }
 
@@ -281,134 +299,99 @@ impl StrategyTemplate for PythonStrategyAdapter {
 
     fn on_bar(&mut self, bar: &BarData, _context: &StrategyContext) {
         Python::attach(|py| {
-            // Import required modules
-            let object_module = match PyModule::import(py, "vnpy.trader.object") {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("Failed to import vnpy.trader.object: {}", e);
-                    return;
-                }
-            };
-            let constant_module = match PyModule::import(py, "vnpy.trader.constant") {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("Failed to import vnpy.trader.constant: {}", e);
-                    return;
-                }
-            };
-            let datetime_module = match PyModule::import(py, "datetime") {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("Failed to import datetime: {}", e);
-                    return;
-                }
-            };
+            // Build a simple dict representation of the bar first (works without vnpy)
+            let bar_dict = PyDict::new(py);
+            let _ = bar_dict.set_item("gateway_name", &bar.gateway_name);
+            let _ = bar_dict.set_item("symbol", &bar.symbol);
+            let _ = bar_dict.set_item("exchange", bar.exchange.value());
+            let _ = bar_dict.set_item("datetime", bar.datetime.to_rfc3339());
+            let _ = bar_dict.set_item(
+                "interval",
+                bar.interval
+                    .unwrap_or(crate::trader::constant::Interval::Minute)
+                    .value(),
+            );
+            let _ = bar_dict.set_item("open_price", bar.open_price);
+            let _ = bar_dict.set_item("high_price", bar.high_price);
+            let _ = bar_dict.set_item("low_price", bar.low_price);
+            let _ = bar_dict.set_item("close_price", bar.close_price);
+            let _ = bar_dict.set_item("volume", bar.volume);
+            let _ = bar_dict.set_item("turnover", bar.turnover);
+            let _ = bar_dict.set_item("open_interest", bar.open_interest);
 
-            let bar_data_class = match object_module.getattr("BarData") {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("BarData class not found: {}", e);
-                    return;
-                }
-            };
-            let exchange_enum = match constant_module.getattr("Exchange") {
-                Ok(e) => e,
-                Err(e) => {
-                    eprintln!("Exchange enum not found: {}", e);
-                    return;
-                }
-            };
-            let interval_enum = match constant_module.getattr("Interval") {
-                Ok(i) => i,
-                Err(e) => {
-                    eprintln!("Interval enum not found: {}", e);
-                    return;
-                }
-            };
+            // Try vnpy BarData first (for vnpy-compatible strategies)
+            let vnpy_available = PyModule::import(py, "vnpy.trader.object").is_ok()
+                && PyModule::import(py, "vnpy.trader.constant").is_ok();
 
-            // Convert Exchange
-            // Assuming exchange.value() (e.g. "BINANCE") is valid for Exchange constuctor or lookup
-            let exchange_val = bar.exchange.value();
-            // Try Exchange(value)
-            let py_exchange = match exchange_enum.call1((exchange_val,)) {
-                Ok(e) => e,
-                Err(_) => {
-                    // Fallback to Exchange.LOCAL or similar if not found, or keeping string might fail if typed?
-                    // Let's try to find a generic or use the first enum?
-                    // Better to just print error?
-                    // For backtesting, we mapped OKX to Global. Global value is "GLOBAL".
-                    // "GLOBAL" should be in Exchange if it's defined in constant.rs
-                    // But python vnpy might NOT have "GLOBAL".
-                    // If python vnpy Exchange doesn't have it, we fallback to Local.
-                    exchange_enum
-                        .getattr("LOCAL")
-                        .unwrap_or_else(|_| py.None().bind(py).clone())
-                }
-            };
+            if vnpy_available {
+                // Try to create a vnpy BarData object
+                if let (Ok(object_module), Ok(constant_module), Ok(datetime_module)) = (
+                    PyModule::import(py, "vnpy.trader.object"),
+                    PyModule::import(py, "vnpy.trader.constant"),
+                    PyModule::import(py, "datetime"),
+                ) {
+                    if let (Ok(bar_data_class), Ok(exchange_enum), Ok(interval_enum)) = (
+                        object_module.getattr("BarData"),
+                        constant_module.getattr("Exchange"),
+                        constant_module.getattr("Interval"),
+                    ) {
+                        // Convert Exchange
+                        let exchange_val = bar.exchange.value();
+                        let py_exchange =
+                            exchange_enum.call1((exchange_val,)).unwrap_or_else(|_| {
+                                exchange_enum
+                                    .getattr("LOCAL")
+                                    .unwrap_or_else(|_| py.None().bind(py).clone())
+                            });
 
-            // Convert Interval
-            let interval_val = bar
-                .interval
-                .unwrap_or(crate::trader::constant::Interval::Minute)
-                .value();
-            let py_interval = match interval_enum.call1((interval_val,)) {
-                Ok(i) => i,
-                Err(_) => match interval_enum.getattr("MINUTE") {
-                    Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("Interval.MINUTE not found: {}", e);
-                        return;
-                    }
-                },
-            };
+                        // Convert Interval
+                        let interval_val = bar
+                            .interval
+                            .unwrap_or(crate::trader::constant::Interval::Minute)
+                            .value();
+                        let py_interval =
+                            interval_enum.call1((interval_val,)).unwrap_or_else(|_| {
+                                interval_enum
+                                    .getattr("MINUTE")
+                                    .unwrap_or_else(|_| py.None().bind(py).clone())
+                            });
 
-            // Convert DateTime
-            // bar.datetime is chrono::DateTime. format to RFC3339 string then parse?
-            // Or simpler: datetime.datetime.fromisoformat(str)
-            // But fromisoformat might not handle "Z" until recent python?
-            // Rust to_rfc3339 uses +00:00 usually.
-            let dt_str = bar.datetime.to_rfc3339();
-            // datetime.datetime.fromisoformat(dt_str)
-            let py_datetime = match datetime_module.getattr("datetime") {
-                Ok(dt_cls) => match dt_cls.call_method1("fromisoformat", (dt_str.as_str(),)) {
-                    Ok(dt) => dt,
-                    Err(e) => {
-                        eprintln!("Failed to parse datetime '{}': {}", dt_str, e);
-                        return;
-                    }
-                },
-                Err(e) => {
-                    eprintln!("datetime.datetime not found: {}", e);
-                    return;
-                }
-            };
+                        // Convert DateTime
+                        let dt_str = bar.datetime.to_rfc3339();
+                        let py_datetime = datetime_module.getattr("datetime").and_then(|dt_cls| {
+                            dt_cls.call_method1("fromisoformat", (dt_str.as_str(),))
+                        });
 
-            // Create kwargs
-            let kwargs = PyDict::new(py);
-            let _ = kwargs.set_item("gateway_name", &bar.gateway_name);
-            let _ = kwargs.set_item("symbol", &bar.symbol);
-            let _ = kwargs.set_item("exchange", py_exchange);
-            let _ = kwargs.set_item("datetime", py_datetime);
-            let _ = kwargs.set_item("interval", py_interval);
-            let _ = kwargs.set_item("volume", bar.volume);
-            let _ = kwargs.set_item("turnover", bar.turnover);
-            let _ = kwargs.set_item("open_interest", bar.open_interest);
-            let _ = kwargs.set_item("open_price", bar.open_price);
-            let _ = kwargs.set_item("high_price", bar.high_price);
-            let _ = kwargs.set_item("low_price", bar.low_price);
-            let _ = kwargs.set_item("close_price", bar.close_price);
+                        if let Ok(py_dt) = py_datetime {
+                            // Create vnpy BarData kwargs
+                            let kwargs = PyDict::new(py);
+                            let _ = kwargs.set_item("gateway_name", &bar.gateway_name);
+                            let _ = kwargs.set_item("symbol", &bar.symbol);
+                            let _ = kwargs.set_item("exchange", py_exchange);
+                            let _ = kwargs.set_item("datetime", py_dt);
+                            let _ = kwargs.set_item("interval", py_interval);
+                            let _ = kwargs.set_item("volume", bar.volume);
+                            let _ = kwargs.set_item("turnover", bar.turnover);
+                            let _ = kwargs.set_item("open_interest", bar.open_interest);
+                            let _ = kwargs.set_item("open_price", bar.open_price);
+                            let _ = kwargs.set_item("high_price", bar.high_price);
+                            let _ = kwargs.set_item("low_price", bar.low_price);
+                            let _ = kwargs.set_item("close_price", bar.close_price);
 
-            // Instantiate BarData
-            // BarData(**kwargs)
-            match bar_data_class.call((), Some(&kwargs)) {
-                Ok(py_bar) => {
-                    if let Err(e) = self.call_py_method1("on_bar", py, py_bar.into()) {
-                        eprintln!("NEW CODE on_bar error: {}", e);
+                            if let Ok(py_bar) = bar_data_class.call((), Some(&kwargs)) {
+                                if let Err(e) = self.call_py_method1("on_bar", py, py_bar.into()) {
+                                    eprintln!("on_bar error: {}", e);
+                                }
+                                return; // Success with vnpy BarData
+                            }
+                        }
                     }
                 }
-                Err(e) => {
-                    eprintln!("Failed to instantiate BarData: {}", e);
-                }
+            }
+
+            // Fallback: send plain dict (works with our Strategy/CtaStrategy base classes)
+            if let Err(e) = self.call_py_method_with_dict("on_bar", py, &bar_dict) {
+                eprintln!("on_bar error: {}", e);
             }
         });
     }
@@ -466,11 +449,68 @@ impl StrategyTemplate for PythonStrategyAdapter {
         });
     }
 
+    fn drain_pending_orders(&mut self) -> Vec<OrderRequest> {
+        // Drain from the shared Arc<Mutex<Vec<PendingOrder>>> (set during from_py_object)
+        let pending: Vec<PendingOrder> = if let Some(ref queue) = self.pending_orders {
+            queue
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .drain(..)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Convert PendingOrder to OrderRequest
+        // Direction/Offset mapping (consistent with apply_fill):
+        // - buy:   Long+Open  → delta = +vol (open long)
+        // - sell:  Short+Close→ delta = -vol (close long)
+        // - short: Short+Open → delta = -vol (open short)
+        // - cover: Long+Close → delta = +vol (close short)
+        pending
+            .into_iter()
+            .map(|po| {
+                let symbol = po
+                    .vt_symbol
+                    .split('.')
+                    .next()
+                    .unwrap_or(&po.vt_symbol)
+                    .to_string();
+                let (direction, offset) = match po.direction.as_str() {
+                    "buy" => (Direction::Long, Offset::Open),
+                    "sell" => (Direction::Short, Offset::Close),
+                    "short" => (Direction::Short, Offset::Open),
+                    "cover" => (Direction::Long, Offset::Close),
+                    _ => (Direction::Long, Offset::Open),
+                };
+                OrderRequest {
+                    symbol,
+                    exchange: Exchange::Binance,
+                    direction,
+                    order_type: OrderType::Limit,
+                    volume: po.volume,
+                    price: po.price,
+                    offset,
+                    reference: String::new(),
+                }
+            })
+            .collect()
+    }
+
     fn update_position(&mut self, vt_symbol: &str, position: f64) {
+        // Update our internal tracking
         self.positions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(vt_symbol.to_string(), position);
+
+        // Propagate to the Python Strategy's pos_data so that
+        // get_pos() / self.pos (CtaStrategy) return the correct value
+        // without needing to call engine.get_pos() (which would deadlock).
+        Python::attach(|py| {
+            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = strategy.call_method1(py, "set_pos", (vt_symbol, position));
+        });
     }
 
     fn get_position(&self, vt_symbol: &str) -> f64 {
@@ -517,10 +557,13 @@ pub fn load_strategies_from_directory(
                     if let Ok(mut file) = fs::File::open(&path) {
                         let mut content = String::new();
                         if file.read_to_string(&mut content).is_ok() {
-                            // Simple search for "class X(CtaTemplate):"
+                            // Simple search for "class X(CtaTemplate):" or "class X(CtaStrategy):"
                             for line in content.lines() {
                                 let line = line.trim();
-                                if line.starts_with("class ") && line.contains("(CtaTemplate)") {
+                                if line.starts_with("class ")
+                                    && (line.contains("(CtaTemplate)")
+                                        || line.contains("(CtaStrategy)"))
+                                {
                                     // Parse class name
                                     if let Some(start) = line.find("class ") {
                                         if let Some(end) = line.find('(') {
