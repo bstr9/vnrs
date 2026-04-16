@@ -205,19 +205,26 @@ impl Position {
         let trade_qty = trade.volume;
         let trade_price = trade.price;
 
-        // Determine trade direction effect
+        // Determine trade direction effect on signed position
+        // signed_qty: positive = long, negative = short
+        //
+        // Order direction + offset → delta:
+        // - Long + Open  = buy to open long    → delta = +vol (position increases)
+        // - Short + Open = sell to open short  → delta = -vol (position decreases)
+        // - Long + Close = buy to close short  → delta = +vol (position increases toward zero)
+        // - Short + Close = sell to close long → delta = -vol (position decreases toward zero)
         let delta_qty = match trade.direction {
             Some(Direction::Long) => {
                 match trade.offset {
-                    Offset::Open => trade_qty, // Open long: increase position
-                    Offset::Close | Offset::CloseToday | Offset::CloseYesterday => -trade_qty, // Close long: decrease
+                    Offset::Open => trade_qty, // Buy to open long: increase position
+                    Offset::Close | Offset::CloseToday | Offset::CloseYesterday => trade_qty, // Buy to close short: increase toward zero
                     Offset::None => trade_qty, // Default: treat as open
                 }
             }
             Some(Direction::Short) => {
                 match trade.offset {
-                    Offset::Open => -trade_qty, // Open short: decrease position (negative)
-                    Offset::Close | Offset::CloseToday | Offset::CloseYesterday => trade_qty, // Close short: increase
+                    Offset::Open => -trade_qty, // Sell to open short: decrease position
+                    Offset::Close | Offset::CloseToday | Offset::CloseYesterday => -trade_qty, // Sell to close long: decrease toward zero
                     Offset::None => -trade_qty, // Default: treat as open
                 }
             }
