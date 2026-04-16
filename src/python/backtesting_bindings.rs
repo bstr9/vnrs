@@ -184,13 +184,16 @@ impl PyBacktestingEngine {
     ) -> PyResult<()> {
         use crate::python::strategy_adapter::PythonStrategyAdapter;
 
+        // Inject engine reference (for buy/sell/short/cover convenience methods)
+        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
+        strategy_instance.setattr(py, "engine", engine_ref.clone_ref(py))?;
+
         // Inject PortfolioFacade
         let portfolio_facade = PortfolioFacade::from_state(slf.borrow().portfolio_state.clone());
         let portfolio_py = Py::new(py, portfolio_facade)?;
         strategy_instance.setattr(py, "portfolio", portfolio_py)?;
 
         // Inject OrderFactory with engine reference to PyBacktestingEngine
-        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
         let order_factory = OrderFactory::from_engine(engine_ref, "");
         let factory_py = Py::new(py, order_factory)?;
         strategy_instance.setattr(py, "order_factory", factory_py)?;
@@ -233,13 +236,16 @@ impl PyBacktestingEngine {
             )
         })?;
 
+        // Inject engine reference (for buy/sell/short/cover convenience methods)
+        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
+        py_instance.setattr(py, "engine", engine_ref.clone_ref(py))?;
+
         // Inject PortfolioFacade
         let portfolio_facade = PortfolioFacade::from_state(slf.borrow().portfolio_state.clone());
         let portfolio_py = Py::new(py, portfolio_facade)?;
         py_instance.setattr(py, "portfolio", portfolio_py)?;
 
         // Inject OrderFactory with engine reference to PyBacktestingEngine
-        let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
         let order_factory = OrderFactory::from_engine(engine_ref, "");
         let factory_py = Py::new(py, order_factory)?;
         py_instance.setattr(py, "order_factory", factory_py)?;
@@ -372,14 +378,112 @@ impl PyBacktestingEngine {
         }
     }
 
-    /// Cancel order
-    fn cancel_order(&self, _strategy: Py<PyAny>, vt_orderid: String) {
-        self.engine.lock().unwrap_or_else(|e| e.into_inner()).cancel_order(&vt_orderid);
+    /// Buy (long open) — convenience method matching Strategy.buy() signature
+    fn buy(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
+        let req = OrderRequest {
+            symbol: symbol.to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume,
+            price,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let vt_orderid = engine.send_limit_order(req);
+        if vt_orderid.is_empty() {
+            Ok(vec![])
+        } else {
+            Ok(vec![vt_orderid])
+        }
     }
 
-    /// Write log
-    fn write_log(&self, msg: String, _strategy: Option<Py<PyAny>>) {
+    /// Sell (long close) — convenience method matching Strategy.sell() signature
+    fn sell(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
+        let req = OrderRequest {
+            symbol: symbol.to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume,
+            price,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+        let vt_orderid = engine.send_limit_order(req);
+        if vt_orderid.is_empty() {
+            Ok(vec![])
+        } else {
+            Ok(vec![vt_orderid])
+        }
+    }
+
+    /// Short (short open, futures only) — convenience method matching Strategy.short() signature
+    fn short(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
+        let req = OrderRequest {
+            symbol: symbol.to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume,
+            price,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let vt_orderid = engine.send_limit_order(req);
+        if vt_orderid.is_empty() {
+            Ok(vec![])
+        } else {
+            Ok(vec![vt_orderid])
+        }
+    }
+
+    /// Cover (short close, futures only) — convenience method matching Strategy.cover() signature
+    fn cover(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
+        let req = OrderRequest {
+            symbol: symbol.to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume,
+            price,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+        let vt_orderid = engine.send_limit_order(req);
+        if vt_orderid.is_empty() {
+            Ok(vec![])
+        } else {
+            Ok(vec![vt_orderid])
+        }
+    }
+
+    /// Get current position quantity for a symbol
+    fn get_pos(&self, _vt_symbol: Option<&str>) -> PyResult<f64> {
+        Ok(self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_pos())
+    }
+
+    /// Write log — matches Strategy.write_log() signature (single msg argument)
+    fn write_log(&self, msg: String) {
         println!("[Strategy Log] {}", msg);
+    }
+
+    /// Send email — matches Strategy.send_email() signature (no-op in backtesting)
+    fn send_email(&self, _msg: String) {
+        // No-op in backtesting
+    }
+
+    /// Cancel order — matches Strategy.cancel_order() signature
+    fn cancel_order(&self, vt_orderid: String) {
+        self.engine.lock().unwrap_or_else(|e| e.into_inner()).cancel_order(&vt_orderid);
     }
 
     /// Load bar data
