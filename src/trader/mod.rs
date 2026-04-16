@@ -26,6 +26,7 @@ pub mod datafeed;
 pub mod engine;
 pub mod event;
 pub mod gateway;
+pub mod identifier;
 pub mod logger;
 pub mod object;
 pub mod optimize;
@@ -46,6 +47,7 @@ pub use datafeed::{BaseDatafeed, EmptyDatafeed};
 pub use engine::{BaseEngine, LogEngine, MainEngine, OmsEngine};
 pub use event::*;
 pub use gateway::{BaseGateway, GatewayEvent, GatewayEventSender, GatewaySettings, GatewaySettingValue};
+pub use identifier::{ClientOrderId, InstrumentId, PositionId, StrategyId};
 pub use logger::{init_logger, Logger, DEBUG, ERROR, INFO, WARNING, CRITICAL};
 pub use object::{
     AccountData, BarData, CancelRequest, ContractData, HistoryRequest, LogData, OrderData,
