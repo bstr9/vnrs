@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex};
 use super::base::{StrategySetting, StrategyState, StrategyType};
 #[cfg(feature = "gui")]
 use crate::chart::Indicator;
-use crate::trader::{BarData, Direction, Interval, Offset, OrderData, TickData, TradeData};
+use crate::trader::{
+    BarData, Direction, Interval, Offset, OrderData, OrderRequest, TickData, TradeData,
+};
 
 #[cfg(feature = "gui")]
 type IndicatorMap = Arc<Mutex<HashMap<String, Vec<Box<dyn Indicator>>>>>;
@@ -229,6 +231,13 @@ pub trait StrategyTemplate: Send + Sync {
 
     /// Stop order callback
     fn on_stop_order(&mut self, stop_orderid: &str);
+
+    /// Drain pending orders placed during on_bar/on_tick callback
+    /// This is called by BacktestingEngine after each callback to collect orders
+    /// that were placed by the strategy (e.g., via Python's buy/sell methods)
+    fn drain_pending_orders(&mut self) -> Vec<OrderRequest> {
+        Vec::new() // Default: no pending orders
+    }
 
     /// Update position
     fn update_position(&mut self, vt_symbol: &str, position: f64);

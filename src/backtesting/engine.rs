@@ -361,8 +361,17 @@ impl BacktestingEngine {
         let context = Arc::clone(&self.strategy_context);
 
         // Initialize strategy
-        if let Some(strategy) = &mut self.strategy {
+        let pending_init = if let Some(strategy) = &mut self.strategy {
             strategy.on_init(&context);
+            strategy.drain_pending_orders()
+        } else {
+            Vec::new()
+        };
+        for req in pending_init {
+            self.send_limit_order(req);
+        }
+        
+        if let Some(strategy) = &mut self.strategy {
             strategy.on_start();
         }
 
@@ -417,8 +426,14 @@ impl BacktestingEngine {
             
             // 5. Call strategy on_bar AFTER fills are settled
             //    Orders placed here won't be evaluated until next bar's step 3-4
-            if let Some(strategy) = &mut self.strategy {
+            let pending = if let Some(strategy) = &mut self.strategy {
                 strategy.on_bar(bar, &context);
+                strategy.drain_pending_orders()
+            } else {
+                Vec::new()
+            };
+            for req in pending {
+                self.send_limit_order(req);
             }
         }
 
@@ -471,9 +486,15 @@ impl BacktestingEngine {
             self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
             
             // Call strategy on_tick AFTER fills are settled
-            if let Some(strategy) = &mut self.strategy {
-                let context = Arc::clone(&self.strategy_context);
-                strategy.on_tick(tick, &context);
+            let pending = if let Some(strategy) = &mut self.strategy {
+                let ctx = Arc::clone(&self.strategy_context);
+                strategy.on_tick(tick, &ctx);
+                strategy.drain_pending_orders()
+            } else {
+                Vec::new()
+            };
+            for req in pending {
+                self.send_limit_order(req);
             }
         }
 
@@ -613,6 +634,9 @@ impl BacktestingEngine {
                 // Call strategy callback
                 if let Some(strategy) = &mut self.strategy {
                     strategy.on_trade(&trade);
+                    // Sync position cache so get_pos() / self.pos works
+                    // without calling engine.get_pos() (which would deadlock)
+                    strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
 
                 // Mark for removal
@@ -701,6 +725,8 @@ impl BacktestingEngine {
 
                 if let Some(strategy) = &mut self.strategy {
                     strategy.on_trade(&trade);
+                    // Sync position cache so get_pos() / self.pos works
+                    strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
             }
 
@@ -760,6 +786,8 @@ impl BacktestingEngine {
                 // Call strategy callback
                 if let Some(strategy) = &mut self.strategy {
                     strategy.on_trade(&trade);
+                    // Sync position cache so get_pos() / self.pos works
+                    strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
 
                 // Mark for removal
@@ -848,6 +876,8 @@ impl BacktestingEngine {
 
                 if let Some(strategy) = &mut self.strategy {
                     strategy.on_trade(&trade);
+                    // Sync position cache so get_pos() / self.pos works
+                    strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
             }
 
