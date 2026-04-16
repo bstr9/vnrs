@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Direction of order/trade/position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Direction {
     /// Long position (多)
     Long,
@@ -52,7 +52,9 @@ impl fmt::Display for Offset {
 }
 
 /// Order status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 pub enum Status {
     /// Submitting order (提交中)
     #[default]
@@ -432,7 +434,7 @@ impl Interval {
             Interval::Tick => "tick",
         }
     }
-    
+
     /// Get display name
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -446,7 +448,7 @@ impl Interval {
             Interval::Tick => "Tick",
         }
     }
-    
+
     /// Get all intervals for UI selection
     pub fn all() -> Vec<Interval> {
         vec![

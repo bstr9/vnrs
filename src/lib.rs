@@ -68,6 +68,8 @@ pub use trader::{
     ClientOrderId, InstrumentId, PositionId, StrategyId,
     // Utilities
     ArrayManager, BarGenerator,
+    // Synchronized bar generator
+    SynchronizedBarGenerator, SynchronizedBars,
 };
 
 // Re-export Binance gateways
