@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc, NaiveDate};
 use crate::trader::{BarData, TickData, Exchange, Interval, Direction, Offset, TradeData};
 use crate::strategy::StrategyTemplate;
 use super::base::BacktestingMode;
+use super::data_merge::{BarMergeIterator, TickMergeIterator};
 
 /// Symbol configuration for portfolio
 #[derive(Clone)]
@@ -149,12 +150,11 @@ impl PortfolioBacktestingEngine {
 
     /// Run bar-based portfolio backtesting
     async fn run_bar_backtesting(&mut self) -> Result<(), String> {
-        // Collect and sort all bars by datetime (owned copies to avoid borrow conflicts)
-        let mut all_bars: Vec<BarData> = Vec::new();
-        for bars in self.bar_data.values() {
-            all_bars.extend(bars.iter().cloned());
-        }
-        all_bars.sort_by_key(|bar| bar.datetime);
+        // Use heap-based K-way merge instead of clone + sort.
+        // Swap out bar_data to avoid borrow conflicts during iteration.
+        let bar_data = std::mem::take(&mut self.bar_data);
+        let sources: Vec<&[BarData]> = bar_data.values().map(|v| v.as_slice()).collect();
+        let merge_iter = BarMergeIterator::new(sources);
 
         // Initialize strategy
         if let Some(strategy) = &mut self.strategy {
@@ -166,8 +166,8 @@ impl PortfolioBacktestingEngine {
         let mut current_date: Option<NaiveDate> = None;
         let mut daily_trade_start_idx = 0;
 
-        // Process bars
-        for bar in &all_bars {
+        // Process bars via K-way merge (O(N log K) instead of O(N log N))
+        for bar in merge_iter {
             let bar_date = bar.datetime.date_naive();
 
             // When date changes, finalize the previous day's result
@@ -186,6 +186,9 @@ impl PortfolioBacktestingEngine {
             }
         }
 
+        // Restore bar_data
+        self.bar_data = bar_data;
+
         // Finalize the last day
         if let Some(date) = current_date {
             self.finalize_daily_result(date, &mut daily_trade_start_idx);
@@ -201,12 +204,11 @@ impl PortfolioBacktestingEngine {
 
     /// Run tick-based portfolio backtesting
     async fn run_tick_backtesting(&mut self) -> Result<(), String> {
-        // Collect and sort all ticks by datetime (owned copies to avoid borrow conflicts)
-        let mut all_ticks: Vec<TickData> = Vec::new();
-        for ticks in self.tick_data.values() {
-            all_ticks.extend(ticks.iter().cloned());
-        }
-        all_ticks.sort_by_key(|tick| tick.datetime);
+        // Use heap-based K-way merge instead of clone + sort.
+        // Swap out tick_data to avoid borrow conflicts during iteration.
+        let tick_data = std::mem::take(&mut self.tick_data);
+        let sources: Vec<&[TickData]> = tick_data.values().map(|v| v.as_slice()).collect();
+        let merge_iter = TickMergeIterator::new(sources);
 
         // Initialize strategy
         if let Some(strategy) = &mut self.strategy {
@@ -218,8 +220,8 @@ impl PortfolioBacktestingEngine {
         let mut current_date: Option<NaiveDate> = None;
         let mut daily_trade_start_idx = 0;
 
-        // Process ticks
-        for tick in &all_ticks {
+        // Process ticks via K-way merge (O(N log K) instead of O(N log N))
+        for tick in merge_iter {
             let tick_date = tick.datetime.date_naive();
 
             if current_date.is_some_and(|d| d != tick_date) {
@@ -236,6 +238,9 @@ impl PortfolioBacktestingEngine {
                 strategy.on_tick(tick, &context);
             }
         }
+
+        // Restore tick_data
+        self.tick_data = tick_data;
 
         if let Some(date) = current_date {
             self.finalize_daily_result(date, &mut daily_trade_start_idx);

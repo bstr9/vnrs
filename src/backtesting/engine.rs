@@ -2,6 +2,14 @@
 //! 
 //! Core backtesting engine that integrates with strategy framework
 //! Supports both spot and futures trading
+//!
+//! Event loop order (following nautilus_trader to prevent look-ahead bias):
+//! 1. Bar arrives → update current_dt
+//! 2. Handle new day (daily result tracking)
+//! 3. Cross pending limit orders from PREVIOUS bar against current bar
+//! 4. Cross pending stop orders from PREVIOUS bar against current bar
+//! 5. THEN call strategy's on_bar() (strategy can place new orders,
+//!    but they won't be evaluated until NEXT bar)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,6 +27,9 @@ use crate::strategy::{
 use super::base::{BacktestingMode, DailyResult, BacktestingResult, BacktestingStatistics};
 use super::statistics::calculate_statistics;
 use super::database::DatabaseLoader;
+use super::position::Position;
+use super::fill_model::{FillModel, BestPriceFillModel};
+use super::risk_engine::{RiskEngine, RiskConfig};
 
 /// Backtesting engine for strategy testing
 pub struct BacktestingEngine {
@@ -32,7 +43,7 @@ pub struct BacktestingEngine {
     
     // Trading parameters
     rate: f64,          // Commission rate
-    slippage: f64,      // Slippage per share/contract
+    slippage: f64,      // Slippage per share/contract (kept for DailyResult calculation)
     size: f64,          // Contract size (1 for spot, different for futures)
     pricetick: f64,     // Minimum price movement
     capital: f64,       // Initial capital
@@ -63,8 +74,14 @@ pub struct BacktestingEngine {
     trade_count: u64,
     trades: HashMap<String, TradeData>,
     
-    // Position tracking
-    pos: f64,
+    // Position tracking (enhanced with avg price, realized PnL, flip handling)
+    position: Position,
+    
+    // Fill model for realistic order fill simulation
+    fill_model: Box<dyn FillModel>,
+    
+    // Pre-trade risk engine
+    risk_engine: RiskEngine,
     
     // Daily results
     daily_results: HashMap<NaiveDate, DailyResult>,
@@ -107,7 +124,13 @@ impl BacktestingEngine {
             active_stop_orders: HashMap::new(),
             trade_count: 0,
             trades: HashMap::new(),
-            pos: 0.0,
+            position: Position::new(
+                Position::generate_position_id("", Exchange::Binance, 0),
+                String::new(),
+                Exchange::Binance,
+            ),
+            fill_model: Box::new(BestPriceFillModel::new(0.0)),
+            risk_engine: RiskEngine::new_unrestricted(),
             daily_results: HashMap::new(),
             daily_result: None,
             logs: Vec::new(),
@@ -129,7 +152,7 @@ impl BacktestingEngine {
         self.trade_count = 0;
         self.trades.clear();
         
-        self.pos = 0.0;
+        self.position.reset();
         self.daily_results.clear();
         self.daily_result = None;
         
@@ -176,6 +199,23 @@ impl BacktestingEngine {
         self.pricetick = pricetick;
         self.capital = capital;
         self.mode = mode;
+
+        // Re-initialize position with correct symbol/exchange
+        self.position = Position::new(
+            Position::generate_position_id(&self.symbol, self.exchange, 0),
+            self.symbol.clone(),
+            self.exchange,
+        ).with_size_multiplier(size);
+    }
+
+    /// Set fill model for order fill simulation
+    pub fn set_fill_model(&mut self, model: Box<dyn FillModel>) {
+        self.fill_model = model;
+    }
+
+    /// Set risk engine configuration
+    pub fn set_risk_config(&mut self, config: RiskConfig) {
+        self.risk_engine.set_config(config);
     }
 
     /// Add strategy to backtesting engine
@@ -307,7 +347,7 @@ impl BacktestingEngine {
 
     /// Run backtesting
     pub async fn run_backtesting(&mut self) -> Result<(), String> {
-        if self.history_data.is_empty() {
+        if self.history_data.is_empty() && self.tick_data.is_empty() {
             return Err("历史数据为空，无法开始回测".to_string());
         }
 
@@ -346,40 +386,63 @@ impl BacktestingEngine {
     }
 
     /// Run bar-based backtesting
+    ///
+    /// Event loop order per bar (prevents look-ahead bias):
+    /// 1. Update current_dt
+    /// 2. Handle new day
+    /// 3. Cross pending limit orders (placed on PREVIOUS bar)
+    /// 4. Cross pending stop orders (placed on PREVIOUS bar)
+    /// 5. Call strategy on_bar() - new orders placed here are evaluated on NEXT bar
     async fn run_bar_backtesting(&mut self) -> Result<(), String> {
         let context = Arc::clone(&self.strategy_context);
+
+        // Take ownership to avoid borrow conflicts while mutating self
+        let history_data = std::mem::take(&mut self.history_data);
         
-        for bar in self.history_data.clone() {
+        for bar in &history_data {
+            // 1. Update current time
             self.current_dt = bar.datetime;
             
-            // New day - create new daily result
-            self.new_day(&bar);
+            // 2. New day - create new daily result
+            self.new_day(bar);
             
-            // Cross limit orders
-            self.cross_limit_order(&bar);
+            // 3. Cross pending limit orders from previous bar
+            self.cross_limit_order(bar);
             
-            // Cross stop orders
-            self.cross_stop_order(&bar);
+            // 4. Cross pending stop orders from previous bar
+            self.cross_stop_order(bar);
             
-            // Update bar to strategy
+            // 4.5. Update registered indicators BEFORE strategy.on_bar()
+            //      so the strategy can use the latest indicator values
+            self.strategy_context.update_indicators(&self.vt_symbol, bar);
+            
+            // 5. Call strategy on_bar AFTER fills are settled
+            //    Orders placed here won't be evaluated until next bar's step 3-4
             if let Some(strategy) = &mut self.strategy {
-                strategy.on_bar(&bar, &context);
+                strategy.on_bar(bar, &context);
             }
         }
 
         // Close last day
-        if let Some(last_bar) = self.history_data.last().cloned() {
-            self.close_day(&last_bar);
+        if let Some(last_bar) = history_data.last() {
+            self.close_day(last_bar);
         }
+
+        // Restore history data
+        self.history_data = history_data;
 
         Ok(())
     }
 
     /// Run tick-based backtesting
+    ///
+    /// Same look-ahead bias prevention as bar mode:
+    /// Orders placed by strategy are only evaluated on the next tick.
     async fn run_tick_backtesting(&mut self) -> Result<(), String> {
-        let _context = Arc::clone(&self.strategy_context);
-        
-        for tick in self.tick_data.clone() {
+        // Take ownership to avoid borrow conflicts while mutating self
+        let tick_data = std::mem::take(&mut self.tick_data);
+
+        for tick in &tick_data {
             self.current_dt = tick.datetime;
 
             let synthetic_bar = BarData {
@@ -400,20 +463,24 @@ impl BacktestingEngine {
             self.new_day(&synthetic_bar);
 
             // Cross limit orders with tick data
-            self.cross_limit_order_tick(&tick);
+            self.cross_limit_order_tick(tick);
             
             // Cross stop orders with tick data
-            self.cross_stop_order_tick(&tick);
+            self.cross_stop_order_tick(tick);
             
-            // Update tick to strategy
+            // Update registered indicators with synthetic bar BEFORE strategy callbacks
+            let vt_symbol = format!("{}.{}", tick.symbol, tick.exchange.value());
+            self.strategy_context.update_indicators(&vt_symbol, &synthetic_bar);
+            
+            // Call strategy on_tick AFTER fills are settled
             if let Some(strategy) = &mut self.strategy {
                 let context = Arc::clone(&self.strategy_context);
-                strategy.on_tick(&tick, &context);
+                strategy.on_tick(tick, &context);
             }
         }
 
         // Calculate final result based on last tick
-        if let Some(last_tick) = self.tick_data.last() {
+        if let Some(last_tick) = tick_data.last() {
             // Create a synthetic bar for closing
             let close_bar = BarData {
                 gateway_name: "BACKTESTING".to_string(),
@@ -433,6 +500,9 @@ impl BacktestingEngine {
             self.close_day(&close_bar);
         }
 
+        // Restore tick data
+        self.tick_data = tick_data;
+
         Ok(())
     }
 
@@ -445,6 +515,8 @@ impl BacktestingEngine {
             let result_date = result.date;
             
             if bar_date != result_date {
+                // Reset daily risk counters for new day
+                self.risk_engine.reset_daily();
                 // Close previous day
                 let prev_bar = BarData {
                     gateway_name: "BACKTESTING".to_string(),
@@ -467,14 +539,14 @@ impl BacktestingEngine {
                 self.daily_result = Some(DailyResult::new(bar_date, bar.close_price));
                 if let Some(result) = &mut self.daily_result {
                     result.pre_close = prev_bar.close_price;
-                    result.start_pos = self.pos;
+                    result.start_pos = self.position.signed_qty();
                 }
             }
         } else {
             // First day
             self.daily_result = Some(DailyResult::new(bar_date, bar.close_price));
             if let Some(result) = &mut self.daily_result {
-                result.start_pos = self.pos;
+                result.start_pos = self.position.signed_qty();
             }
         }
     }
@@ -483,7 +555,7 @@ impl BacktestingEngine {
     fn close_day(&mut self, bar: &BarData) {
         if let Some(mut result) = self.daily_result.take() {
             result.close_price = bar.close_price;
-            result.end_pos = self.pos;
+            result.end_pos = self.position.signed_qty();
             
             // Calculate PnL
             result.calculate_pnl(self.size, self.rate, self.slippage);
@@ -493,35 +565,21 @@ impl BacktestingEngine {
         }
     }
 
-    /// Cross limit orders with bar
+    /// Cross limit orders with bar using FillModel
     fn cross_limit_order(&mut self, bar: &BarData) {
-        let mut to_remove = Vec::new();
-        
         // Collect active orders to avoid borrow issues
         let active_orders: Vec<_> = self.active_limit_orders.iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         
-        for (vt_orderid, order) in active_orders {
-            let should_cross = match order.direction {
-                Some(Direction::Long) => {
-                    order.price >= bar.low_price
-                }
-                Some(Direction::Short) => {
-                    order.price <= bar.high_price
-                }
-                _ => false,
-            };
+        let mut to_remove = Vec::new();
 
-            if should_cross {
-                // Trade price is order price with slippage
-                let trade_price = match order.direction {
-                    Some(Direction::Long) => order.price + self.slippage,
-                    Some(Direction::Short) => order.price - self.slippage,
-                    _ => order.price,
-                };
-                
-                // Create trade
+        for (vt_orderid, order) in active_orders {
+            // Use FillModel to simulate the fill
+            let result = self.fill_model.simulate_limit_fill(&order, bar);
+
+            if result.filled {
+                // Create trade from FillResult
                 self.trade_count += 1;
                 let trade = TradeData {
                     gateway_name: "BACKTESTING".to_string(),
@@ -531,7 +589,7 @@ impl BacktestingEngine {
                     tradeid: format!("{}", self.trade_count),
                     direction: order.direction,
                     offset: order.offset,
-                    price: trade_price,
+                    price: result.fill_price,
                     volume: order.volume,
                     datetime: Some(bar.datetime),
                     extra: None,
@@ -541,8 +599,12 @@ impl BacktestingEngine {
                 let vt_tradeid = trade.vt_tradeid();
                 self.trades.insert(vt_tradeid.clone(), trade.clone());
                 
-                // Update position
-                self.update_position(&trade);
+                // Update position using apply_fill
+                self.position.apply_fill(&trade)
+                    .expect("Position apply_fill failed");
+                
+                // Record trade in risk engine
+                self.risk_engine.record_trade(trade.price * trade.volume * self.size);
                 
                 // Update daily result
                 if let Some(result) = &mut self.daily_result {
@@ -566,7 +628,7 @@ impl BacktestingEngine {
         }
     }
 
-    /// Cross stop orders with bar
+    /// Cross stop orders with bar using FillModel
     fn cross_stop_order(&mut self, bar: &BarData) {
         let mut to_trigger = Vec::new();
         
@@ -585,41 +647,63 @@ impl BacktestingEngine {
         for (stop_orderid, mut stop_order) in to_trigger {
             stop_order.status = StopOrderStatus::Triggered;
 
-            let trade_price = match stop_order.direction {
-                Direction::Long => stop_order.price + self.slippage,
-                Direction::Short => stop_order.price - self.slippage,
-                _ => stop_order.price,
-            };
-
-            self.trade_count += 1;
-            let symbol = crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
-                .map(|(s, _)| s)
-                .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string());
-            let trade = TradeData {
+            // Create a synthetic OrderData to pass to FillModel
+            let order = OrderData {
                 gateway_name: "BACKTESTING".to_string(),
-                symbol,
+                symbol: crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
+                    .map(|(s, _)| s)
+                    .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string()),
                 exchange: self.exchange,
                 orderid: stop_orderid.clone(),
-                tradeid: format!("{}", self.trade_count),
+                order_type: stop_order.order_type,
                 direction: Some(stop_order.direction),
                 offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: trade_price,
+                price: stop_order.price,
                 volume: stop_order.volume,
+                traded: 0.0,
+                status: Status::NotTraded,
                 datetime: Some(bar.datetime),
+                reference: String::new(),
                 extra: None,
             };
 
-            let vt_tradeid = trade.vt_tradeid();
-            self.trades.insert(vt_tradeid.clone(), trade.clone());
-            self.update_position(&trade);
+            // Use FillModel to simulate the stop fill with trigger price
+            let fill_result = self.fill_model.simulate_stop_fill(&order, bar, stop_order.price);
 
-            if let Some(result) = &mut self.daily_result {
-                result.trades.push(trade.clone());
-                result.trade_count += 1;
-            }
+            if fill_result.filled {
+                self.trade_count += 1;
+                let trade = TradeData {
+                    gateway_name: "BACKTESTING".to_string(),
+                    symbol: order.symbol.clone(),
+                    exchange: self.exchange,
+                    orderid: stop_orderid.clone(),
+                    tradeid: format!("{}", self.trade_count),
+                    direction: Some(stop_order.direction),
+                    offset: stop_order.offset.unwrap_or(Offset::Open),
+                    price: fill_result.fill_price,
+                    volume: stop_order.volume,
+                    datetime: Some(bar.datetime),
+                    extra: None,
+                };
 
-            if let Some(strategy) = &mut self.strategy {
-                strategy.on_trade(&trade);
+                let vt_tradeid = trade.vt_tradeid();
+                self.trades.insert(vt_tradeid.clone(), trade.clone());
+                
+                // Update position using apply_fill
+                self.position.apply_fill(&trade)
+                    .expect("Position apply_fill failed");
+
+                // Record trade in risk engine
+                self.risk_engine.record_trade(trade.price * trade.volume * self.size);
+
+                if let Some(result) = &mut self.daily_result {
+                    result.trades.push(trade.clone());
+                    result.trade_count += 1;
+                }
+
+                if let Some(strategy) = &mut self.strategy {
+                    strategy.on_trade(&trade);
+                }
             }
 
             stop_order.vt_orderid = Some(stop_orderid.clone());
@@ -628,37 +712,21 @@ impl BacktestingEngine {
         }
     }
 
-    /// Cross limit orders with tick data
+    /// Cross limit orders with tick data using FillModel
     fn cross_limit_order_tick(&mut self, tick: &TickData) {
-        let mut to_remove = Vec::new();
-        
         // Collect active orders to avoid borrow issues
         let active_orders: Vec<_> = self.active_limit_orders.iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         
-        for (vt_orderid, order) in active_orders {
-            let should_cross = match order.direction {
-                Some(Direction::Long) => {
-                    // Buy order: check if we can buy at or below order price
-                    order.price >= tick.ask_price_1
-                }
-                Some(Direction::Short) => {
-                    // Sell order: check if we can sell at or above order price
-                    order.price <= tick.bid_price_1
-                }
-                _ => false,
-            };
+        let mut to_remove = Vec::new();
 
-            if should_cross {
-                // Use best available price
-                let trade_price = match order.direction {
-                    Some(Direction::Long) => tick.ask_price_1,
-                    Some(Direction::Short) => tick.bid_price_1,
-                    _ => order.price,
-                };
-                
-                // Create trade
+        for (vt_orderid, order) in active_orders {
+            // Use FillModel to simulate tick fill
+            let result = self.fill_model.simulate_tick_fill(&order, tick);
+
+            if result.filled {
+                // Create trade from FillResult
                 self.trade_count += 1;
                 let trade = TradeData {
                     gateway_name: "BACKTESTING".to_string(),
@@ -668,7 +736,7 @@ impl BacktestingEngine {
                     tradeid: format!("{}", self.trade_count),
                     direction: order.direction,
                     offset: order.offset,
-                    price: trade_price,
+                    price: result.fill_price,
                     volume: order.volume,
                     datetime: Some(tick.datetime),
                     extra: None,
@@ -678,9 +746,19 @@ impl BacktestingEngine {
                 let vt_tradeid = trade.vt_tradeid();
                 self.trades.insert(vt_tradeid.clone(), trade.clone());
                 
-                // Update position
-                self.update_position(&trade);
-                
+                // Update position using apply_fill
+                self.position.apply_fill(&trade)
+                    .expect("Position apply_fill failed");
+
+                // Record trade in risk engine
+                self.risk_engine.record_trade(trade.price * trade.volume * self.size);
+
+                // Update daily result
+                if let Some(result) = &mut self.daily_result {
+                    result.trades.push(trade.clone());
+                    result.trade_count += 1;
+                }
+
                 // Call strategy callback
                 if let Some(strategy) = &mut self.strategy {
                     strategy.on_trade(&trade);
@@ -697,7 +775,7 @@ impl BacktestingEngine {
         }
     }
 
-    /// Cross stop orders with tick data
+    /// Cross stop orders with tick data using FillModel
     fn cross_stop_order_tick(&mut self, tick: &TickData) {
         let mut to_trigger = Vec::new();
         
@@ -716,67 +794,68 @@ impl BacktestingEngine {
         for (stop_orderid, mut stop_order) in to_trigger {
             stop_order.status = StopOrderStatus::Triggered;
 
-            let trade_price = match stop_order.direction {
-                Direction::Long => stop_order.price + self.slippage,
-                Direction::Short => stop_order.price - self.slippage,
-                _ => stop_order.price,
-            };
-
-            self.trade_count += 1;
-            let symbol = crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
-                .map(|(s, _)| s)
-                .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string());
-            let trade = TradeData {
+            // Create a synthetic OrderData to pass to FillModel
+            let order = OrderData {
                 gateway_name: "BACKTESTING".to_string(),
-                symbol,
+                symbol: crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
+                    .map(|(s, _)| s)
+                    .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string()),
                 exchange: self.exchange,
                 orderid: stop_orderid.clone(),
-                tradeid: format!("{}", self.trade_count),
+                order_type: stop_order.order_type,
                 direction: Some(stop_order.direction),
                 offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: trade_price,
+                price: stop_order.price,
                 volume: stop_order.volume,
+                traded: 0.0,
+                status: Status::NotTraded,
                 datetime: Some(tick.datetime),
+                reference: String::new(),
                 extra: None,
             };
 
-            let vt_tradeid = trade.vt_tradeid();
-            self.trades.insert(vt_tradeid.clone(), trade.clone());
-            self.update_position(&trade);
+            // For tick data, use simulate_tick_fill for stop orders
+            let fill_result = self.fill_model.simulate_tick_fill(&order, tick);
 
-            if let Some(result) = &mut self.daily_result {
-                result.trades.push(trade.clone());
-                result.trade_count += 1;
-            }
+            if fill_result.filled {
+                self.trade_count += 1;
+                let trade = TradeData {
+                    gateway_name: "BACKTESTING".to_string(),
+                    symbol: order.symbol.clone(),
+                    exchange: self.exchange,
+                    orderid: stop_orderid.clone(),
+                    tradeid: format!("{}", self.trade_count),
+                    direction: Some(stop_order.direction),
+                    offset: stop_order.offset.unwrap_or(Offset::Open),
+                    price: fill_result.fill_price,
+                    volume: stop_order.volume,
+                    datetime: Some(tick.datetime),
+                    extra: None,
+                };
 
-            if let Some(strategy) = &mut self.strategy {
-                strategy.on_trade(&trade);
+                let vt_tradeid = trade.vt_tradeid();
+                self.trades.insert(vt_tradeid.clone(), trade.clone());
+                
+                // Update position using apply_fill
+                self.position.apply_fill(&trade)
+                    .expect("Position apply_fill failed");
+
+                // Record trade in risk engine
+                self.risk_engine.record_trade(trade.price * trade.volume * self.size);
+
+                if let Some(result) = &mut self.daily_result {
+                    result.trades.push(trade.clone());
+                    result.trade_count += 1;
+                }
+
+                if let Some(strategy) = &mut self.strategy {
+                    strategy.on_trade(&trade);
+                }
             }
 
             stop_order.vt_orderid = Some(stop_orderid.clone());
             self.stop_orders.insert(stop_orderid.clone(), stop_order);
             self.active_stop_orders.remove(&stop_orderid);
-        }
-    }
-
-    /// Update position from trade
-    fn update_position(&mut self, trade: &TradeData) {
-        match trade.direction {
-            Some(Direction::Long) => {
-                if trade.offset == Offset::Open {
-                    self.pos += trade.volume;
-                } else {
-                    self.pos -= trade.volume;
-                }
-            }
-            Some(Direction::Short) => {
-                if trade.offset == Offset::Open {
-                    self.pos -= trade.volume;
-                } else {
-                    self.pos += trade.volume;
-                }
-            }
-            _ => {}
         }
     }
 
@@ -801,6 +880,19 @@ impl BacktestingEngine {
             reference: req.reference,
             extra: None,
         };
+
+        // Pre-trade risk check
+        let active_order_count = self.active_limit_orders.len() + self.active_stop_orders.len();
+        let risk_result = self.risk_engine.check_order(
+            &order, &self.position, active_order_count, self.size,
+        );
+        if !risk_result.is_approved {
+            self.write_log(&format!(
+                "Order rejected by risk engine: {}",
+                risk_result.reason.as_deref().unwrap_or("unknown")
+            ));
+            return String::new();
+        }
 
         self.limit_orders.insert(vt_orderid.clone(), order.clone());
         self.active_limit_orders.insert(vt_orderid.clone(), order);
@@ -827,6 +919,35 @@ impl BacktestingEngine {
             status: StopOrderStatus::Waiting,
             datetime: self.current_dt,
         };
+
+        // Pre-trade risk check - create a synthetic OrderData for the check
+        let order_for_check = OrderData {
+            gateway_name: "BACKTESTING".to_string(),
+            symbol: req.symbol,
+            exchange: req.exchange,
+            orderid: stop_orderid.clone(),
+            order_type: req.order_type,
+            direction: Some(req.direction),
+            offset: req.offset,
+            price: req.price,
+            volume: req.volume,
+            traded: 0.0,
+            status: Status::NotTraded,
+            datetime: Some(self.current_dt),
+            reference: String::new(),
+            extra: None,
+        };
+        let active_order_count = self.active_limit_orders.len() + self.active_stop_orders.len();
+        let risk_result = self.risk_engine.check_order(
+            &order_for_check, &self.position, active_order_count, self.size,
+        );
+        if !risk_result.is_approved {
+            self.write_log(&format!(
+                "Stop order rejected by risk engine: {}",
+                risk_result.reason.as_deref().unwrap_or("unknown")
+            ));
+            return String::new();
+        }
 
         self.stop_orders.insert(stop_orderid.clone(), stop_order.clone());
         self.active_stop_orders.insert(stop_orderid.clone(), stop_order);
@@ -896,9 +1017,19 @@ impl BacktestingEngine {
         // In production, also save to logs vector
     }
 
-    /// Get current position
-    pub fn get_position(&self) -> f64 {
-        self.pos
+    /// Get current position (enhanced Position reference)
+    pub fn get_position(&self) -> &Position {
+        &self.position
+    }
+
+    /// Get current position as simple signed quantity (backward compatibility)
+    pub fn get_pos(&self) -> f64 {
+        self.position.signed_qty()
+    }
+
+    /// Get realized PnL from position
+    pub fn get_realized_pnl(&self) -> f64 {
+        self.position.realized_pnl()
     }
 
     /// Get logs
