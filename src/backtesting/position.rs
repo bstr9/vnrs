@@ -483,8 +483,8 @@ mod tests {
         pos.apply_fill(&create_trade(Direction::Long, Offset::Open, 100.0, 10.0))
             .unwrap();
 
-        // Close long
-        pos.apply_fill(&create_trade(Direction::Long, Offset::Close, 110.0, 10.0))
+        // Close long (sell to close long)
+        pos.apply_fill(&create_trade(Direction::Short, Offset::Close, 110.0, 10.0))
             .unwrap();
 
         assert!(pos.is_flat());
@@ -551,8 +551,8 @@ mod tests {
         pos.apply_fill(&create_trade(Direction::Short, Offset::Open, 100.0, 10.0))
             .unwrap();
 
-        // Close short at 90 (profit)
-        pos.apply_fill(&create_trade(Direction::Short, Offset::Close, 90.0, 10.0))
+        // Close short at 90 (profit) - buy to close short
+        pos.apply_fill(&create_trade(Direction::Long, Offset::Close, 90.0, 10.0))
             .unwrap();
 
         assert!(pos.is_flat());
@@ -567,10 +567,10 @@ mod tests {
         pos.apply_fill(&create_trade(Direction::Long, Offset::Open, 100.0, 10.0))
             .unwrap();
         pos.add_commission(10.0);
-        pos.apply_fill(&create_trade(Direction::Long, Offset::Close, 110.0, 10.0))
+        pos.apply_fill(&create_trade(Direction::Short, Offset::Close, 110.0, 10.0))
             .unwrap();
 
-        // PnL = 100, commission = 10
+        // PnL = 100, commission deducted from realized_return = -10
         assert_eq!(pos.realized_pnl(), 100.0);
         assert_eq!(pos.realized_return, -10.0);
     }

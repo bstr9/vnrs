@@ -928,8 +928,36 @@ impl DashboardPanel {
                 ui.set_min_width(width - 24.0);
                 ui.set_min_height(136.0);
 
-                // Header
-                ui.label(RichText::new("📈 今日盈亏曲线").size(14.0).strong());
+                // Header with time range selector
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("📈 盈亏曲线").size(14.0).strong());
+
+                    // Time range selector
+                    egui::ComboBox::from_id_salt("pnl_time_range")
+                        .selected_text(match self.pnl_time_range {
+                            PnlTimeRange::Today => "今日",
+                            PnlTimeRange::Week => "本周",
+                            PnlTimeRange::Month => "本月",
+                        })
+                        .width(60.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.pnl_time_range,
+                                PnlTimeRange::Today,
+                                "今日",
+                            );
+                            ui.selectable_value(
+                                &mut self.pnl_time_range,
+                                PnlTimeRange::Week,
+                                "本周",
+                            );
+                            ui.selectable_value(
+                                &mut self.pnl_time_range,
+                                PnlTimeRange::Month,
+                                "本月",
+                            );
+                        });
+                });
 
                 ui.add_space(8.0);
 

@@ -1332,7 +1332,7 @@ mod tests {
             exchange: Exchange::Binance,
             orderid: "2".to_string(),
             tradeid: "2".to_string(),
-            direction: Some(Direction::Long),
+            direction: Some(Direction::Short),  // Sell to close long
             offset: Offset::Close,
             price: 51000.0,
             volume: 1.0,
@@ -1402,7 +1402,7 @@ mod tests {
             exchange: Exchange::Binance,
             orderid: "2".to_string(),
             tradeid: "2".to_string(),
-            direction: Some(Direction::Short),
+            direction: Some(Direction::Long),  // Buy to close short
             offset: Offset::Close,
             price: 49000.0,
             volume: 1.0,

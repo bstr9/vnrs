@@ -1668,6 +1668,11 @@ impl CustomIndicator {
         }
     }
 
+    /// Get the expression string for this custom indicator
+    pub fn expression(&self) -> &str {
+        &self.expression
+    }
+
     /// Evaluate the cached AST for a single bar.
     fn evaluate_expr(&self, bar: &BarData) -> Option<f64> {
         self.parsed.as_ref().map(|node| node.eval(bar))
