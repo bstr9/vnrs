@@ -35,7 +35,7 @@ Requirements: Do not delete existing features. Each iteration must ensure the co
 "@
 
     # 3. Execute opencode
-    opencode run $instruction -c --prompt "You are a top architect proficient in vn.py, vn.rs and other quantitative trading systems. Your current task is to analyze and complete a partially-built quantitative project. You must independently think about missing modules (e.g.: risk control, matching offset handling, multi-period synthesizer, etc.) and implement them one by one."
+    opencode run $instruction -c --thinking --variant max --dangerously-skip-permissions --prompt "You are a top architect proficient in vn.py, vn.rs and other quantitative trading systems. Your current task is to analyze and complete a partially-built quantitative project. You must independently think about missing modules (e.g.: risk control, matching offset handling, multi-period synthesizer, etc.) and implement them one by one."
 
     # 4. Git commit
     if (git rev-parse --is-inside-work-tree 2>$null) {
