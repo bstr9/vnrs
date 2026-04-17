@@ -30,6 +30,8 @@ pub mod identifier;
 pub mod logger;
 pub mod object;
 pub mod optimize;
+pub mod recorder;
+pub mod risk;
 pub mod setting;
 pub mod sync_bar_generator;
 pub mod utility;
@@ -55,6 +57,8 @@ pub use object::{
     OrderRequest, PositionData, QuoteData, QuoteRequest, SubscribeRequest, TickData, TradeData,
 };
 pub use optimize::{check_optimization_setting, run_bf_optimization, run_ga_optimization, OptimizationSetting};
+pub use recorder::{DataRecorder, RecordStatus, RecorderConfig};
+pub use risk::{DailyStats, RiskCheckResult, RiskConfig, RiskManager};
 pub use setting::{Settings, SettingValue, SETTINGS};
 pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use utility::{
