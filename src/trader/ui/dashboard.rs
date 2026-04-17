@@ -275,144 +275,151 @@ impl DashboardPanel {
         let available_width = ui.available_width();
         let card_spacing = 10.0;
 
-        // Determine number of columns based on width
-        let (cols_row1, cols_row2) = if available_width > 1600.0 {
-            (3, 2) // Wide: 3 cards in row 1, 2 cards in row 2
-        } else if available_width > 1200.0 {
-            (3, 1) // Medium: 3 cards in row 1, 1 card in row 2
-        } else {
-            (1, 1) // Narrow: single column
-        };
+        let is_wide = available_width > 1600.0;
+        let is_medium = available_width > 1200.0;
 
-        // Row 1: Account / Today PnL / Risk (responsive)
-        let card_width =
-            (available_width - card_spacing * (cols_row1 as f32 - 1.0)) / cols_row1 as f32;
+        // Row 1: Account / Today PnL / Risk
+        {
+            let num_cards = if is_wide || is_medium { 3usize } else { 1 };
+            let card_width =
+                (available_width - card_spacing * (num_cards - 1) as f32) / num_cards as f32;
 
-        ui.horizontal(|ui| {
-            ui.set_min_height(140.0);
+            ui.horizontal_top(|ui| {
+                // Account Summary Card
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new(card_width, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let a = self.show_account_card(ui, card_width);
+                        if a != DashboardAction::None {
+                            action = a;
+                        }
+                    },
+                );
 
-            // Account Summary Card
-            let card_action = self.show_account_card(ui, card_width);
-            if card_action != DashboardAction::None {
-                action = card_action;
-            }
+                if num_cards >= 2 {
+                    ui.add_space(card_spacing);
 
-            if cols_row1 >= 2 {
-                ui.add_space(card_spacing);
-
-                // Today PnL Card
-                let card_action = self.show_pnl_card(ui, card_width);
-                if card_action != DashboardAction::None {
-                    action = card_action;
+                    // Today PnL Card
+                    ui.allocate_ui_with_layout(
+                        egui::Vec2::new(card_width, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            let a = self.show_pnl_card(ui, card_width);
+                            if a != DashboardAction::None {
+                                action = a;
+                            }
+                        },
+                    );
                 }
-            }
 
-            if cols_row1 >= 3 {
-                ui.add_space(card_spacing);
+                if num_cards >= 3 {
+                    ui.add_space(card_spacing);
 
-                // Risk Status Card
-                let card_action = self.show_risk_card(ui, card_width);
-                if card_action != DashboardAction::None {
-                    action = card_action;
+                    // Risk Status Card
+                    ui.allocate_ui_with_layout(
+                        egui::Vec2::new(card_width, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            let a = self.show_risk_card(ui, card_width);
+                            if a != DashboardAction::None {
+                                action = a;
+                            }
+                        },
+                    );
                 }
-            }
-        });
+            });
+        }
 
         ui.add_space(card_spacing);
 
-        // Row 2: Positions / Strategies (responsive)
-        let row2_width = if cols_row2 == 2 {
+        // Row 2: Positions / Strategies
+        if is_wide {
             let pos_width = (available_width - card_spacing) * 0.6;
             let strat_width = available_width - card_spacing - pos_width;
-            Some((pos_width, strat_width))
-        } else {
-            None
-        };
 
-        ui.horizontal(|ui| {
-            ui.set_min_height(180.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new(pos_width, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let a = self.show_positions_card(ui, pos_width);
+                        if a != DashboardAction::None {
+                            action = a;
+                        }
+                    },
+                );
 
-            // Positions Card
-            let width = row2_width.map(|(w, _)| w).unwrap_or(available_width);
-            let card_action = self.show_positions_card(ui, width);
-            if card_action != DashboardAction::None {
-                action = card_action;
-            }
-
-            if let Some((_, strat_width)) = row2_width {
                 ui.add_space(card_spacing);
 
-                // Strategies Card
-                let card_action = self.show_strategies_card(ui, strat_width);
-                if card_action != DashboardAction::None {
-                    action = card_action;
-                }
-            }
-        });
-
-        // If single column, show strategies below positions
-        if cols_row2 == 1 && cols_row1 == 1 {
-            ui.add_space(card_spacing);
-
-            let card_action = self.show_pnl_card(ui, available_width);
-            if card_action != DashboardAction::None {
-                action = card_action;
-            }
-
-            ui.add_space(card_spacing);
-
-            let card_action = self.show_risk_card(ui, available_width);
-            if card_action != DashboardAction::None {
-                action = card_action;
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new(strat_width, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let a = self.show_strategies_card(ui, strat_width);
+                        if a != DashboardAction::None {
+                            action = a;
+                        }
+                    },
+                );
+            });
+        } else {
+            let a = self.show_positions_card(ui, available_width);
+            if a != DashboardAction::None {
+                action = a;
             }
 
             ui.add_space(card_spacing);
 
-            let card_action = self.show_strategies_card(ui, available_width);
-            if card_action != DashboardAction::None {
-                action = card_action;
+            let a = self.show_strategies_card(ui, available_width);
+            if a != DashboardAction::None {
+                action = a;
             }
         }
 
         ui.add_space(card_spacing);
 
         // Row 3: PnL Curve / System Status
-        let (curve_width, sys_width) = if available_width > 1200.0 {
-            (
-                (available_width - card_spacing) * 0.6,
-                available_width - card_spacing - (available_width - card_spacing) * 0.6,
-            )
-        } else {
-            (available_width, available_width)
-        };
+        if is_wide || is_medium {
+            let curve_width = (available_width - card_spacing) * 0.6;
+            let sys_width = available_width - card_spacing - curve_width;
 
-        ui.horizontal(|ui| {
-            ui.set_min_height(160.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new(curve_width, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let a = self.show_pnl_curve_card(ui, curve_width);
+                        if a != DashboardAction::None {
+                            action = a;
+                        }
+                    },
+                );
 
-            // PnL Curve Card
-            let card_action = self.show_pnl_curve_card(ui, curve_width);
-            if card_action != DashboardAction::None {
-                action = card_action;
-            }
-
-            if available_width > 1200.0 {
                 ui.add_space(card_spacing);
 
-                // System Status Card
-                let card_action = self.show_system_card(ui, sys_width);
-                if card_action != DashboardAction::None {
-                    action = card_action;
-                }
+                ui.allocate_ui_with_layout(
+                    egui::Vec2::new(sys_width, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        let a = self.show_system_card(ui, sys_width);
+                        if a != DashboardAction::None {
+                            action = a;
+                        }
+                    },
+                );
+            });
+        } else {
+            let a = self.show_pnl_curve_card(ui, available_width);
+            if a != DashboardAction::None {
+                action = a;
             }
-        });
 
-        // If narrow, show system card below curve
-        if available_width <= 1200.0 {
             ui.add_space(card_spacing);
 
-            let card_action = self.show_system_card(ui, available_width);
-            if card_action != DashboardAction::None {
-                action = card_action;
+            let a = self.show_system_card(ui, available_width);
+            if a != DashboardAction::None {
+                action = a;
             }
         }
 
@@ -423,7 +430,8 @@ impl DashboardPanel {
     // Individual Cards
     // ========================================================================
 
-    fn show_account_card(&mut self, ui: &mut egui::Ui, width: f32) -> DashboardAction {
+    /// Render a card inside a fixed-width column allocated by the layout
+    fn show_account_card(&mut self, ui: &mut egui::Ui, _width: f32) -> DashboardAction {
         let mut action = DashboardAction::None;
 
         egui::Frame::NONE
@@ -431,9 +439,6 @@ impl DashboardPanel {
             .inner_margin(12.0)
             .outer_margin(0.0)
             .show(ui, |ui| {
-                ui.set_min_width(width - 24.0);
-                ui.set_min_height(116.0);
-
                 // Header
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("💰 账户总览").size(14.0).strong());
