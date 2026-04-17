@@ -139,6 +139,8 @@ impl TradingWidget {
             exchange_index: 0,
             exchanges: vec![
                 Exchange::Binance,
+                Exchange::BinanceUsdm,
+                Exchange::BinanceCoinm,
                 Exchange::Cffex,
                 Exchange::Shfe,
                 Exchange::Dce,

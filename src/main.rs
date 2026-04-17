@@ -102,6 +102,19 @@ impl TradeEngineApp {
             // Set main engine reference
             main_window.set_main_engine(main_engine.clone());
             
+            // Create and wire strategy engine
+            let strategy_engine = Arc::new(trade_engine::strategy::StrategyEngine::new(
+                main_engine.clone(),
+                event_engine.clone(),
+            ));
+            {
+                let se = strategy_engine.clone();
+                runtime.spawn(async move {
+                    se.init().await;
+                });
+            }
+            main_window.set_strategy_engine(strategy_engine);
+            
             // Apply dark theme
             main_window.setup_style(&cc.egui_ctx);
         }

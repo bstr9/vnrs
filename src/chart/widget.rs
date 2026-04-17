@@ -229,10 +229,47 @@ impl ChartWidget {
         }
     }
 
-    /// Update with historical bar data
+    /// Update with historical bar data and jump to the rightmost position
+    /// Use this for initial data load or interval change
     pub fn update_history(&mut self, history: Vec<BarData>) {
         self.manager.update_history(history);
         self.move_to_right();
+        self.recalculate_indicators();
+    }
+
+    /// Update with historical bar data while preserving the current scroll position
+    /// Use this when prepending older data (drag-to-load more history)
+    /// The viewport shifts right by the number of new bars prepended before the old start,
+    /// so the user sees the same bars they were looking at before the load.
+    pub fn update_history_prepend(&mut self, history: Vec<BarData>) {
+        let old_count = self.manager.get_count();
+        // Remember the time of the leftmost visible bar so we can restore the view
+        let anchor_time = {
+            let (min_ix, _) = self.get_visible_range();
+            self.manager.get_bar(min_ix as f64).map(|b| b.datetime)
+        };
+
+        self.manager.update_history(history);
+
+        let new_count = self.manager.get_count();
+
+        // If anchor_time is available, reposition viewport so the
+        // previously leftmost bar stays at the left edge
+        if let Some(dt) = anchor_time {
+            if let Some(ix) = self.manager.get_index(dt) {
+                // Place the anchor bar at the left edge of the viewport
+                self.right_ix = ix.saturating_add(self.bar_count);
+                self.right_ix = self.right_ix.clamp(self.bar_count, new_count);
+            }
+        } else {
+            // Fallback: shift by the number of added bars
+            let added = new_count.saturating_sub(old_count);
+            if added > 0 {
+                self.right_ix = self.right_ix.saturating_add(added);
+                self.right_ix = self.right_ix.clamp(self.bar_count, new_count);
+            }
+        }
+
         self.recalculate_indicators();
     }
 

@@ -33,14 +33,60 @@ pub enum PnlTimeRange {
     Today,
     Week,
     Month,
+    Year,
+    Year3,
+    All,
 }
 
+impl PnlTimeRange {
+    /// Returns the cutoff timestamp in minutes (unix minutes) for this time range.
+    /// Returns None if All (no cutoff).
+    fn cutoff_minutes(&self) -> Option<i64> {
+        let now_secs = chrono::Utc::now().timestamp();
+        let cutoff_secs = match self {
+            PnlTimeRange::Today => {
+                // Start of today in UTC
+                let now = chrono::Utc::now();
+                let start_of_day = now.date_naive().and_hms_opt(0, 0, 0).unwrap_or_default();
+                start_of_day.and_utc().timestamp()
+            }
+            PnlTimeRange::Week => now_secs - 7 * 86400,
+            PnlTimeRange::Month => now_secs - 30 * 86400,
+            PnlTimeRange::Year => now_secs - 365 * 86400,
+            PnlTimeRange::Year3 => now_secs - 3 * 365 * 86400,
+            PnlTimeRange::All => return None,
+        };
+        Some(cutoff_secs / 60)
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            PnlTimeRange::Today => "今日",
+            PnlTimeRange::Week => "本周",
+            PnlTimeRange::Month => "本月",
+            PnlTimeRange::Year => "本年",
+            PnlTimeRange::Year3 => "三年",
+            PnlTimeRange::All => "全部",
+        }
+    }
+}
+
+/// Single asset balance entry
 #[derive(Default, Clone)]
+pub struct AssetBalance {
+    pub asset: String, // e.g. "USDT", "BTC", "ETH"
+    pub balance: f64,
+    pub available: f64,
+    pub frozen: f64,
+}
+
 pub struct AccountSummary {
     pub total_balance: f64,
     pub available: f64,
     pub margin_used: f64,
     pub currency: String,
+    /// All asset balances from the exchange
+    pub assets: Vec<AssetBalance>,
 }
 
 #[derive(Default, Clone)]
@@ -155,6 +201,7 @@ impl DashboardPanel {
                 available: 0.0,
                 margin_used: 0.0,
                 currency: "USDT".to_string(),
+                assets: Vec::new(),
             },
             today_pnl: TodayPnl::default(),
             risk_status: RiskStatus::default(),
@@ -171,13 +218,21 @@ impl DashboardPanel {
     // Data Update Methods
     // ========================================================================
 
-    /// Update account summary data
-    pub fn update_account(&mut self, total: f64, available: f64, margin: f64, currency: &str) {
+    /// Update account summary data with multi-asset support
+    pub fn update_account(
+        &mut self,
+        total: f64,
+        available: f64,
+        margin: f64,
+        currency: &str,
+        assets: Vec<AssetBalance>,
+    ) {
         self.account_summary = AccountSummary {
             total_balance: total,
             available,
             margin_used: margin,
             currency: currency.to_string(),
+            assets,
         };
 
         // Update risk status based on margin
@@ -446,9 +501,9 @@ impl DashboardPanel {
 
                 ui.add_space(8.0);
 
-                // Total balance
+                // Primary balance (USDT or the main currency)
                 let balance_text = format!(
-                    "{:.2} {}",
+                    "{:.4} {}",
                     self.account_summary.total_balance, self.account_summary.currency
                 );
                 ui.label(
@@ -500,7 +555,84 @@ impl DashboardPanel {
                     ui.label(RichText::new(&margin_text).size(10.0).color(COLOR_LONG));
                 });
 
-                ui.add_space(6.0);
+                ui.add_space(4.0);
+
+                // Other asset balances (non-zero, sorted: USDT first, then by balance descending)
+                if !self.account_summary.assets.is_empty() {
+                    // Sort: USDT/USDC first, then by balance descending
+                    let mut display_assets: Vec<&AssetBalance> = self
+                        .account_summary
+                        .assets
+                        .iter()
+                        .filter(|a| a.balance > 0.0)
+                        .collect();
+                    display_assets.sort_by(|a, b| {
+                        let a_priority = match a.asset.as_str() {
+                            "USDT" | "USDC" => 0,
+                            "BTC" => 1,
+                            "ETH" => 2,
+                            "BNB" => 3,
+                            _ => 99,
+                        };
+                        let b_priority = match b.asset.as_str() {
+                            "USDT" | "USDC" => 0,
+                            "BTC" => 1,
+                            "ETH" => 2,
+                            "BNB" => 3,
+                            _ => 99,
+                        };
+                        a_priority.cmp(&b_priority).then_with(|| {
+                            b.balance
+                                .partial_cmp(&a.balance)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                    });
+
+                    // Show up to 5 assets, skip the primary one if it's already shown as total_balance
+                    let mut shown = 0;
+                    for asset in display_assets.iter() {
+                        if shown >= 5 {
+                            break;
+                        }
+                        // Skip the primary currency if it's already shown above as total_balance
+                        if asset.asset == self.account_summary.currency {
+                            continue;
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("{}:", asset.asset))
+                                    .size(10.0)
+                                    .color(COLOR_TEXT_SECONDARY),
+                            );
+                            ui.label(
+                                RichText::new(format!("{:.6}", asset.balance))
+                                    .size(10.0)
+                                    .color(COLOR_TEXT_PRIMARY),
+                            );
+                            if asset.frozen > 0.0 {
+                                ui.label(
+                                    RichText::new(format!("冻结 {:.6}", asset.frozen))
+                                        .size(9.0)
+                                        .color(COLOR_LONG),
+                                );
+                            }
+                        });
+                        shown += 1;
+                    }
+
+                    // Show remaining count
+                    let remaining = display_assets.len().saturating_sub(5);
+                    if remaining > 0 {
+                        ui.label(
+                            RichText::new(format!("+{} 种资产", remaining))
+                                .size(9.0)
+                                .color(COLOR_TEXT_SECONDARY),
+                        );
+                    }
+                }
+
+                ui.add_space(4.0);
 
                 // View detail link
                 if ui
@@ -756,11 +888,19 @@ impl DashboardPanel {
                                 COLOR_NEGATIVE
                             };
 
-                            ui.label(
-                                RichText::new(&pos.vt_symbol)
-                                    .size(11.0)
-                                    .color(COLOR_TEXT_PRIMARY),
+                            // Clickable symbol to open chart
+                            let symbol_response = ui.add(
+                                egui::Label::new(
+                                    RichText::new(&pos.vt_symbol)
+                                        .size(11.0)
+                                        .color(Color32::from_rgb(100, 150, 255)),
+                                )
+                                .sense(egui::Sense::click()),
                             );
+                            if symbol_response.clicked() {
+                                action = DashboardAction::OpenChart(pos.vt_symbol.clone());
+                            }
+                            symbol_response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
                             let dir_text = if pos.direction == "Long" {
                                 "多"
@@ -939,11 +1079,7 @@ impl DashboardPanel {
 
                     // Time range selector
                     egui::ComboBox::from_id_salt("pnl_time_range")
-                        .selected_text(match self.pnl_time_range {
-                            PnlTimeRange::Today => "今日",
-                            PnlTimeRange::Week => "本周",
-                            PnlTimeRange::Month => "本月",
-                        })
+                        .selected_text(self.pnl_time_range.label())
                         .width(60.0)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
@@ -960,6 +1096,21 @@ impl DashboardPanel {
                                 &mut self.pnl_time_range,
                                 PnlTimeRange::Month,
                                 "本月",
+                            );
+                            ui.selectable_value(
+                                &mut self.pnl_time_range,
+                                PnlTimeRange::Year,
+                                "本年",
+                            );
+                            ui.selectable_value(
+                                &mut self.pnl_time_range,
+                                PnlTimeRange::Year3,
+                                "三年",
+                            );
+                            ui.selectable_value(
+                                &mut self.pnl_time_range,
+                                PnlTimeRange::All,
+                                "全部",
                             );
                         });
                 });
@@ -991,28 +1142,33 @@ impl DashboardPanel {
                 );
 
                 // Draw curve if data exists
-                if self.pnl_curve.len() >= 2 {
+                // Filter by time range
+                let cutoff = self.pnl_time_range.cutoff_minutes();
+                let filtered_curve: Vec<&PnlPoint> = self
+                    .pnl_curve
+                    .iter()
+                    .filter(|p| cutoff.map_or(true, |c| p.time >= c))
+                    .collect();
+
+                if filtered_curve.len() >= 2 {
                     // Find min/max for scaling
-                    let min_pnl = self
-                        .pnl_curve
+                    let min_pnl = filtered_curve
                         .iter()
                         .map(|p| p.cumulative_pnl)
                         .fold(f64::INFINITY, f64::min);
-                    let max_pnl = self
-                        .pnl_curve
+                    let max_pnl = filtered_curve
                         .iter()
                         .map(|p| p.cumulative_pnl)
                         .fold(f64::NEG_INFINITY, f64::max);
                     let range = (max_pnl - min_pnl).max(1.0);
 
                     // Build points
-                    let points: Vec<Pos2> = self
-                        .pnl_curve
+                    let points: Vec<Pos2> = filtered_curve
                         .iter()
                         .enumerate()
                         .map(|(i, p)| {
                             let x = curve_rect.left()
-                                + (i as f32 / (self.pnl_curve.len() - 1).max(1) as f32)
+                                + (i as f32 / (filtered_curve.len() - 1).max(1) as f32)
                                     * curve_rect.width();
                             let normalized = (p.cumulative_pnl - min_pnl) / range;
                             let y = curve_rect.bottom() - (normalized as f32 * curve_rect.height());
@@ -1021,8 +1177,7 @@ impl DashboardPanel {
                         .collect();
 
                     // Determine color based on final value
-                    let final_pnl = self
-                        .pnl_curve
+                    let final_pnl = filtered_curve
                         .last()
                         .map(|p| p.cumulative_pnl)
                         .unwrap_or(0.0);
@@ -1048,19 +1203,16 @@ impl DashboardPanel {
                 }
 
                 // Stats below curve
-                if !self.pnl_curve.is_empty() {
-                    let max_pnl = self
-                        .pnl_curve
+                if !filtered_curve.is_empty() {
+                    let max_pnl = filtered_curve
                         .iter()
                         .map(|p| p.cumulative_pnl)
                         .fold(f64::NEG_INFINITY, f64::max);
-                    let min_pnl = self
-                        .pnl_curve
+                    let min_pnl = filtered_curve
                         .iter()
                         .map(|p| p.cumulative_pnl)
                         .fold(f64::INFINITY, f64::min);
-                    let current_pnl = self
-                        .pnl_curve
+                    let current_pnl = filtered_curve
                         .last()
                         .map(|p| p.cumulative_pnl)
                         .unwrap_or(0.0);

@@ -1,0 +1,101 @@
+# ========================================================================
+
+# 量化框架功能补全与策略进化脚本
+
+# ========================================================================
+
+
+
+$configPath = "C:\Users\baoji\.rstrader\binance\gateway_configs.json"
+
+$targetSymbol = "BTCUSDT"
+
+$maxIterations = 100
+
+
+
+Write-Host "🚀 开始对齐 vn.py 架构并补全功能..." -ForegroundColor Cyan
+
+
+
+for ($i = 1; $i -le $maxIterations; $i++) {
+
+    Write-Host "`n[Iteration $i] $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Green
+
+    
+
+    # 1. 环境反馈（尝试构建并运行）
+
+    $testResult = if (Test-Path "Cargo.toml") { cargo test 2>&1 } else { pytest 2>&1 }
+
+    $statusText = if ($LASTEXITCODE -eq 0) { "SUCCESS" } else { "FAILED" }
+
+
+
+    # 2. 动态阶段指令设计
+
+    # 前 50 次专注于框架补全，后 50 次专注于策略
+
+    $phase = if ($i -le 50) { "框架功能补全" } else { "策略摸索优化" }
+
+
+
+    $instruction = @"
+
+当前阶段：$phase
+
+环境状态：$statusText
+
+配置文件：$configPath
+
+
+
+任务重点：
+
+1. 架构对齐：阅读 vnrs 的代码，分析当前项目缺失的功能（如 EventEngine, DataRecorder, RPC 服务等）。
+
+2. 功能设计：请自动设计并实现你认为的缺失的功能
+
+3. 策略摸索（仅在框架稳定后）：
+
+   - 基于 $targetSymbol 历史数据，实现一个至少包含‘波动率过滤’和‘动态止盈’的策略。
+
+   - 自动运行回测，并将 Sharpe Ratio 和 Max Drawdown 结果追加到 backtest_log.md。
+
+
+
+要求：禁止删除已有功能，每一轮必须保证代码可以编译/运行，并基于 $configPath 验证连接性。
+
+"@
+
+
+
+    # 3. 执行 opencode
+
+    opencode run $instruction -c --prompt "你是一个精通 vn.py、vn.rs 等量化交易系统的顶级架构师。你当前的任务是分析并补全一个残缺的量化项目。你必须独立思考缺失的模块（如：风险控制、撮合偏移处理、多周期合成器等），并逐一实现它们。"
+
+
+
+    # 4. Git 提交
+
+    if (git rev-parse --is-inside-work-tree 2>$null) {
+
+        git add .
+
+        $changes = git status --porcelain
+
+        if ($changes) {
+
+            git commit -m "[$phase] Iteration $i: $statusText" -q
+
+            Write-Host "✅ 变更已同步至 Git" -ForegroundColor Gray
+
+        }
+
+    }
+
+
+
+    Start-Sleep -Seconds 2
+
+}

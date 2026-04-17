@@ -14,12 +14,13 @@ use super::style::{ToastManager, ToastType};
 use super::backtesting_panel::BacktestingPanel;
 use super::dashboard::{DashboardPanel, DashboardAction};
 use super::strategy_panel::StrategyPanel;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use crate::chart::ChartWidget;
 use crate::trader::object::BarData;
 use crate::mcp::UICommand;
 use chrono::{Utc, Timelike, Duration, Datelike};
+use crate::strategy::{StrategyEngine, StrategyState};
 
 /// Panel visibility state
 #[derive(Default)]
@@ -125,8 +126,19 @@ pub struct MainWindow {
     // Tick aggregators for each symbol
     tick_aggregators: HashMap<String, TickBarAggregator>,
     
-    // Pending history data from async queries
+    // Pending history data from async queries (initial load / interval change → jump to right)
     pub pending_history_data: Arc<tokio::sync::Mutex<HashMap<String, Vec<BarData>>>>,
+    // Pending prepended history data (drag-to-load → preserve scroll position)
+    pending_history_prepend: Arc<tokio::sync::Mutex<HashMap<String, Vec<BarData>>>>,
+    
+    // Strategy engine reference for async data sync
+    strategy_engine: Option<Arc<StrategyEngine>>,
+    // Cached strategy data for sync access from UI thread
+    strategy_cache: Arc<Mutex<Vec<(String, StrategyState)>>>,
+    // Frame counter for periodic strategy data refresh
+    strategy_update_counter: u32,
+    // Frame counter for periodic dashboard data logging (every ~10 frames = 1 second)
+    dashboard_log_counter: u32,
     
     // Actions pending from UI
     pub pending_connect: Option<(String, std::collections::HashMap<String, serde_json::Value>)>,
@@ -172,6 +184,11 @@ impl MainWindow {
             charts: HashMap::new(),
             tick_aggregators: HashMap::new(),
             pending_history_data: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            pending_history_prepend: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            strategy_engine: None,
+            strategy_cache: Arc::new(Mutex::new(Vec::new())),
+            strategy_update_counter: 0,
+            dashboard_log_counter: 0,
             pending_connect: None,
             pending_cancel_order: None,
             pending_cancel_quote: None,
@@ -184,15 +201,31 @@ impl MainWindow {
         self.main_engine = Some(engine);
     }
     
+    /// Set reference to strategy engine for data sync
+    pub fn set_strategy_engine(&mut self, engine: Arc<StrategyEngine>) {
+        self.strategy_engine = Some(engine);
+    }
+    
     /// Update UI data from main engine
     pub fn update_data(&mut self) {
         if let Some(ref engine) = self.main_engine {
-            // Check for pending history data
+            // Check for pending history data (initial load / interval change → jump to right)
             if let Ok(mut pending) = self.pending_history_data.try_lock() {
                 for (vt_symbol, bars) in pending.drain() {
                     if let Some(chart) = self.charts.get_mut(&vt_symbol) {
                         tracing::info!("加载历史数据到图表: {} ({} 条)", vt_symbol, bars.len());
                         chart.update_history(bars);
+                        chart.set_loading_history(false);
+                    }
+                }
+            }
+
+            // Check for pending prepended history data (drag-to-load → preserve scroll position)
+            if let Ok(mut pending) = self.pending_history_prepend.try_lock() {
+                for (vt_symbol, bars) in pending.drain() {
+                    if let Some(chart) = self.charts.get_mut(&vt_symbol) {
+                        tracing::info!("追加历史数据到图表: {} ({} 条)", vt_symbol, bars.len());
+                        chart.update_history_prepend(bars);
                         chart.set_loading_history(false);
                     }
                 }
@@ -280,26 +313,149 @@ impl MainWindow {
         if let Some(engine_arc) = self.main_engine.clone() {
             self.update_dashboard_data(&*engine_arc);
         }
+        
+        // Update strategy data periodically (every 30 frames ~ every 3 seconds)
+        self.strategy_update_counter += 1;
+        if self.strategy_update_counter >= 30 {
+            self.strategy_update_counter = 0;
+            
+            // Spawn background task to read strategy data from async engine
+            if let Some(ref strategy_engine) = self.strategy_engine {
+                let cache = self.strategy_cache.clone();
+                let engine = strategy_engine.clone();
+                tokio::spawn(async move {
+                    let names = engine.get_all_strategy_names().await;
+                    let mut data = Vec::new();
+                    for name in names {
+                        if let Some(info) = engine.get_strategy_info(&name).await {
+                            let state_str = info.get("state").cloned().unwrap_or_default();
+                            let state = match state_str.as_str() {
+                                "Inited" => StrategyState::Inited,
+                                "Trading" => StrategyState::Trading,
+                                "Stopped" => StrategyState::Stopped,
+                                _ => StrategyState::NotInited,
+                            };
+                            data.push((name, state));
+                        }
+                    }
+                    if let Ok(mut cache) = cache.lock() {
+                        *cache = data;
+                    }
+                });
+            }
+        }
+        
+        // Apply cached strategy data to UI panels (non-blocking read)
+        if let Ok(cache) = self.strategy_cache.lock() {
+            use super::dashboard::{StrategySummary, StrategyStateDisplay};
+            
+            // Update dashboard strategies card
+            let strategies: Vec<StrategySummary> = cache.iter().map(|(name, state)| {
+                let display_state = match state {
+                    StrategyState::Trading => StrategyStateDisplay::Running,
+                    StrategyState::Inited => StrategyStateDisplay::Inited,
+                    _ => StrategyStateDisplay::Stopped,
+                };
+                StrategySummary {
+                    name: name.clone(),
+                    state: display_state,
+                    today_pnl: 0.0, // TODO: per-strategy PnL tracking
+                }
+            }).collect();
+            self.dashboard_panel.update_strategies(strategies);
+            
+            // Update strategy panel
+            let rows: Vec<super::strategy_panel::StrategyRow> = cache.iter().map(|(name, state)| {
+                let state_str = match state {
+                    StrategyState::NotInited => "NotInited",
+                    StrategyState::Inited => "Inited",
+                    StrategyState::Trading => "Trading",
+                    StrategyState::Stopped => "Stopped",
+                };
+                super::strategy_panel::StrategyRow {
+                    name: name.clone(),
+                    state: state_str.to_string(),
+                    strategy_type: "CTA".to_string(),
+                    symbols: String::new(),
+                }
+            }).collect();
+            self.strategy_panel.update_strategies(rows);
+        }
     }
     
     /// Update dashboard panel with current engine data
     fn update_dashboard_data(&mut self, engine: &crate::trader::MainEngine) {
         use super::dashboard::{PositionSummary, GatewayStatus, NotificationItem};
+        use chrono::TimeZone;
         
-        // Account summary
+        // Log dashboard data every ~10 frames (~1 second) to avoid log spam
+        self.dashboard_log_counter += 1;
+        let should_log = self.dashboard_log_counter >= 10;
+        if should_log {
+            self.dashboard_log_counter = 0;
+        }
+        
+        // Conditional log macro
+        macro_rules! dlog {
+            ($($arg:tt)*) => {
+                if should_log {
+                    tracing::info!($($arg)*);
+                }
+            };
+        }
+        
+        if should_log { tracing::info!("========== Dashboard Data Update =========="); }
+        
+        // Account summary - process all assets
         let accounts = engine.get_all_accounts();
-        if let Some(account) = accounts.first() {
-            self.dashboard_panel.update_account(
-                account.balance,
-                account.available(),
-                account.frozen,
-                "USDT", // Default currency for crypto
+        dlog!("[Account] 共 {} 个账户", accounts.len());
+        
+        // Build asset balances list
+        use super::dashboard::AssetBalance;
+        let mut assets: Vec<AssetBalance> = accounts.iter()
+            .map(|a| AssetBalance {
+                asset: a.accountid.clone(), // accountid contains the asset name (e.g., "USDT", "BTC")
+                balance: a.balance,
+                available: a.available(),
+                frozen: a.frozen,
+            })
+            .collect();
+        
+        // Log all assets
+        for asset in &assets {
+            dlog!(
+                "[Account] 资产: {} balance={:.6}, frozen={:.6}, available={:.6}",
+                asset.asset, asset.balance, asset.frozen, asset.available
             );
         }
         
+        // Find USDT as primary currency for margin trading display
+        let usdt_account = assets.iter().find(|a| a.asset == "USDT");
+        let primary_asset = usdt_account.or_else(|| assets.iter().find(|a| a.balance > 0.0));
+        
+        let (total_balance, available, frozen, currency) = if let Some(primary) = primary_asset {
+            (primary.balance, primary.available, primary.frozen, primary.asset.clone())
+        } else {
+            (0.0, 0.0, 0.0, "USDT".to_string())
+        };
+        
+        dlog!(
+            "[Account] 主显示: currency={}, balance={:.6}, available={:.6}, frozen={:.6}",
+            currency, total_balance, available, frozen
+        );
+        
+        // Sort assets: primary currency first, then by balance descending
+        assets.sort_by(|a, b| {
+            if a.asset == currency { return std::cmp::Ordering::Less; }
+            if b.asset == currency { return std::cmp::Ordering::Greater; }
+            b.balance.partial_cmp(&a.balance).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        
+        self.dashboard_panel.update_account(total_balance, available, frozen, &currency, assets);
+        
         // Positions summary
-        let positions: Vec<PositionSummary> = engine.get_all_positions()
-            .iter()
+        let all_positions = engine.get_all_positions();
+        let positions: Vec<PositionSummary> = all_positions.iter()
             .filter(|p| p.volume > 0.0)
             .map(|p| {
                 PositionSummary {
@@ -312,19 +468,93 @@ impl MainWindow {
                 }
             })
             .collect();
+        dlog!(
+            "[Positions] 总持仓数={}, 有量持仓={}",
+            all_positions.len(),
+            positions.len()
+        );
+        for (i, pos) in positions.iter().enumerate() {
+            dlog!(
+                "[Positions] #{}: symbol={}, dir={}, vol={:.4}, price={:.2}, pnl={:.4}, pnl%={:.2}%",
+                i + 1,
+                pos.vt_symbol,
+                pos.direction,
+                pos.volume,
+                pos.avg_price,
+                pos.pnl,
+                pos.pnl_percent
+            );
+        }
         self.dashboard_panel.update_positions(positions);
         
-        // Today's PnL from positions (simplified: use position pnl as proxy)
-        let today_pnl: f64 = engine.get_all_positions().iter()
+        // Today's PnL - use position floating PnL for total, trade data for counts
+        let today_pnl: f64 = all_positions.iter()
             .map(|p| p.pnl)
             .sum();
-        
-        // Count positions with positive/negative pnl as win/loss proxy
-        let win_count = engine.get_all_positions().iter().filter(|p| p.pnl > 0.0).count();
-        let loss_count = engine.get_all_positions().iter().filter(|p| p.pnl < 0.0).count();
-        let win_amount: f64 = engine.get_all_positions().iter().filter(|p| p.pnl > 0.0).map(|p| p.pnl).sum();
-        let loss_amount: f64 = engine.get_all_positions().iter().filter(|p| p.pnl < 0.0).map(|p| p.pnl.abs()).sum();
-        
+        dlog!("[TodayPnL] 持仓浮动盈亏合计={:.4}", today_pnl);
+
+        // Count today's trades for win/loss statistics
+        let today_start = NaiveDateTime::new(
+            Utc::now().date_naive(),
+            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        );
+        let today_start_utc = Utc.from_utc_datetime(&today_start);
+        let all_trades = engine.get_all_trades();
+        let today_trades: Vec<_> = all_trades.iter()
+            .filter(|t| t.datetime.map_or(false, |dt| dt >= today_start_utc))
+            .collect();
+        let trade_count = today_trades.len();
+        dlog!(
+            "[TodayPnL] 总成交数={}, 今日成交数={}",
+            all_trades.len(),
+            trade_count
+        );
+        for (i, trade) in today_trades.iter().enumerate() {
+            dlog!(
+                "[TodayPnL] trade#{}: symbol={}, dir={:?}, vol={:.4}, price={:.2}, time={:?}",
+                i + 1,
+                trade.vt_symbol(),
+                trade.direction,
+                trade.volume,
+                trade.price,
+                trade.datetime
+            );
+        }
+
+        // Derive win/loss from positions with positive/negative floating PnL
+        let pos_win_count = all_positions.iter().filter(|p| p.pnl > 0.0).count();
+        let pos_loss_count = all_positions.iter().filter(|p| p.pnl < 0.0).count();
+        let win_amount: f64 = all_positions.iter().filter(|p| p.pnl > 0.0).map(|p| p.pnl).sum();
+        let loss_amount: f64 = all_positions.iter().filter(|p| p.pnl < 0.0).map(|p| p.pnl.abs()).sum();
+        dlog!(
+            "[TodayPnL] 持仓盈: {}笔 共{:.4}, 亏: {}笔 共{:.4}",
+            pos_win_count, win_amount, pos_loss_count, loss_amount
+        );
+
+        // Use trade count to override if we have actual trades today
+        let (win_count, loss_count) = if trade_count > 0 {
+            // Split trades by direction as a proxy: sells = realized gains, buys = realized costs
+            let sells = today_trades.iter()
+                .filter(|t| t.direction == Some(Direction::Short))
+                .count();
+            let buys = today_trades.iter()
+                .filter(|t| t.direction == Some(Direction::Long))
+                .count();
+            dlog!("[TodayPnL] 今日买入={}, 卖出={}", buys, sells);
+            // If we have a net positive PnL, attribute more wins to sells; otherwise to buys
+            if today_pnl >= 0.0 {
+                (sells.max(1), buys)
+            } else {
+                (buys.max(1), sells)
+            }
+        } else {
+            (pos_win_count, pos_loss_count)
+        };
+        dlog!(
+            "[TodayPnL] 最终: pnl={:.4}, win_count={}, loss_count={}, win_amount={:.4}, loss_amount={:.4}",
+            today_pnl, win_count, loss_count, win_amount, loss_amount
+        );
+
         self.dashboard_panel.update_today_pnl(
             today_pnl,
             win_count,
@@ -332,12 +562,57 @@ impl MainWindow {
             win_amount,
             loss_amount,
         );
+
+        // PnL curve from trade history
+        use super::dashboard::PnlPoint;
+        use crate::trader::constant::Direction;
+        use chrono::{NaiveDateTime, NaiveTime};
+
+        let mut sorted_trades: Vec<_> = all_trades.iter()
+            .filter(|t| t.datetime.is_some())
+            .collect();
+        sorted_trades.sort_by_key(|t| t.datetime);
+
+        let mut cumulative = 0.0_f64;
+        let mut curve: Vec<PnlPoint> = Vec::new();
+
+        for trade in &sorted_trades {
+            // Approximate PnL contribution from trade direction and volume
+            let trade_value = trade.volume * trade.price;
+            let contribution = match trade.direction {
+                Some(Direction::Short) => trade_value,   // Selling = revenue
+                Some(Direction::Long) => -trade_value,   // Buying = cost
+                _ => 0.0,
+            };
+            cumulative += contribution;
+
+            if let Some(dt) = trade.datetime {
+                let time_minutes = dt.timestamp() / 60;
+                curve.push(PnlPoint {
+                    time: time_minutes,
+                    cumulative_pnl: cumulative,
+                });
+            }
+        }
+        dlog!("[PnLCurve] 累计曲线点数={}, 最后cumulative={:.4}", curve.len(), cumulative);
+
+        // Append current floating PnL as the latest point
+        if !curve.is_empty() || today_pnl != 0.0 {
+            let now_minutes = Utc::now().timestamp() / 60;
+            curve.push(PnlPoint {
+                time: now_minutes,
+                cumulative_pnl: today_pnl,
+            });
+        }
+
+        self.dashboard_panel.update_pnl_curve(curve);
         
         // System status (gateways)
         let gateway_names = self.gateway_names.clone();
         let gateway_status: Vec<GatewayStatus> = gateway_names.iter()
             .map(|name| {
                 let connected = engine.get_gateway(name).is_some();
+                dlog!("[Gateway] {} connected={}", name, connected);
                 GatewayStatus {
                     name: name.clone(),
                     connected,
@@ -349,18 +624,30 @@ impl MainWindow {
             .collect();
         
         // Recent notifications from logs
-        let notifications: Vec<NotificationItem> = engine.get_all_logs()
+        let all_logs = engine.get_all_logs();
+        dlog!("[System] 总日志数={}, 网关数={}", all_logs.len(), gateway_status.len());
+        let notifications: Vec<NotificationItem> = all_logs
             .iter()
             .rev()
             .take(5)
-            .map(|log| NotificationItem {
-                time: log.time.format("%H:%M:%S").to_string(),
-                message: log.msg.clone(),
-                level: super::dashboard::NotificationLevel::Info,
+            .map(|log| {
+                // Map log level to notification level
+                // LogData.level uses: DEBUG=10, INFO=20, WARNING=30, ERROR=40, CRITICAL=50
+                let level = match log.level {
+                    l if l >= 40 => super::dashboard::NotificationLevel::Error,
+                    l if l >= 30 => super::dashboard::NotificationLevel::Warning,
+                    _ => super::dashboard::NotificationLevel::Info,
+                };
+                NotificationItem {
+                    time: log.time.format("%H:%M:%S").to_string(),
+                    message: log.msg.clone(),
+                    level,
+                }
             })
             .collect();
         
         self.dashboard_panel.update_system_status(gateway_status, notifications);
+        if should_log { tracing::info!("========== Dashboard Data Update END =========="); }
     }
     
     /// Set available gateways
@@ -446,6 +733,10 @@ impl MainWindow {
         }
         if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num7)) {
             self.central_tab = CentralTab::Strategy;
+        }
+        // Ctrl+0: Dashboard tab
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
+            self.central_tab = CentralTab::Dashboard;
         }
         
         // Ctrl+L: Log tab
@@ -592,9 +883,10 @@ impl MainWindow {
                         ui.label("Ctrl+5  报价");
                         ui.label("Ctrl+6  回测");
                         ui.label("Ctrl+7  策略");
-                        
+                        ui.label("Ctrl+0  仪表盘");
+
                         ui.separator();
-                        
+
                         ui.label(RichText::new("底部标签页").strong());
                         ui.label("Ctrl+L  日志");
                         ui.label("Ctrl+B  资金");
@@ -814,10 +1106,46 @@ impl MainWindow {
                 self.bottom_tab = BottomTab::Log;
             }
             DashboardAction::StartAllStrategies => {
-                self.toast_manager.add("批量启动策略", ToastType::Info);
+                if let Ok(cache) = self.strategy_cache.lock() {
+                    let names: Vec<String> = cache.iter()
+                        .filter(|(_, state)| *state == StrategyState::Inited)
+                        .map(|(name, _)| name.clone())
+                        .collect();
+                    if names.is_empty() {
+                        self.toast_manager.add("没有可启动的策略（需要先初始化）", ToastType::Info);
+                    } else {
+                        for name in &names {
+                            tracing::info!("启动策略: {}", name);
+                        }
+                        self.toast_manager.add(
+                            &format!("启动 {} 个策略", names.len()),
+                            ToastType::Info,
+                        );
+                    }
+                } else {
+                    self.toast_manager.add("批量启动策略", ToastType::Info);
+                }
             }
             DashboardAction::StopAllStrategies => {
-                self.toast_manager.add("批量停止策略", ToastType::Info);
+                if let Ok(cache) = self.strategy_cache.lock() {
+                    let names: Vec<String> = cache.iter()
+                        .filter(|(_, state)| *state == StrategyState::Trading)
+                        .map(|(name, _)| name.clone())
+                        .collect();
+                    if names.is_empty() {
+                        self.toast_manager.add("没有运行中的策略", ToastType::Info);
+                    } else {
+                        for name in &names {
+                            tracing::info!("停止策略: {}", name);
+                        }
+                        self.toast_manager.add(
+                            &format!("停止 {} 个策略", names.len()),
+                            ToastType::Info,
+                        );
+                    }
+                } else {
+                    self.toast_manager.add("批量停止策略", ToastType::Info);
+                }
             }
             DashboardAction::OpenChart(vt_symbol) => {
                 self.open_chart(&vt_symbol);
@@ -869,6 +1197,27 @@ impl MainWindow {
         }
     }
     
+    /// Map an Exchange enum to the appropriate gateway name
+    fn gateway_for_exchange(exchange: crate::trader::Exchange, gateway_names: &[String]) -> String {
+        match exchange {
+            crate::trader::Exchange::Binance => {
+                if gateway_names.contains(&"BINANCE_SPOT".to_string()) {
+                    "BINANCE_SPOT".to_string()
+                } else {
+                    String::new()
+                }
+            }
+            crate::trader::Exchange::BinanceUsdm => {
+                if gateway_names.contains(&"BINANCE_USDT".to_string()) {
+                    "BINANCE_USDT".to_string()
+                } else {
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        }
+    }
+    
     /// Open or focus chart window for a symbol
     pub fn open_chart(&mut self, vt_symbol: &str) {
         if !self.charts.contains_key(vt_symbol) {
@@ -882,17 +1231,32 @@ impl MainWindow {
             let symbol = parts[0];
             let exchange_str = parts[1];
             
-            // Find the appropriate gateway
-            let gateway_name = if exchange_str.contains("BINANCE") || exchange_str == "Binance" {
-                if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
-                    Some("BINANCE_SPOT")
-                } else if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
-                    Some("BINANCE_USDT")
-                } else {
-                    None
+            // Find the appropriate gateway based on exchange string
+            let gateway_name = match exchange_str {
+                "BINANCE" | "Binance" => {
+                    if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
+                        Some("BINANCE_SPOT")
+                    } else {
+                        None
+                    }
                 }
-            } else {
-                None
+                "BINANCE_USDM" | "BinanceUsdm" => {
+                    if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
+                        Some("BINANCE_USDT")
+                    } else {
+                        None
+                    }
+                }
+                _ => {
+                    // Fallback: try to find any Binance gateway
+                    if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
+                        Some("BINANCE_SPOT")
+                    } else if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
+                        Some("BINANCE_USDT")
+                    } else {
+                        None
+                    }
+                }
             };
             
             if gateway_name.is_none() {
@@ -1013,17 +1377,7 @@ impl MainWindow {
                 };
                 
                 // Find appropriate gateway based on exchange
-                let gateway_name = if exchange == crate::trader::Exchange::Binance {
-                    if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
-                        "BINANCE_SPOT".to_string()
-                    } else if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
-                        "BINANCE_USDT".to_string()
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
+                let gateway_name = Self::gateway_for_exchange(exchange, &self.gateway_names);
                 
                 let engine_clone = engine.clone();
                 let pending_data = self.pending_history_data.clone();
@@ -1037,6 +1391,8 @@ impl MainWindow {
                         }
                         Err(e) => {
                             tracing::warn!("周期切换查询历史数据失败: {}", e);
+                            let mut data = pending_data.lock().await;
+                            data.insert(vt_sym, Vec::new());
                         }
                     }
                 });
@@ -1057,20 +1413,10 @@ impl MainWindow {
                     interval: Some(interval),
                 };
 
-                let gateway_name = if exchange == crate::trader::Exchange::Binance {
-                    if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
-                        "BINANCE_SPOT".to_string()
-                    } else if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
-                        "BINANCE_USDT".to_string()
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
+                let gateway_name = Self::gateway_for_exchange(exchange, &self.gateway_names);
 
                 let engine_clone = engine.clone();
-                let pending_data = self.pending_history_data.clone();
+                let pending_data = self.pending_history_prepend.clone();
                 let vt_sym = vt_symbol.clone();
                 tokio::spawn(async move {
                     match engine_clone.query_history(req, &gateway_name).await {
@@ -1081,6 +1427,9 @@ impl MainWindow {
                         }
                         Err(e) => {
                             tracing::warn!("加载更多历史数据失败: {}", e);
+                            // Insert empty vec to reset loading_history flag
+                            let mut data = pending_data.lock().await;
+                            data.insert(vt_sym, Vec::new());
                         }
                     }
                 });
@@ -1099,14 +1448,22 @@ impl MainWindow {
             // Find the appropriate gateway for this exchange
             let gateway_name = match req.exchange {
                 crate::trader::Exchange::Binance => {
-                    // Check if it's spot or usdt based on gateway availability
                     if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
                         "BINANCE_SPOT".to_string()
-                    } else if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
+                    } else {
+                        return None;
+                    }
+                }
+                crate::trader::Exchange::BinanceUsdm => {
+                    if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
                         "BINANCE_USDT".to_string()
                     } else {
                         return None;
                     }
+                }
+                crate::trader::Exchange::BinanceCoinm => {
+                    // Coin-M gateway not yet implemented
+                    return None;
                 }
                 _ => return None,
             };

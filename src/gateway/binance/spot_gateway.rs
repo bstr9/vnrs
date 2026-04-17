@@ -200,6 +200,103 @@ impl BinanceSpotGateway {
         Ok(())
     }
 
+    /// Query historical trades for symbols with open orders
+    /// Fetches up to 3 years of trade history with pagination.
+    async fn query_trade_impl(&self) -> Result<(), String> {
+        // Binance myTrades requires symbol parameter.
+        // Collect symbols from cached open orders and positions to query their trade history.
+        let symbols: Vec<String> = {
+            let orders = self.orders.read().await;
+            let mut set = std::collections::HashSet::new();
+            for order in orders.values() {
+                set.insert(order.symbol.to_uppercase());
+            }
+            set.into_iter().collect()
+        };
+
+        if symbols.is_empty() {
+            self.write_log("无持仓委托，跳过历史成交查询").await;
+            return Ok(());
+        }
+
+        // Query trades from 3 years ago
+        let start_time = Utc::now().timestamp_millis() - 3 * 365 * 24 * 60 * 60 * 1000;
+        let limit = 1000i64;
+
+        let mut total_count = 0usize;
+        for symbol in &symbols {
+            let mut cursor = start_time;
+            let mut symbol_count = 0usize;
+
+            loop {
+                let mut params = HashMap::new();
+                params.insert("symbol".to_string(), symbol.clone());
+                params.insert("limit".to_string(), limit.to_string());
+                params.insert("startTime".to_string(), cursor.to_string());
+
+                match self.rest_client.get("/api/v3/myTrades", &params, Security::Signed).await {
+                    Ok(data) => {
+                        if let Some(trades) = data.as_array() {
+                            if trades.is_empty() {
+                                break; // No more trades
+                            }
+
+                            let mut last_time = 0i64;
+                            for d in trades {
+                                let trade_time = d["time"].as_i64().unwrap_or(0);
+                                if trade_time > last_time {
+                                    last_time = trade_time;
+                                }
+
+                                let side = d["side"].as_str().unwrap_or("");
+                                let direction = DIRECTION_BINANCE2VT.get(side).copied();
+
+                                let trade = TradeData {
+                                    symbol: symbol.to_lowercase(),
+                                    exchange: Exchange::Binance,
+                                    orderid: d["orderId"].as_i64().unwrap_or(0).to_string(),
+                                    tradeid: d["id"].as_i64().unwrap_or(0).to_string(),
+                                    direction,
+                                    offset: Offset::None,
+                                    price: d["price"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    volume: d["qty"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    datetime: Some(timestamp_to_datetime(trade_time)),
+                                    gateway_name: self.gateway_name.clone(),
+                                    extra: None,
+                                };
+                                self.on_trade(trade).await;
+                                symbol_count += 1;
+                            }
+
+                            total_count += symbol_count;
+
+                            // If we got less than limit, we've reached the end
+                            if trades.len() < limit as usize {
+                                break;
+                            }
+
+                            // Move cursor past the last trade time
+                            cursor = last_time + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        self.write_log(&format!("查询 {} 历史成交失败: {}", symbol, e)).await;
+                        break;
+                    }
+                }
+            }
+
+            if symbol_count > 0 {
+                self.write_log(&format!("查询 {} 历史成交: {} 条", symbol, symbol_count)).await;
+            }
+        }
+
+        self.write_log(&format!("历史成交查询成功，共 {} 条", total_count)).await;
+        Ok(())
+    }
+
     /// Query open orders
     async fn query_order_impl(&self) -> Result<(), String> {
         let params = HashMap::new();
@@ -562,6 +659,7 @@ impl BaseGateway for BinanceSpotGateway {
         self.query_time().await?;
         self.query_account_impl().await?;
         self.query_order_impl().await?;
+        self.query_trade_impl().await?;
         self.query_contract_impl().await?;
         self.start_user_stream(&proxy_host, proxy_port).await?;
 
