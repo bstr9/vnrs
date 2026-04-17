@@ -25,7 +25,7 @@ Environment status: $statusText
 Config file: $configPath
 
 Task focus:
-1. Architecture alignment: Read vnrs code, analyze missing features (e.g. EventEngine, DataRecorder, RPC service, etc.).
+1. Architecture alignment: Read vnrs and C:\Users\baoji\code\nautilus_trader code, analyze missing features (e.g. EventEngine, DataRecorder, RPC service, etc.).
 2. Feature design: Automatically design and implement missing features.
 3. Strategy exploration (only after framework is stable):
    - Based on $targetSymbol historical data, implement a strategy with at least 'volatility filter' and 'dynamic take-profit'.
@@ -35,7 +35,9 @@ Requirements: Do not delete existing features. Each iteration must ensure the co
 "@
 
     # 3. Execute opencode
-    opencode run $instruction -c --thinking --variant max --dangerously-skip-permissions --prompt "You are a top architect proficient in vn.py, vn.rs and other quantitative trading systems. Your current task is to analyze and complete a partially-built quantitative project. You must independently think about missing modules (e.g.: risk control, matching offset handling, multi-period synthesizer, etc.) and implement them one by one."
+    $systemPrompt = "You are a top architect proficient in vn.py and nautilus_trader, vn.rs and other quantitative trading systems. Your current task is to analyze and complete a partially-built quantitative project. You must independently think about missing modules (e.g.: risk control, matching offset handling, multi-period synthesizer, etc.) and implement them one by one."
+    $fullMessage = "$systemPrompt`n`n$instruction"
+    opencode run $fullMessage -c
 
     # 4. Git commit
     if (git rev-parse --is-inside-work-tree 2>$null) {
