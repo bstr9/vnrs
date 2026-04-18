@@ -23,6 +23,17 @@ pub enum RiskCheckResult {
     Rejected(String),
 }
 
+/// Trading state for emergency controls (kill switch)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradingState {
+    /// Normal trading - all orders allowed
+    Running,
+    /// All trading halted - no orders allowed
+    Halted,
+    /// Only closing orders allowed (risk reduction mode)
+    ClosingOnly,
+}
+
 /// Risk management configuration
 #[derive(Debug, Clone)]
 pub struct RiskConfig {
@@ -109,6 +120,10 @@ pub struct RiskManager {
     total_active_orders: RwLock<usize>,
     /// Current positions per vt_symbol
     positions: RwLock<HashMap<String, f64>>,
+    /// Previous balance per vt_accountid (for daily PnL tracking)
+    prev_balance: RwLock<HashMap<String, f64>>,
+    /// Trading state (kill switch)
+    trading_state: RwLock<TradingState>,
     /// Running flag
     running: AtomicBool,
     /// Whether risk manager is enabled
@@ -130,6 +145,8 @@ impl RiskManager {
             active_orders: RwLock::new(HashMap::new()),
             total_active_orders: RwLock::new(0),
             positions: RwLock::new(HashMap::new()),
+            prev_balance: RwLock::new(HashMap::new()),
+            trading_state: RwLock::new(TradingState::Running),
             running: AtomicBool::new(false),
             enabled: AtomicBool::new(true),
         }
@@ -152,6 +169,26 @@ impl RiskManager {
         self.enabled.load(Ordering::SeqCst)
     }
 
+    /// Set the trading state (kill switch)
+    pub fn set_trading_state(&self, state: TradingState) {
+        let mut current = self.trading_state.write().unwrap();
+        let old = *current;
+        *current = state;
+        drop(current);
+        if old != state {
+            match state {
+                TradingState::Running => info!("[RiskManager] Trading state: RUNNING"),
+                TradingState::Halted => warn!("[RiskManager] Trading state: HALTED - all orders blocked"),
+                TradingState::ClosingOnly => warn!("[RiskManager] Trading state: CLOSING_ONLY - only close orders allowed"),
+            }
+        }
+    }
+
+    /// Get the current trading state
+    pub fn get_trading_state(&self) -> TradingState {
+        *self.trading_state.read().unwrap()
+    }
+
     /// Update risk configuration
     pub fn update_config(&self, config: RiskConfig) {
         let mut current = self.config.write().unwrap();
@@ -168,6 +205,26 @@ impl RiskManager {
     ///
     /// Returns Approved if the order passes all checks, or Rejected with a reason.
     pub fn check_order(&self, req: &OrderRequest) -> RiskCheckResult {
+        // Check trading state (kill switch) first
+        {
+            let state = *self.trading_state.read().unwrap();
+            match state {
+                TradingState::Halted => {
+                    return RiskCheckResult::Rejected("Trading is HALTED - all orders blocked".to_string());
+                }
+                TradingState::ClosingOnly => {
+                    use super::constant::Offset;
+                    if req.offset != Offset::Close
+                        && req.offset != Offset::CloseToday
+                        && req.offset != Offset::CloseYesterday
+                    {
+                        return RiskCheckResult::Rejected("Trading is CLOSING_ONLY - only close orders allowed".to_string());
+                    }
+                }
+                TradingState::Running => {}
+            }
+        }
+
         if !self.enabled.load(Ordering::SeqCst) {
             return RiskCheckResult::Approved;
         }
@@ -302,8 +359,18 @@ impl RiskManager {
     }
 
     /// Update account data (for daily PnL tracking)
-    pub fn update_account(&self, _account: &AccountData) {
-        // Future: track balance changes for daily PnL
+    pub fn update_account(&self, account: &AccountData) {
+        self.check_daily_reset();
+        let vt_accountid = account.vt_accountid();
+        let mut prev = self.prev_balance.write().unwrap();
+        if let Some(&prev_balance) = prev.get(&vt_accountid) {
+            // Balance change ≈ realized PnL (approximation; deposits/withdrawals
+            // would also change balance but we have no way to distinguish them here)
+            let balance_change = account.balance - prev_balance;
+            let mut stats = self.daily_stats.write().unwrap();
+            stats.realized_pnl += balance_change;
+        }
+        prev.insert(vt_accountid, account.balance);
     }
 
     /// Increment active order count for a symbol
@@ -500,5 +567,82 @@ mod tests {
         let req = make_order("btcusdt", Exchange::Binance, Direction::Long, 50000.0, 0.01);
         let result = rm.check_order(&req);
         assert!(matches!(result, RiskCheckResult::Rejected(_)));
+    }
+
+    #[test]
+    fn test_risk_manager_halted() {
+        let rm = RiskManager::new();
+        rm.set_trading_state(TradingState::Halted);
+
+        let req = make_order("btcusdt", Exchange::Binance, Direction::Long, 50000.0, 0.01);
+        let result = rm.check_order(&req);
+        assert!(matches!(result, RiskCheckResult::Rejected(_)));
+
+        rm.set_trading_state(TradingState::Running);
+        let result = rm.check_order(&req);
+        assert!(matches!(result, RiskCheckResult::Approved));
+    }
+
+    #[test]
+    fn test_risk_manager_closing_only() {
+        let rm = RiskManager::new();
+        rm.set_trading_state(TradingState::ClosingOnly);
+
+        // Open order should be rejected
+        let open_req = OrderRequest {
+            symbol: "btcusdt".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: crate::trader::constant::OrderType::Limit,
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 0.01,
+            reference: String::new(),
+        };
+        let result = rm.check_order(&open_req);
+        assert!(matches!(result, RiskCheckResult::Rejected(_)));
+
+        // Close order should pass
+        let close_req = OrderRequest {
+            symbol: "btcusdt".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: crate::trader::constant::OrderType::Limit,
+            offset: Offset::Close,
+            price: 50000.0,
+            volume: 0.01,
+            reference: String::new(),
+        };
+        let result = rm.check_order(&close_req);
+        assert!(matches!(result, RiskCheckResult::Approved));
+    }
+
+    #[test]
+    fn test_risk_manager_update_account() {
+        let rm = RiskManager::new();
+
+        // First update sets baseline (no prev balance → no PnL computed)
+        let account1 = AccountData {
+            accountid: "USDT".to_string(),
+            balance: 10000.0,
+            frozen: 0.0,
+            gateway_name: "BINANCE_SPOT".to_string(),
+            extra: None,
+        };
+        rm.update_account(&account1);
+        let stats = rm.get_daily_stats();
+        assert_eq!(stats.realized_pnl, 0.0);
+
+        // Second update: balance increased by 100 → realized PnL
+        let account2 = AccountData {
+            accountid: "USDT".to_string(),
+            balance: 10100.0,
+            frozen: 0.0,
+            gateway_name: "BINANCE_SPOT".to_string(),
+            extra: None,
+        };
+        rm.update_account(&account2);
+        let stats = rm.get_daily_stats();
+        assert!((stats.realized_pnl - 100.0).abs() < 0.001);
     }
 }

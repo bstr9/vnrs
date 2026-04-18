@@ -657,6 +657,23 @@ impl MainEngine {
         }
     }
 
+    /// Disconnect from a gateway
+    pub async fn disconnect(&self, gateway_name: &str) -> Result<(), String> {
+        if let Some(gateway) = self.get_gateway(gateway_name) {
+            self.write_log(format!("断开连接 -> {}", gateway_name), "MainEngine");
+            gateway.close().await;
+            Ok(())
+        } else {
+            Err(format!("找不到底层接口：{}", gateway_name))
+        }
+    }
+
+    /// Reconnect to a gateway with new settings
+    pub async fn reconnect(&self, setting: GatewaySettings, gateway_name: &str) -> Result<(), String> {
+        let _ = self.disconnect(gateway_name).await;
+        self.connect(setting, gateway_name).await
+    }
+
     /// Subscribe to tick data
     pub async fn subscribe(&self, req: SubscribeRequest, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {

@@ -100,13 +100,41 @@ impl Default for MemoryDatabase {
 impl BaseDatabase for MemoryDatabase {
     async fn save_bar_data(&self, bars: Vec<BarData>, _stream: bool) -> Result<bool, String> {
         let mut data = self.bars.write().map_err(|e| e.to_string())?;
-        data.extend(bars);
+        // Dedup: collect existing keys for O(1) lookup
+        let existing_keys: std::collections::HashSet<(String, Exchange, Option<Interval>, i64)> = data.iter()
+            .map(|b| (b.symbol.clone(), b.exchange, b.interval, b.datetime.timestamp()))
+            .collect();
+        for bar in bars {
+            let key = (bar.symbol.clone(), bar.exchange, bar.interval, bar.datetime.timestamp());
+            if !existing_keys.contains(&key) {
+                data.push(bar);
+            }
+        }
+        // Limit to 1M bars
+        if data.len() > 1_000_000 {
+            let excess = data.len() - 1_000_000;
+            data.drain(0..excess);
+        }
         Ok(true)
     }
 
     async fn save_tick_data(&self, ticks: Vec<TickData>, _stream: bool) -> Result<bool, String> {
         let mut data = self.ticks.write().map_err(|e| e.to_string())?;
-        data.extend(ticks);
+        // Dedup: collect existing keys for O(1) lookup
+        let existing_keys: std::collections::HashSet<(String, Exchange, i64)> = data.iter()
+            .map(|t| (t.symbol.clone(), t.exchange, t.datetime.timestamp()))
+            .collect();
+        for tick in ticks {
+            let key = (tick.symbol.clone(), tick.exchange, tick.datetime.timestamp());
+            if !existing_keys.contains(&key) {
+                data.push(tick);
+            }
+        }
+        // Limit to 1M ticks
+        if data.len() > 1_000_000 {
+            let excess = data.len() - 1_000_000;
+            data.drain(0..excess);
+        }
         Ok(true)
     }
 

@@ -1082,7 +1082,65 @@ impl MainWindow {
     fn process_pending_actions(&mut self) {
         // Cancel all from trading widget
         if self.trading.take_cancel_all() {
-            // This will be handled by the app
+            if let Some(ref engine) = self.main_engine {
+                let active_orders = engine.get_all_active_orders();
+                let count = active_orders.len();
+                for order in active_orders {
+                    if let Some(gw_name) = engine.find_gateway_name_for_exchange(order.exchange) {
+                        let req = crate::trader::object::CancelRequest {
+                            orderid: order.orderid.clone(),
+                            symbol: order.symbol.clone(),
+                            exchange: order.exchange,
+                        };
+                        let engine = engine.clone();
+                        let gw = gw_name.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = engine.cancel_order(req, &gw).await {
+                                tracing::warn!("撤单失败: {}", e);
+                            }
+                        });
+                    }
+                }
+                self.toast_manager.add(&format!("撤销 {} 个委托", count), ToastType::Info);
+            }
+        }
+
+        // Strategy panel pending actions
+        if let Some(name) = self.strategy_panel.take_init() {
+            if let Some(ref se) = self.strategy_engine {
+                let se = se.clone();
+                let n = name.clone();
+                tokio::spawn(async move {
+                    match se.init_strategy(&n).await {
+                        Ok(_) => tracing::info!("策略 {} 初始化成功", n),
+                        Err(e) => tracing::error!("策略 {} 初始化失败: {}", n, e),
+                    }
+                });
+            }
+        }
+        if let Some(name) = self.strategy_panel.take_start() {
+            if let Some(ref se) = self.strategy_engine {
+                let se = se.clone();
+                let n = name.clone();
+                tokio::spawn(async move {
+                    match se.start_strategy(&n).await {
+                        Ok(_) => tracing::info!("策略 {} 启动成功", n),
+                        Err(e) => tracing::error!("策略 {} 启动失败: {}", n, e),
+                    }
+                });
+            }
+        }
+        if let Some(name) = self.strategy_panel.take_stop() {
+            if let Some(ref se) = self.strategy_engine {
+                let se = se.clone();
+                let n = name.clone();
+                tokio::spawn(async move {
+                    match se.stop_strategy(&n).await {
+                        Ok(_) => tracing::info!("策略 {} 停止成功", n),
+                        Err(e) => tracing::error!("策略 {} 停止失败: {}", n, e),
+                    }
+                });
+            }
         }
     }
     
@@ -1106,45 +1164,63 @@ impl MainWindow {
                 self.bottom_tab = BottomTab::Log;
             }
             DashboardAction::StartAllStrategies => {
-                if let Ok(cache) = self.strategy_cache.lock() {
-                    let names: Vec<String> = cache.iter()
-                        .filter(|(_, state)| *state == StrategyState::Inited)
-                        .map(|(name, _)| name.clone())
-                        .collect();
-                    if names.is_empty() {
-                        self.toast_manager.add("没有可启动的策略（需要先初始化）", ToastType::Info);
-                    } else {
-                        for name in &names {
-                            tracing::info!("启动策略: {}", name);
+                if let Some(ref se) = self.strategy_engine {
+                    if let Ok(cache) = self.strategy_cache.lock() {
+                        let names: Vec<String> = cache.iter()
+                            .filter(|(_, state)| *state == StrategyState::Inited)
+                            .map(|(name, _)| name.clone())
+                            .collect();
+                        if names.is_empty() {
+                            self.toast_manager.add("没有可启动的策略（需要先初始化）", ToastType::Info);
+                        } else {
+                            for name in &names {
+                                let se = se.clone();
+                                let n = name.clone();
+                                tokio::spawn(async move {
+                                    match se.start_strategy(&n).await {
+                                        Ok(_) => tracing::info!("策略 {} 启动成功", n),
+                                        Err(e) => tracing::error!("策略 {} 启动失败: {}", n, e),
+                                    }
+                                });
+                            }
+                            self.toast_manager.add(
+                                &format!("启动 {} 个策略", names.len()),
+                                ToastType::Info,
+                            );
                         }
-                        self.toast_manager.add(
-                            &format!("启动 {} 个策略", names.len()),
-                            ToastType::Info,
-                        );
                     }
                 } else {
-                    self.toast_manager.add("批量启动策略", ToastType::Info);
+                    self.toast_manager.add("策略引擎未加载", ToastType::Info);
                 }
             }
             DashboardAction::StopAllStrategies => {
-                if let Ok(cache) = self.strategy_cache.lock() {
-                    let names: Vec<String> = cache.iter()
-                        .filter(|(_, state)| *state == StrategyState::Trading)
-                        .map(|(name, _)| name.clone())
-                        .collect();
-                    if names.is_empty() {
-                        self.toast_manager.add("没有运行中的策略", ToastType::Info);
-                    } else {
-                        for name in &names {
-                            tracing::info!("停止策略: {}", name);
+                if let Some(ref se) = self.strategy_engine {
+                    if let Ok(cache) = self.strategy_cache.lock() {
+                        let names: Vec<String> = cache.iter()
+                            .filter(|(_, state)| *state == StrategyState::Trading)
+                            .map(|(name, _)| name.clone())
+                            .collect();
+                        if names.is_empty() {
+                            self.toast_manager.add("没有运行中的策略", ToastType::Info);
+                        } else {
+                            for name in &names {
+                                let se = se.clone();
+                                let n = name.clone();
+                                tokio::spawn(async move {
+                                    match se.stop_strategy(&n).await {
+                                        Ok(_) => tracing::info!("策略 {} 停止成功", n),
+                                        Err(e) => tracing::error!("策略 {} 停止失败: {}", n, e),
+                                    }
+                                });
+                            }
+                            self.toast_manager.add(
+                                &format!("停止 {} 个策略", names.len()),
+                                ToastType::Info,
+                            );
                         }
-                        self.toast_manager.add(
-                            &format!("停止 {} 个策略", names.len()),
-                            ToastType::Info,
-                        );
                     }
                 } else {
-                    self.toast_manager.add("批量停止策略", ToastType::Info);
+                    self.toast_manager.add("策略引擎未加载", ToastType::Info);
                 }
             }
             DashboardAction::OpenChart(vt_symbol) => {
