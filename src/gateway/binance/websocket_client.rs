@@ -2,6 +2,7 @@
 
 use std::io::{Error, ErrorKind};
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -260,6 +261,12 @@ pub struct BinanceWebSocketClient {
     connection_url: Arc<RwLock<Option<String>>>,
     /// Proxy settings for potential reconnect
     proxy_settings: Arc<RwLock<(String, u16)>>,
+    /// Tracked subscriptions for re-subscription after reconnect
+    subscriptions: Arc<RwLock<Vec<String>>>,
+    /// Callback invoked when connection is lost unexpectedly (not via disconnect())
+    on_disconnect: Arc<RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>,
+    /// Flag to distinguish intentional disconnect from unexpected connection loss
+    graceful_shutdown: Arc<AtomicBool>,
 }
 
 impl BinanceWebSocketClient {
@@ -275,6 +282,9 @@ impl BinanceWebSocketClient {
             last_pong: Arc::new(RwLock::new(None)),
             connection_url: Arc::new(RwLock::new(None)),
             proxy_settings: Arc::new(RwLock::new((String::new(), 0u16))),
+            subscriptions: Arc::new(RwLock::new(Vec::new())),
+            on_disconnect: Arc::new(RwLock::new(None)),
+            graceful_shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -365,6 +375,8 @@ impl BinanceWebSocketClient {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
+        // Reset graceful shutdown flag for new connection
+        self.graceful_shutdown.store(false, std::sync::atomic::Ordering::SeqCst);
 
         let (write, read) = ws_stream.split();
         let (tx, rx) = mpsc::channel::<Message>(1024);
@@ -373,11 +385,17 @@ impl BinanceWebSocketClient {
         *self.active.write().await = true;
         *self.last_pong.write().await = Some(std::time::Instant::now());
 
+        // Shared flag to ensure on_disconnect is called at most once per connection lifecycle
+        let disconnect_notified = Arc::new(AtomicBool::new(false));
+
         // Spawn write task (with periodic ping for keepalive)
         let write_active = self.active.clone();
         let write_tx = self.tx.clone();
         let last_pong_clone = self.last_pong.clone();
         let gateway_name = self.gateway_name.clone();
+        let graceful_shutdown_write = self.graceful_shutdown.clone();
+        let disconnect_notified_write = disconnect_notified.clone();
+        let on_disconnect_write = self.on_disconnect.clone();
         tokio::spawn(async move {
             let mut write = write;
             let mut rx = rx;
@@ -405,7 +423,8 @@ impl BinanceWebSocketClient {
                                 .unwrap_or(false)
                         };
                         if !pong_ok {
-                            warn!("{}: No pong received in 60s, connection may be dead", gateway_name);
+                            warn!("{}: No pong received in 60s, connection is dead", gateway_name);
+                            break; // Exit write loop — triggers reconnect
                         }
                         // Send ping to keep connection alive
                         if let Err(e) = write.send(Message::Ping(vec![].into())).await {
@@ -418,6 +437,15 @@ impl BinanceWebSocketClient {
             *write_active.write().await = false;
             // Clear tx so subsequent send() calls fail immediately
             *write_tx.write().await = None;
+
+            // Notify disconnect if not graceful
+            let was_notified = disconnect_notified_write.swap(true, std::sync::atomic::Ordering::SeqCst);
+            if !was_notified && !graceful_shutdown_write.load(std::sync::atomic::Ordering::SeqCst) {
+                warn!("{}: Write loop ended unexpectedly, invoking on_disconnect", gateway_name);
+                if let Some(cb) = on_disconnect_write.read().await.as_ref() {
+                    cb();
+                }
+            }
         });
 
         // Spawn read task
@@ -425,6 +453,9 @@ impl BinanceWebSocketClient {
         let read_active = self.active.clone();
         let gateway_name = self.gateway_name.clone();
         let last_pong_read = self.last_pong.clone();
+        let graceful_shutdown_read = self.graceful_shutdown.clone();
+        let disconnect_notified_read = disconnect_notified.clone();
+        let on_disconnect_read = self.on_disconnect.clone();
         tokio::spawn(async move {
             let mut read = read;
             while let Some(result) = read.next().await {
@@ -465,11 +496,60 @@ impl BinanceWebSocketClient {
             }
             *read_active.write().await = false;
             warn!("{}: WebSocket read loop ended", gateway_name);
+
+            // Notify disconnect if not graceful
+            let was_notified = disconnect_notified_read.swap(true, std::sync::atomic::Ordering::SeqCst);
+            if !was_notified && !graceful_shutdown_read.load(std::sync::atomic::Ordering::SeqCst) {
+                warn!("{}: Read loop ended unexpectedly, invoking on_disconnect", gateway_name);
+                if let Some(cb) = on_disconnect_read.read().await.as_ref() {
+                    cb();
+                }
+            }
+        });
+
+        // Spawn health monitor task
+        let health_active = self.active.clone();
+        let health_last_pong = self.last_pong.clone();
+        let health_gateway_name = self.gateway_name.clone();
+        let health_graceful = self.graceful_shutdown.clone();
+        let health_disconnect_notified = disconnect_notified;
+        let health_on_disconnect = self.on_disconnect.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            loop {
+                interval.tick().await;
+                if !*health_active.read().await {
+                    break;
+                }
+                // Check if connection is dead (no pong in 60s)
+                let dead = {
+                    let last = health_last_pong.read().await;
+                    last.map(|t| t.elapsed() > std::time::Duration::from_secs(60))
+                        .unwrap_or(false)
+                };
+                if dead {
+                    let already_handled = health_disconnect_notified.load(std::sync::atomic::Ordering::SeqCst);
+                    if !already_handled && !health_graceful.load(std::sync::atomic::Ordering::SeqCst) {
+                        warn!("{}: Health monitor detected dead connection, triggering disconnect notification", health_gateway_name);
+                        *health_active.write().await = false;
+                        // The disconnect_notified flag + callback invocation will be handled
+                        // by whichever task gets here first
+                        let was_notified = health_disconnect_notified.swap(true, std::sync::atomic::Ordering::SeqCst);
+                        if !was_notified {
+                            if let Some(cb) = health_on_disconnect.read().await.as_ref() {
+                                cb();
+                            }
+                        }
+                    }
+                    break; // Health monitor can stop — reconnect is in progress
+                }
+            }
         });
     }
 
     /// Disconnect from WebSocket
     pub async fn disconnect(&self) {
+        self.graceful_shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
         *self.active.write().await = false;
         if let Some(tx) = self.tx.write().await.take() {
             let _ = tx.send(Message::Close(None)).await;
@@ -528,6 +608,16 @@ impl BinanceWebSocketClient {
 
     /// Subscribe to channels
     pub async fn subscribe(&self, channels: Vec<String>) -> Result<(), String> {
+        // Track subscriptions for re-subscription after reconnect
+        {
+            let mut subs = self.subscriptions.write().await;
+            for ch in &channels {
+                if !subs.contains(ch) {
+                    subs.push(ch.clone());
+                }
+            }
+        }
+
         let mut req_id = self.req_id.write().await;
         *req_id += 1;
 
@@ -543,11 +633,41 @@ impl BinanceWebSocketClient {
     /// Unsubscribe from channels
     #[allow(dead_code)]
     pub async fn unsubscribe(&self, channels: Vec<String>) -> Result<(), String> {
+        // Remove from tracked subscriptions
+        {
+            let mut subs = self.subscriptions.write().await;
+            subs.retain(|ch| !channels.contains(ch));
+        }
+
         let mut req_id = self.req_id.write().await;
         *req_id += 1;
 
         let message = json!({
             "method": "UNSUBSCRIBE",
+            "params": channels,
+            "id": *req_id
+        });
+
+        self.send(message).await
+    }
+
+    /// Set the on_disconnect callback, invoked when connection is lost unexpectedly
+    pub async fn set_on_disconnect(&self, callback: Arc<dyn Fn() + Send + Sync>) {
+        *self.on_disconnect.write().await = Some(callback);
+    }
+
+    /// Re-send all tracked subscriptions after reconnection
+    pub async fn resubscribe(&self) -> Result<(), String> {
+        let channels = self.subscriptions.read().await.clone();
+        if channels.is_empty() {
+            return Ok(());
+        }
+
+        let mut req_id = self.req_id.write().await;
+        *req_id += 1;
+
+        let message = json!({
+            "method": "SUBSCRIBE",
             "params": channels,
             "id": *req_id
         });

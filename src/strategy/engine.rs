@@ -13,7 +13,7 @@ use chrono::{Utc, Duration};
 use crate::trader::{
     MainEngine, TickData, OrderData, OrderRequest, TradeData, BarData,
     SubscribeRequest, CancelRequest, HistoryRequest,
-    Direction, Interval, Exchange, BaseEngine, GatewayEvent,
+    Direction, Interval, Exchange, Offset, Status, BaseEngine, GatewayEvent,
     EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE,
 };
 use crate::trader::database::BaseDatabase;
@@ -77,8 +77,24 @@ pub struct StrategyEngine {
     strategy_trade_count: Arc<RwLock<HashMap<String, usize>>>,
     /// Per-strategy average entry price: (strategy_name, vt_symbol) → avg entry price
     strategy_avg_price: Arc<RwLock<HashMap<(String, String), f64>>>,
+    /// Frozen close volume per strategy per symbol (to prevent double-closing)
+    /// Key: strategy_name, Value: HashMap<vt_symbol, frozen_close_volume>
+    strategy_frozen_closes: Arc<RwLock<HashMap<String, HashMap<String, f64>>>>,
+    /// Maps vt_orderid → CloseOrderInfo for unfreezing on fill/cancel/reject
+    order_close_info: Arc<RwLock<HashMap<String, CloseOrderInfo>>>,
     /// Optional database for loading historical data
     database: Option<Arc<dyn BaseDatabase>>,
+}
+
+/// Tracks a close order for frozen volume management
+#[derive(Debug, Clone)]
+struct CloseOrderInfo {
+    strategy_name: String,
+    vt_symbol: String,
+    /// Original volume of the close order (for unfreezing on cancel/reject)
+    volume: f64,
+    /// Remaining unfilled volume (decremented on partial fills)
+    remaining: f64,
 }
 
 /// Bar synthesizer for multi-period bar generation from 1-minute bars
@@ -189,6 +205,8 @@ impl StrategyEngine {
             strategy_unrealized_pnl: Arc::new(RwLock::new(HashMap::new())),
             strategy_trade_count: Arc::new(RwLock::new(HashMap::new())),
             strategy_avg_price: Arc::new(RwLock::new(HashMap::new())),
+            strategy_frozen_closes: Arc::new(RwLock::new(HashMap::new())),
+            order_close_info: Arc::new(RwLock::new(HashMap::new())),
             database,
         }
     }
@@ -325,12 +343,66 @@ impl StrategyEngine {
     }
 
     /// Process order event and dispatch to owning strategy
+    /// Also handles unfreezing of close volume when orders are cancelled or rejected
     fn process_order_event(&self, order: &OrderData) {
         let strategy_name = self.orderid_strategy_map.blocking_read()
             .get(&order.vt_orderid())
             .cloned();
 
         if let Some(strategy_name) = strategy_name {
+            // Unfreeze close volume on order cancellation or rejection
+            if order.status == Status::Cancelled || order.status == Status::Rejected {
+                let vt_orderid = order.vt_orderid();
+                let mut close_info_map = self.order_close_info.blocking_write();
+                if let Some(close_info) = close_info_map.remove(&vt_orderid) {
+                    // For cancelled/rejected orders, unfreeze the remaining volume
+                    let remaining = close_info.remaining;
+                    if remaining > 0.0 {
+                        drop(close_info_map);
+                        // Use blocking_write on the async RwLock
+                        let mut frozen = self.strategy_frozen_closes.blocking_write();
+                        if let Some(strategy_frozen) = frozen.get_mut(&close_info.strategy_name) {
+                            let current = strategy_frozen.get(&close_info.vt_symbol).copied().unwrap_or(0.0);
+                            let new_val = (current - remaining).max(0.0);
+                            if new_val > 0.0 {
+                                strategy_frozen.insert(close_info.vt_symbol.clone(), new_val);
+                            } else {
+                                strategy_frozen.remove(&close_info.vt_symbol);
+                            }
+                        }
+                        tracing::debug!(
+                            "Unfrozen {} close volume for {} on {} due to order {:?}",
+                            remaining, close_info.strategy_name, close_info.vt_symbol, order.status
+                        );
+                    }
+                }
+            } else if order.status == Status::PartTraded {
+                // Update remaining volume in close order info on partial fill
+                let mut close_info_map = self.order_close_info.blocking_write();
+                if let Some(close_info) = close_info_map.get_mut(&order.vt_orderid()) {
+                    let filled = order.traded;
+                    let old_remaining = close_info.remaining;
+                    // remaining = original volume - total filled
+                    close_info.remaining = (close_info.volume - filled).max(0.0);
+                    let unfreeze_amount = old_remaining - close_info.remaining;
+                    if unfreeze_amount > 0.0 {
+                        let strategy_name = close_info.strategy_name.clone();
+                        let vt_symbol = close_info.vt_symbol.clone();
+                        drop(close_info_map);
+                        let mut frozen = self.strategy_frozen_closes.blocking_write();
+                        if let Some(strategy_frozen) = frozen.get_mut(&strategy_name) {
+                            let current = strategy_frozen.get(&vt_symbol).copied().unwrap_or(0.0);
+                            let new_val = (current - unfreeze_amount).max(0.0);
+                            if new_val > 0.0 {
+                                strategy_frozen.insert(vt_symbol.clone(), new_val);
+                            } else {
+                                strategy_frozen.remove(&vt_symbol);
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut strategies = self.strategies.blocking_write();
             if let Some(strategy) = strategies.get_mut(&strategy_name) {
                 strategy.on_order(order);
@@ -339,7 +411,7 @@ impl StrategyEngine {
     }
 
     /// Process trade event and dispatch to owning strategy (with deduplication)
-    /// Also tracks per-strategy realized PnL
+    /// Also tracks per-strategy realized PnL and unfreezes close volume
     fn process_trade_event(&self, trade: &TradeData) {
         // Deduplicate trades
         let vt_tradeid = trade.vt_tradeid();
@@ -359,6 +431,45 @@ impl StrategyEngine {
             .cloned();
 
         if let Some(strategy_name) = strategy_name {
+            // Unfreeze close volume on trade fill
+            if Self::is_close_offset(trade.offset) {
+                let vt_orderid = trade.vt_orderid();
+                let mut close_info_map = self.order_close_info.blocking_write();
+                if let Some(close_info) = close_info_map.get_mut(&vt_orderid) {
+                    // Unfreeze the traded volume
+                    let unfreeze_amount = trade.volume.min(close_info.remaining);
+                    close_info.remaining = (close_info.remaining - unfreeze_amount).max(0.0);
+
+                    let strategy_name_clone = close_info.strategy_name.clone();
+                    let vt_symbol_clone = close_info.vt_symbol.clone();
+                    let is_complete = close_info.remaining <= 0.0;
+                    drop(close_info_map);
+
+                    // Remove the close info if fully filled
+                    if is_complete {
+                        self.order_close_info.blocking_write().remove(&vt_orderid);
+                    }
+
+                    // Unfreeze the volume
+                    if unfreeze_amount > 0.0 {
+                        let mut frozen = self.strategy_frozen_closes.blocking_write();
+                        if let Some(strategy_frozen) = frozen.get_mut(&strategy_name_clone) {
+                            let current = strategy_frozen.get(&vt_symbol_clone).copied().unwrap_or(0.0);
+                            let new_val = (current - unfreeze_amount).max(0.0);
+                            if new_val > 0.0 {
+                                strategy_frozen.insert(vt_symbol_clone.clone(), new_val);
+                            } else {
+                                strategy_frozen.remove(&vt_symbol_clone);
+                            }
+                        }
+                        tracing::debug!(
+                            "Unfrozen {} close volume for {} on {} due to trade fill",
+                            unfreeze_amount, strategy_name_clone, vt_symbol_clone
+                        );
+                    }
+                }
+            }
+
             let volume_change = match trade.direction {
                 Some(Direction::Long) => trade.volume,
                 Some(Direction::Short) => -trade.volume,
@@ -710,6 +821,16 @@ impl StrategyEngine {
             avg_prices.retain(|(name, _), _| name != strategy_name);
         }
 
+        // Remove frozen close tracking data
+        {
+            let mut frozen = self.strategy_frozen_closes.write().await;
+            frozen.remove(strategy_name);
+        }
+        {
+            let mut close_info = self.order_close_info.write().await;
+            close_info.retain(|_, info| info.strategy_name != strategy_name);
+        }
+
         tracing::info!("Strategy {} removed", strategy_name);
         Ok(())
     }
@@ -822,16 +943,47 @@ impl StrategyEngine {
 
     /// Send an order on behalf of a strategy, routing through MainEngine (with risk check)
     /// Also populates orderid_strategy_map and strategy_orderid_map for callback routing
+    ///
+    /// For close orders, this method:
+    /// 1. Checks available position (actual position minus frozen close volume from pending orders)
+    /// 2. Reduces order volume if it exceeds available position
+    /// 3. Freezes the close volume to prevent other strategies from double-closing
     pub async fn send_order(
         &self,
         strategy_name: &str,
-        req: OrderRequest,
+        mut req: OrderRequest,
     ) -> Result<String, String> {
+        // Check if this is a close order and enforce position isolation
+        if Self::is_close_offset(req.offset) {
+            let vt_symbol = req.vt_symbol();
+            let pos = self.get_strategy_position(strategy_name, &vt_symbol).await;
+            let frozen = self.get_frozen_close_volume_async(strategy_name, &vt_symbol).await;
+            let available = (pos - frozen).max(0.0);
+
+            if req.volume > available {
+                if available > 0.0 {
+                    tracing::warn!(
+                        "Close order volume {} exceeds available {} for {} on {} (pos={}, frozen={}) - reducing to available",
+                        req.volume, available, strategy_name, vt_symbol, pos, frozen
+                    );
+                    req.volume = available;
+                } else {
+                    return Err(format!(
+                        "No available position to close for {} on {} (pos={}, frozen={})",
+                        strategy_name, vt_symbol, pos, frozen
+                    ));
+                }
+            }
+
+            // Freeze the close volume
+            self.freeze_close_volume(strategy_name, &vt_symbol, req.volume).await;
+        }
+
         let exchange = req.exchange;
         let gw_name = self.main_engine.find_gateway_name_for_exchange(exchange)
             .ok_or_else(|| format!("No gateway found for exchange {:?}", exchange))?;
 
-        let result = self.main_engine.send_order(req, &gw_name).await?;
+        let result = self.main_engine.send_order(req.clone(), &gw_name).await?;
 
         // Track order -> strategy mapping for callback routing
         {
@@ -843,6 +995,18 @@ impl StrategyEngine {
             strategy_map.entry(strategy_name.to_string())
                 .or_default()
                 .push(result.clone());
+        }
+
+        // Track close order info for later unfreezing
+        if Self::is_close_offset(req.offset) {
+            let vt_symbol = req.vt_symbol();
+            let close_info = CloseOrderInfo {
+                strategy_name: strategy_name.to_string(),
+                vt_symbol: vt_symbol.clone(),
+                volume: req.volume,
+                remaining: req.volume,
+            };
+            self.order_close_info.write().await.insert(result.clone(), close_info);
         }
 
         Ok(result)
@@ -979,6 +1143,50 @@ impl StrategyEngine {
             self.strategy_unrealized_pnl.write().await.insert(strategy_name.to_string(), unrealized);
         }
     }
+
+    // ========================================================================
+    // Strategy-level frozen volume management (position isolation)
+    // ========================================================================
+
+    /// Check if an offset is a close offset
+    fn is_close_offset(offset: Offset) -> bool {
+        matches!(offset, Offset::Close | Offset::CloseToday | Offset::CloseYesterday)
+    }
+
+    /// Freeze volume for a pending close order
+    async fn freeze_close_volume(&self, strategy_name: &str, vt_symbol: &str, volume: f64) {
+        let mut frozen = self.strategy_frozen_closes.write().await;
+        let strategy_frozen = frozen.entry(strategy_name.to_string()).or_default();
+        let current = strategy_frozen.get(vt_symbol).copied().unwrap_or(0.0);
+        strategy_frozen.insert(vt_symbol.to_string(), current + volume);
+        tracing::debug!(
+            "Frozen {} close volume for {} on {} (total frozen: {})",
+            volume, strategy_name, vt_symbol, current + volume
+        );
+    }
+
+    /// Get frozen close volume for a strategy-symbol (async version)
+    async fn get_frozen_close_volume_async(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        self.strategy_frozen_closes.read().await
+            .get(strategy_name)
+            .and_then(|s| s.get(vt_symbol).copied())
+            .unwrap_or(0.0)
+    }
+
+    /// Get available position for a strategy (actual position minus frozen close volume)
+    pub async fn get_available_position(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        let pos = self.get_strategy_position(strategy_name, vt_symbol).await;
+        let frozen = self.get_frozen_close_volume_async(strategy_name, vt_symbol).await;
+        (pos - frozen).max(0.0)
+    }
+
+    /// Get current position for a strategy-symbol
+    pub async fn get_strategy_position(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        let strategies = self.strategies.read().await;
+        strategies.get(strategy_name)
+            .map(|s| s.get_position(vt_symbol))
+            .unwrap_or(0.0)
+    }
 }
 
 /// Implement BaseEngine for StrategyEngine so it can receive events directly from MainEngine
@@ -1012,6 +1220,8 @@ impl Clone for StrategyEngine {
             strategy_unrealized_pnl: self.strategy_unrealized_pnl.clone(),
             strategy_trade_count: self.strategy_trade_count.clone(),
             strategy_avg_price: self.strategy_avg_price.clone(),
+            strategy_frozen_closes: self.strategy_frozen_closes.clone(),
+            order_close_info: self.order_close_info.clone(),
             database: self.database.clone(),
         }
     }
@@ -1247,5 +1457,89 @@ mod tests {
         
         // Should not create synthesizer for base intervals
         engine.register_bar_synthesizer("TestStrategy", "ETHUSDT.BINANCE", Interval::Minute).await;
+    }
+
+    #[tokio::test]
+    async fn test_get_available_position_no_frozen() {
+        let engine = create_strategy_engine();
+        let strategy = MockStrategy::new("TestStrategy".to_string());
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+
+        // No position and no frozen volume
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        assert_eq!(available, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_get_strategy_position() {
+        let engine = create_strategy_engine();
+        let mut strategy = MockStrategy::new("TestStrategy".to_string());
+        strategy.positions.insert("BTCUSDT.BINANCE".to_string(), 1.5);
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+
+        let pos = engine.get_strategy_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        assert_eq!(pos, 1.5);
+
+        // Nonexistent symbol returns 0
+        let pos = engine.get_strategy_position("TestStrategy", "ETHUSDT.BINANCE").await;
+        assert_eq!(pos, 0.0);
+
+        // Nonexistent strategy returns 0
+        let pos = engine.get_strategy_position("NonExistent", "BTCUSDT.BINANCE").await;
+        assert_eq!(pos, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_freeze_close_volume() {
+        let engine = create_strategy_engine();
+        let mut strategy = MockStrategy::new("TestStrategy".to_string());
+        strategy.positions.insert("BTCUSDT.BINANCE".to_string(), 2.0);
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+
+        // Initially available = position = 2.0
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        assert_eq!(available, 2.0);
+
+        // Freeze 1.0
+        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 1.0).await;
+
+        // Available should be 2.0 - 1.0 = 1.0
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        assert_eq!(available, 1.0);
+
+        // Freeze another 0.5
+        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 0.5).await;
+
+        // Available should be 2.0 - 1.5 = 0.5
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        assert_eq!(available, 0.5);
+    }
+
+    #[tokio::test]
+    async fn test_frozen_volume_cleaned_on_remove_strategy() {
+        let engine = create_strategy_engine();
+        let mut strategy = MockStrategy::new("TestStrategy".to_string());
+        strategy.positions.insert("BTCUSDT.BINANCE".to_string(), 2.0);
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 1.0).await;
+
+        // Verify frozen
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        assert_eq!(available, 1.0);
+
+        // Remove strategy
+        engine.remove_strategy("TestStrategy").await.unwrap();
+
+        // Frozen data should be cleaned up (no panic when accessing nonexistent strategy)
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        assert_eq!(available, 0.0);
     }
 }

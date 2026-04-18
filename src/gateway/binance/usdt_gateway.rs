@@ -3,11 +3,12 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{Local, Utc};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use super::config::{BinanceConfigs, BinanceGatewayConfig};
 use super::constants::*;
@@ -43,6 +44,8 @@ pub struct BinanceUsdtGateway {
     keep_alive_count: AtomicU64,
     server: Arc<RwLock<String>>,
     orders: Arc<RwLock<HashMap<String, OrderData>>>,
+    /// Order submission times for stale order detection
+    order_submit_times: Arc<RwLock<HashMap<String, Instant>>>,
     contracts: Arc<RwLock<HashMap<String, ContractData>>>,
     ticks: Arc<RwLock<HashMap<String, TickData>>>,
     positions: Arc<RwLock<HashMap<String, PositionData>>>,
@@ -62,6 +65,7 @@ impl BinanceUsdtGateway {
             keep_alive_count: AtomicU64::new(0),
             server: Arc::new(RwLock::new("REAL".to_string())),
             orders: Arc::new(RwLock::new(HashMap::new())),
+            order_submit_times: Arc::new(RwLock::new(HashMap::new())),
             contracts: Arc::new(RwLock::new(HashMap::new())),
             ticks: Arc::new(RwLock::new(HashMap::new())),
             positions: Arc::new(RwLock::new(HashMap::new())),
@@ -437,6 +441,7 @@ impl BinanceUsdtGateway {
 
         let event_sender = self.event_sender.clone();
         let orders = self.orders.clone();
+        let order_submit_times = self.order_submit_times.clone();
         let positions = self.positions.clone();
         let gateway_name = self.gateway_name.clone();
         let order_lock = Arc::new(Mutex::new(()));
@@ -444,6 +449,7 @@ impl BinanceUsdtGateway {
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let event_sender = event_sender.clone();
             let orders = orders.clone();
+            let order_submit_times = order_submit_times.clone();
             let positions = positions.clone();
             let gateway_name = gateway_name.clone();
             let lock = order_lock.clone();
@@ -545,6 +551,9 @@ impl BinanceUsdtGateway {
                         };
 
                         orders.write().await.insert(orderid.clone(), order.clone());
+                        if order.status != Status::Submitting {
+                            order_submit_times.write().await.remove(&orderid);
+                        }
                         if let Some(sender) = event_sender.read().await.as_ref() {
                             sender.on_order(order.clone());
                         }
@@ -769,6 +778,262 @@ impl BaseGateway for BinanceUsdtGateway {
         self.market_ws.set_handler(handler).await;
         self.market_ws.connect(market_url, &proxy_host, proxy_port).await?;
         self.write_log("行情Websocket API连接成功").await;
+
+        // Set up on_disconnect callback for market_ws to auto-reconnect
+        let market_ws_reconnect = self.market_ws.clone();
+        let gateway_name_market = self.gateway_name.clone();
+        let on_disconnect_market: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            let market_ws = market_ws_reconnect.clone();
+            let gateway_name = gateway_name_market.clone();
+            tokio::spawn(async move {
+                warn!("{}: market_ws disconnected unexpectedly, attempting reconnect...", gateway_name);
+                match market_ws.reconnect().await {
+                    Ok(()) => {
+                        info!("{}: market_ws reconnected, re-subscribing...", gateway_name);
+                        if let Err(e) = market_ws.resubscribe().await {
+                            error!("{}: market_ws resubscribe failed: {}", gateway_name, e);
+                        } else {
+                            info!("{}: market_ws resubscribed successfully", gateway_name);
+                        }
+                    }
+                    Err(e) => {
+                        error!("{}: market_ws reconnect failed: {}", gateway_name, e);
+                    }
+                }
+            });
+        });
+        self.market_ws.set_on_disconnect(on_disconnect_market).await;
+
+        // Set up on_disconnect callback for trade_ws to auto-reconnect
+        let trade_ws_reconnect = self.trade_ws.clone();
+        let rest_client_reconnect = self.rest_client.clone();
+        let listen_key_reconnect = self.listen_key.clone();
+        let positions_reconnect = self.positions.clone();
+        let orders_reconnect = self.orders.clone();
+        let event_sender_trade = self.event_sender.clone();
+        let gateway_name_trade = self.gateway_name.clone();
+        let server_trade = self.server.clone();
+        let on_disconnect_trade: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            let trade_ws = trade_ws_reconnect.clone();
+            let rest_client = rest_client_reconnect.clone();
+            let listen_key_arc = listen_key_reconnect.clone();
+            let positions = positions_reconnect.clone();
+            let orders = orders_reconnect.clone();
+            let event_sender = event_sender_trade.clone();
+            let gateway_name = gateway_name_trade.clone();
+            let server = server_trade.clone();
+            tokio::spawn(async move {
+                warn!("{}: trade_ws disconnected unexpectedly, attempting reconnect...", gateway_name);
+
+                // Disconnect existing
+                trade_ws.disconnect().await;
+
+                // Wait before reconnecting
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                // Create new listen key
+                let params = std::collections::HashMap::new();
+                let data = match rest_client.post("/fapi/v1/listenKey", &params, super::constants::Security::ApiKey).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        error!("{}: failed to create new listenKey: {}", gateway_name, e);
+                        return;
+                    }
+                };
+
+                let new_listen_key = data["listenKey"].as_str().unwrap_or("").to_string();
+                *listen_key_arc.write().await = new_listen_key.clone();
+
+                // Build URL
+                let server_val = server.read().await.clone();
+                let url = if server_val == "REAL" {
+                    format!("{}{}", super::constants::USDT_WS_TRADE_HOST, new_listen_key)
+                } else {
+                    format!("{}{}", super::constants::USDT_TESTNET_WS_TRADE_HOST, new_listen_key)
+                };
+
+                // Get proxy settings
+                let proxy_host = rest_client.get_proxy_host().await;
+                let proxy_port = rest_client.get_proxy_port().await;
+
+                // Reconnect trade_ws
+                if let Err(e) = trade_ws.connect(&url, &proxy_host, proxy_port).await {
+                    error!("{}: trade_ws reconnect failed: {}", gateway_name, e);
+                    return;
+                }
+                info!("{}: trade_ws reconnected with new listen key", gateway_name);
+
+                // Re-query positions
+                match rest_client.get("/fapi/v2/positionRisk", &params, super::constants::Security::Signed).await {
+                    Ok(data) => {
+                        if let Some(pos_arr) = data.as_array() {
+                            for pos in pos_arr {
+                                let pos_amt: f64 = pos["positionAmt"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                                if pos_amt.abs() > 0.0 {
+                                    let direction = if pos_amt > 0.0 { crate::trader::Direction::Long } else { crate::trader::Direction::Short };
+                                    let position = crate::trader::PositionData {
+                                        symbol: pos["symbol"].as_str().unwrap_or("").to_lowercase(),
+                                        exchange: crate::trader::Exchange::BinanceUsdm,
+                                        direction,
+                                        volume: pos_amt.abs(),
+                                        frozen: 0.0,
+                                        price: pos["entryPrice"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                        pnl: pos["unRealizedProfit"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                        yd_volume: 0.0,
+                                        gateway_name: gateway_name.clone(),
+                                        extra: None,
+                                    };
+                                    let key = format!("{}_{}", position.symbol, position.direction);
+                                    positions.write().await.insert(key, position.clone());
+                                    if let Some(sender) = event_sender.read().await.as_ref() {
+                                        sender.on_position(position);
+                                    }
+                                }
+                            }
+                        }
+                        info!("{}: positions re-queried after reconnect", gateway_name);
+                    }
+                    Err(e) => {
+                        error!("{}: failed to re-query positions: {}", gateway_name, e);
+                    }
+                }
+
+                // Re-query open orders
+                match rest_client.get("/fapi/v1/openOrders", &params, super::constants::Security::Signed).await {
+                    Ok(data) => {
+                        if let Some(orders_arr) = data.as_array() {
+                            for d in orders_arr {
+                                let order_type_str = d["type"].as_str().unwrap_or("");
+                                let order_type = match super::constants::ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                    Some(t) => *t,
+                                    None => continue,
+                                };
+
+                                let status_str = d["status"].as_str().unwrap_or("");
+                                let direction_str = d["side"].as_str().unwrap_or("");
+
+                                let order = crate::trader::OrderData {
+                                    symbol: d["symbol"].as_str().unwrap_or("").to_lowercase(),
+                                    exchange: crate::trader::Exchange::BinanceUsdm,
+                                    orderid: d["clientOrderId"].as_str().unwrap_or("").to_string(),
+                                    order_type,
+                                    direction: super::constants::DIRECTION_BINANCE2VT.get(direction_str).copied(),
+                                    offset: crate::trader::Offset::None,
+                                    price: d["price"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    volume: d["origQty"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    traded: d["executedQty"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    status: super::constants::STATUS_BINANCE2VT.get(status_str).copied().unwrap_or(crate::trader::Status::Submitting),
+                                    datetime: Some(super::constants::timestamp_to_datetime(d["time"].as_i64().unwrap_or(0))),
+                                    reference: String::new(),
+                                    gateway_name: gateway_name.clone(),
+                                    extra: None,
+                                };
+                                orders.write().await.insert(order.orderid.clone(), order.clone());
+                                if let Some(sender) = event_sender.read().await.as_ref() {
+                                    sender.on_order(order);
+                                }
+                            }
+                        }
+                        info!("{}: open orders re-queried after reconnect", gateway_name);
+                    }
+                    Err(e) => {
+                        error!("{}: failed to re-query orders: {}", gateway_name, e);
+                    }
+                }
+            });
+        });
+        self.trade_ws.set_on_disconnect(on_disconnect_trade).await;
+
+        // Spawn background stale order checker
+        let orders_checker = self.orders.clone();
+        let order_submit_times_checker = self.order_submit_times.clone();
+        let rest_client_checker = self.rest_client.clone();
+        let event_sender_checker = self.event_sender.clone();
+        let gateway_name_checker = self.gateway_name.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+
+                // Check for stale orders (Submitting for > 60 seconds)
+                let stale_orderids: Vec<String> = {
+                    let times = order_submit_times_checker.read().await;
+                    let now = Instant::now();
+                    times.iter()
+                        .filter(|(_, time)| now.duration_since(**time) > std::time::Duration::from_secs(60))
+                        .map(|(id, _)| id.clone())
+                        .collect()
+                };
+
+                for orderid in stale_orderids {
+                    let mut params = HashMap::new();
+                    params.insert("origClientOrderId".to_string(), orderid.clone());
+
+                    match rest_client_checker.get("/fapi/v1/order", &params, Security::Signed).await {
+                        Ok(data) => {
+                            let status_str = data["status"].as_str().unwrap_or("");
+                            let new_status = STATUS_BINANCE2VT.get(status_str).copied().unwrap_or(Status::Submitting);
+
+                            if new_status != Status::Submitting {
+                                let order_type_str = data["type"].as_str().unwrap_or("");
+                                let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                    Some(t) => *t,
+                                    None => {
+                                        order_submit_times_checker.write().await.remove(&orderid);
+                                        continue;
+                                    }
+                                };
+
+                                let direction_str = data["side"].as_str().unwrap_or("");
+
+                                let corrected_order = OrderData {
+                                    symbol: data["symbol"].as_str().unwrap_or("").to_lowercase(),
+                                    exchange: Exchange::BinanceUsdm,
+                                    orderid: orderid.clone(),
+                                    order_type,
+                                    direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
+                                    offset: Offset::None,
+                                    price: data["price"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    volume: data["origQty"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    traded: data["executedQty"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    status: new_status,
+                                    datetime: Some(timestamp_to_datetime(data["time"].as_i64().unwrap_or(0))),
+                                    reference: String::new(),
+                                    gateway_name: gateway_name_checker.clone(),
+                                    extra: None,
+                                };
+
+                                // Update local cache
+                                orders_checker.write().await.insert(orderid.clone(), corrected_order.clone());
+                                // Emit event
+                                if let Some(sender) = event_sender_checker.read().await.as_ref() {
+                                    sender.on_order(corrected_order);
+                                }
+                                // Remove from tracking
+                                order_submit_times_checker.write().await.remove(&orderid);
+
+                                info!("{}: Stale order {} resolved via REST query, new status: {:?}", gateway_name_checker, orderid, new_status);
+                            }
+                        }
+                        Err(_) => {
+                            // Order not found on exchange — mark as cancelled
+                            if let Some(order) = orders_checker.read().await.get(&orderid).cloned() {
+                                let mut cancelled = order;
+                                cancelled.status = Status::Cancelled;
+                                orders_checker.write().await.insert(orderid.clone(), cancelled.clone());
+                                if let Some(sender) = event_sender_checker.read().await.as_ref() {
+                                    sender.on_order(cancelled);
+                                }
+                            }
+                            order_submit_times_checker.write().await.remove(&orderid);
+                            warn!("{}: Stale order {} not found on exchange, marking cancelled", gateway_name_checker, orderid);
+                        }
+                    }
+                }
+            }
+        });
+
         Ok(())
     }
 
@@ -799,6 +1064,9 @@ impl BaseGateway for BinanceUsdtGateway {
         let order = req.create_order_data(orderid.clone(), self.gateway_name.clone());
         self.on_order(order.clone()).await;
 
+        // Track submission time for stale order detection
+        self.order_submit_times.write().await.insert(orderid.clone(), Instant::now());
+
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), req.symbol.to_uppercase());
         params.insert("side".to_string(), DIRECTION_VT2BINANCE.get(&req.direction).unwrap_or(&"BUY").to_string());
@@ -824,6 +1092,8 @@ impl BaseGateway for BinanceUsdtGateway {
                 let mut rejected_order = order;
                 rejected_order.status = Status::Rejected;
                 self.on_order(rejected_order).await;
+                // Remove from tracking on rejection
+                self.order_submit_times.write().await.remove(&orderid);
                 self.write_log(&format!("委托失败: {}", e)).await;
                 Err(e)
             }
