@@ -336,4 +336,191 @@ impl RiskEngine {
     pub fn is_halted(&self) -> bool {
         self.is_halted
     }
+
+    /// Create a RiskConfig with portfolio-level limits
+    pub fn portfolio_config(
+        max_exposure: f64,
+        max_leverage: f64,
+        max_drawdown_pct: f64,
+        max_concentration: f64,
+    ) -> RiskConfig {
+        RiskConfig {
+            max_portfolio_exposure: max_exposure,
+            max_leverage,
+            max_drawdown_pct,
+            max_position_concentration: max_concentration,
+            ..RiskConfig::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_risk_check_result_approved() {
+        let result = RiskCheckResult::approved();
+        assert!(result.is_approved);
+        assert!(result.reason.is_none());
+    }
+
+    #[test]
+    fn test_risk_check_result_rejected() {
+        let result = RiskCheckResult::rejected("test reason");
+        assert!(!result.is_approved);
+        assert_eq!(result.reason.as_deref(), Some("test reason"));
+    }
+
+    #[test]
+    fn test_risk_config_default_portfolio_limits_disabled() {
+        let config = RiskConfig::default();
+        assert_eq!(config.max_portfolio_exposure, f64::MAX);
+        assert_eq!(config.max_leverage, f64::MAX);
+        assert!((config.max_drawdown_pct - 1.0).abs() < 1e-10);
+        assert!((config.max_position_concentration - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_portfolio_exposure_approved() {
+        let engine = RiskEngine::new_unrestricted();
+        // Default config has f64::MAX limits, so any notional should pass
+        let result = engine.check_portfolio_exposure(1_000_000.0, 100_000.0);
+        assert!(result.is_approved);
+    }
+
+    #[test]
+    fn test_portfolio_exposure_rejected() {
+        let config = RiskEngine::portfolio_config(2.0, f64::MAX, 1.0, 1.0);
+        let mut engine = RiskEngine::new(config);
+        // Set existing notional to 150% of capital
+        engine.update_position_notional("BTCUSDT", 150_000.0);
+        // Adding 100k more = 250k / 100k = 250% > 200%
+        let result = engine.check_portfolio_exposure(100_000.0, 100_000.0);
+        assert!(!result.is_approved);
+        assert!(result.reason.as_ref().map_or(false, |r| r.contains("exposure")));
+    }
+
+    #[test]
+    fn test_portfolio_leverage_rejected() {
+        let config = RiskEngine::portfolio_config(f64::MAX, 3.0, 1.0, 1.0);
+        let mut engine = RiskEngine::new(config);
+        engine.update_position_notional("BTCUSDT", 200_000.0);
+        // Adding 200k more = 400k / 100k = 4x > 3x
+        let result = engine.check_portfolio_exposure(200_000.0, 100_000.0);
+        assert!(!result.is_approved);
+        assert!(result.reason.as_ref().map_or(false, |r| r.contains("Leverage")));
+    }
+
+    #[test]
+    fn test_position_concentration_approved() {
+        let engine = RiskEngine::new_unrestricted();
+        let result = engine.check_position_concentration("BTCUSDT", 30_000.0, 100_000.0);
+        assert!(result.is_approved);
+    }
+
+    #[test]
+    fn test_position_concentration_rejected() {
+        let config = RiskEngine::portfolio_config(f64::MAX, f64::MAX, 1.0, 0.3);
+        let mut engine = RiskEngine::new(config);
+        engine.update_position_notional("BTCUSDT", 20_000.0);
+        // Adding 20k more = 40k / 100k = 40% > 30%
+        let result = engine.check_position_concentration("BTCUSDT", 20_000.0, 100_000.0);
+        assert!(!result.is_approved);
+        assert!(result.reason.as_ref().map_or(false, |r| r.contains("concentration")));
+    }
+
+    #[test]
+    fn test_drawdown_circuit_breaker() {
+        let config = RiskEngine::portfolio_config(f64::MAX, f64::MAX, 0.1, 1.0);
+        let mut engine = RiskEngine::new(config);
+        // Peak equity at 100k
+        let result = engine.update_equity(100_000.0);
+        assert!(result.is_approved);
+        assert!(!engine.is_halted());
+        // Drop 5% — still OK
+        let result = engine.update_equity(95_000.0);
+        assert!(result.is_approved);
+        assert!(!engine.is_halted());
+        // Drop 12% — circuit breaker!
+        let result = engine.update_equity(88_000.0);
+        assert!(!result.is_approved);
+        assert!(engine.is_halted());
+        assert!(result.reason.as_ref().map_or(false, |r| r.contains("Drawdown")));
+    }
+
+    #[test]
+    fn test_drawdown_no_trigger_at_boundary() {
+        let config = RiskEngine::portfolio_config(f64::MAX, f64::MAX, 0.1, 1.0);
+        let mut engine = RiskEngine::new(config);
+        engine.update_equity(100_000.0);
+        // Drop exactly 10% — should trigger (>=)
+        let result = engine.update_equity(90_000.0);
+        assert!(!result.is_approved);
+        assert!(engine.is_halted());
+    }
+
+    #[test]
+    fn test_drawdown_no_trigger_below_boundary() {
+        let config = RiskEngine::portfolio_config(f64::MAX, f64::MAX, 0.1, 1.0);
+        let mut engine = RiskEngine::new(config);
+        engine.update_equity(100_000.0);
+        // Drop 9% — should NOT trigger
+        let result = engine.update_equity(91_000.0);
+        assert!(result.is_approved);
+        assert!(!engine.is_halted());
+    }
+
+    #[test]
+    fn test_update_position_notional() {
+        let mut engine = RiskEngine::new_unrestricted();
+        assert!((engine.total_notional - 0.0).abs() < 1e-10);
+
+        engine.update_position_notional("BTCUSDT", 50_000.0);
+        assert!((engine.total_notional - 50_000.0).abs() < 1e-10);
+
+        engine.update_position_notional("ETHUSDT", 30_000.0);
+        assert!((engine.total_notional - 80_000.0).abs() < 1e-10);
+
+        // Update existing position
+        engine.update_position_notional("BTCUSDT", 60_000.0);
+        assert!((engine.total_notional - 90_000.0).abs() < 1e-10);
+
+        // Close position (notional = 0 removes it)
+        engine.update_position_notional("ETHUSDT", 0.0);
+        assert!((engine.total_notional - 60_000.0).abs() < 1e-10);
+        assert!(!engine.position_notional.contains_key("ETHUSDT"));
+    }
+
+    #[test]
+    fn test_is_halted_default() {
+        let engine = RiskEngine::new_unrestricted();
+        assert!(!engine.is_halted());
+    }
+
+    #[test]
+    fn test_portfolio_config_builder() {
+        let config = RiskEngine::portfolio_config(2.0, 3.0, 0.15, 0.25);
+        assert!((config.max_portfolio_exposure - 2.0).abs() < 1e-10);
+        assert!((config.max_leverage - 3.0).abs() < 1e-10);
+        assert!((config.max_drawdown_pct - 0.15).abs() < 1e-10);
+        assert!((config.max_position_concentration - 0.25).abs() < 1e-10);
+        // Per-order defaults should be preserved
+        assert!(config.check_order_size);
+    }
+
+    #[test]
+    fn test_exposure_zero_capital_approved() {
+        let engine = RiskEngine::new_unrestricted();
+        // Zero capital should auto-approve (can't divide by zero)
+        let result = engine.check_portfolio_exposure(100_000.0, 0.0);
+        assert!(result.is_approved);
+    }
+
+    #[test]
+    fn test_concentration_zero_capital_approved() {
+        let engine = RiskEngine::new_unrestricted();
+        let result = engine.check_position_concentration("BTCUSDT", 100_000.0, 0.0);
+        assert!(result.is_approved);
+    }
 }

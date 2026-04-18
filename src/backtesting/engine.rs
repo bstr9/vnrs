@@ -30,6 +30,78 @@ use super::database::DatabaseLoader;
 use super::position::Position;
 use super::fill_model::{FillModel, BestPriceFillModel};
 use super::risk_engine::{RiskEngine, RiskConfig};
+use crate::trader::OrderType;
+
+/// Emulated order type for backtesting (order types not natively supported by exchanges)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BacktestEmulatedType {
+    /// Trailing stop with percentage distance
+    TrailingStopPct,
+    /// Trailing stop with absolute price distance
+    TrailingStopAbs,
+    /// Market-If-Touched: trigger at price, submit market order
+    Mit,
+    /// Limit-If-Touched: trigger at price, submit limit order
+    Lit,
+}
+
+/// An emulated order tracked by the backtesting engine
+#[derive(Debug, Clone)]
+pub struct BacktestEmulatedOrder {
+    pub id: u64,
+    pub order_type: BacktestEmulatedType,
+    pub symbol: String,
+    pub exchange: Exchange,
+    pub direction: Direction,
+    pub offset: Offset,
+    pub volume: f64,
+    pub trail_pct: Option<f64>,
+    pub trail_abs: Option<f64>,
+    pub trigger_price: Option<f64>,
+    pub limit_price: Option<f64>,
+    pub current_stop: Option<f64>,
+    pub highest_price: Option<f64>,
+    pub lowest_price: Option<f64>,
+    pub is_active: bool,
+}
+
+/// Bracket order group type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BacktestBracketType {
+    Bracket,
+    Oco,
+    Oto,
+}
+
+/// Bracket order group state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BacktestBracketState {
+    Pending,
+    EntryActive,
+    SecondaryActive,
+    Completed,
+    Cancelled,
+}
+
+/// Child order in a bracket group
+#[derive(Debug, Clone)]
+pub struct BacktestChildOrder {
+    pub role: String,
+    pub vt_orderid: Option<String>,
+    pub request: OrderRequest,
+    pub filled_volume: f64,
+    pub is_active: bool,
+}
+
+/// Bracket order group
+#[derive(Debug, Clone)]
+pub struct BacktestBracketGroup {
+    pub id: u64,
+    pub bracket_type: BacktestBracketType,
+    pub state: BacktestBracketState,
+    pub vt_symbol: String,
+    pub children: HashMap<String, BacktestChildOrder>,
+}
 
 /// Backtesting engine for strategy testing
 pub struct BacktestingEngine {
@@ -93,6 +165,16 @@ pub struct BacktestingEngine {
     // Statistics parameters
     risk_free: f64,
     annual_days: u32,
+    
+    // Emulated order management
+    emulated_order_count: u64,
+    emulated_orders: HashMap<u64, BacktestEmulatedOrder>,
+    active_emulated_orders: HashMap<u64, BacktestEmulatedOrder>,
+
+    // Bracket order management
+    bracket_group_count: u64,
+    bracket_groups: HashMap<u64, BacktestBracketGroup>,
+    active_bracket_groups: HashMap<u64, BacktestBracketGroup>,
 }
 
 impl BacktestingEngine {
@@ -136,6 +218,12 @@ impl BacktestingEngine {
             logs: Vec::new(),
             risk_free: 0.0,
             annual_days: 252,
+            emulated_order_count: 0,
+            emulated_orders: HashMap::new(),
+            active_emulated_orders: HashMap::new(),
+            bracket_group_count: 0,
+            bracket_groups: HashMap::new(),
+            active_bracket_groups: HashMap::new(),
         }
     }
 
@@ -158,6 +246,13 @@ impl BacktestingEngine {
         
         self.logs.clear();
         self.history_data.clear();
+
+        self.emulated_order_count = 0;
+        self.emulated_orders.clear();
+        self.active_emulated_orders.clear();
+        self.bracket_group_count = 0;
+        self.bracket_groups.clear();
+        self.active_bracket_groups.clear();
     }
 
     /// Set backtesting parameters
@@ -458,7 +553,8 @@ impl BacktestingEngine {
     /// 2. Handle new day
     /// 3. Cross pending limit orders (placed on PREVIOUS bar)
     /// 4. Cross pending stop orders (placed on PREVIOUS bar)
-    /// 5. Call strategy on_bar() - new orders placed here are evaluated on NEXT bar
+    /// 5. Cross emulated orders (trailing stops, MIT, LIT)
+    /// 6. Call strategy on_bar() - new orders placed here are evaluated on NEXT bar
     async fn run_bar_backtesting(&mut self) -> Result<(), String> {
         let context = Arc::clone(&self.strategy_context);
 
@@ -478,11 +574,14 @@ impl BacktestingEngine {
             // 4. Cross pending stop orders from previous bar
             self.cross_stop_order(bar);
             
+            // 5. Cross emulated orders (trailing stops, MIT, LIT)
+            self.cross_emulated_order(bar);
+            
             #[cfg(feature = "gui")]
             self.strategy_context.update_indicators(&self.vt_symbol, bar);
             
-            // 5. Call strategy on_bar AFTER fills are settled
-            //    Orders placed here won't be evaluated until next bar's step 3-4
+            // 6. Call strategy on_bar AFTER fills are settled
+            //    Orders placed here won't be evaluated until next bar's step 3-5
             let pending = if let Some(strategy) = &mut self.strategy {
                 strategy.on_bar(bar, &context);
                 strategy.drain_pending_orders()
@@ -538,6 +637,9 @@ impl BacktestingEngine {
             
             // Cross stop orders with tick data
             self.cross_stop_order_tick(tick);
+            
+            // Cross emulated orders (trailing stops, MIT, LIT)
+            self.cross_emulated_order(&synthetic_bar);
             
             #[cfg(feature = "gui")]
             self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
@@ -696,6 +798,9 @@ impl BacktestingEngine {
                     strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
 
+                // Process bracket order state machine
+                self.process_bracket_on_trade(&trade);
+
                 // Handle partial fills: if fill_qty < order volume, keep order active
                 let remaining = order.volume - order.traded - result.fill_qty;
                 if remaining > 1e-10 {
@@ -797,6 +902,9 @@ impl BacktestingEngine {
                     strategy.on_stop_order(&stop_orderid);
                 }
 
+                // Process bracket order state machine
+                self.process_bracket_on_trade(&trade);
+
                 stop_order.vt_orderid = Some(stop_orderid.clone());
                 self.stop_orders.insert(stop_orderid.clone(), stop_order);
                 self.active_stop_orders.remove(&stop_orderid);
@@ -866,6 +974,9 @@ impl BacktestingEngine {
                     // Sync position cache so get_pos() / self.pos works
                     strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
+
+                // Process bracket order state machine
+                self.process_bracket_on_trade(&trade);
 
                 // Handle partial fills: if fill_qty < order volume, keep order active
                 let remaining = order.volume - order.traded - result.fill_qty;
@@ -967,6 +1078,9 @@ impl BacktestingEngine {
                     // Notify strategy that stop order was triggered
                     strategy.on_stop_order(&stop_orderid);
                 }
+
+                // Process bracket order state machine
+                self.process_bracket_on_trade(&trade);
 
                 stop_order.vt_orderid = Some(stop_orderid.clone());
                 self.stop_orders.insert(stop_orderid.clone(), stop_order);
@@ -1086,6 +1200,929 @@ impl BacktestingEngine {
             self.active_limit_orders.remove(vt_orderid);
         } else if self.active_stop_orders.contains_key(vt_orderid) {
             self.active_stop_orders.remove(vt_orderid);
+        }
+    }
+
+    // ========================================================================
+    // Emulated order methods (trailing stops, MIT, LIT)
+    // ========================================================================
+
+    /// Send a trailing stop order with percentage distance
+    ///
+    /// For Long: stop ratchets up as price rises; triggers sell when price drops below stop
+    /// For Short: stop ratchets down as price falls; triggers buy when price rises above stop
+    pub fn send_trailing_stop_pct(
+        &mut self,
+        symbol: &str,
+        exchange: Exchange,
+        direction: Direction,
+        offset: Offset,
+        volume: f64,
+        trail_pct: f64,
+    ) -> u64 {
+        self.emulated_order_count += 1;
+        let id = self.emulated_order_count;
+
+        // Initial stop is None - will be computed on first bar cross
+        let order = BacktestEmulatedOrder {
+            id,
+            order_type: BacktestEmulatedType::TrailingStopPct,
+            symbol: symbol.to_string(),
+            exchange,
+            direction,
+            offset,
+            volume,
+            trail_pct: Some(trail_pct),
+            trail_abs: None,
+            trigger_price: None,
+            limit_price: None,
+            current_stop: None,
+            highest_price: None,
+            lowest_price: None,
+            is_active: true,
+        };
+
+        self.emulated_orders.insert(id, order.clone());
+        self.active_emulated_orders.insert(id, order);
+
+        self.write_log(&format!(
+            "发送百分比追踪止损单: id={}, 方向={:?}, 回撤比例={}%",
+            id, direction, trail_pct
+        ));
+
+        id
+    }
+
+    /// Send a trailing stop order with absolute price distance
+    pub fn send_trailing_stop_abs(
+        &mut self,
+        symbol: &str,
+        exchange: Exchange,
+        direction: Direction,
+        offset: Offset,
+        volume: f64,
+        trail_abs: f64,
+    ) -> u64 {
+        self.emulated_order_count += 1;
+        let id = self.emulated_order_count;
+
+        let order = BacktestEmulatedOrder {
+            id,
+            order_type: BacktestEmulatedType::TrailingStopAbs,
+            symbol: symbol.to_string(),
+            exchange,
+            direction,
+            offset,
+            volume,
+            trail_pct: None,
+            trail_abs: Some(trail_abs),
+            trigger_price: None,
+            limit_price: None,
+            current_stop: None,
+            highest_price: None,
+            lowest_price: None,
+            is_active: true,
+        };
+
+        self.emulated_orders.insert(id, order.clone());
+        self.active_emulated_orders.insert(id, order);
+
+        self.write_log(&format!(
+            "发送绝对值追踪止损单: id={}, 方向={:?}, 回撤距离={}",
+            id, direction, trail_abs
+        ));
+
+        id
+    }
+
+    /// Send a Market-If-Touched order
+    ///
+    /// Long MIT: triggers when bar.low <= trigger_price → submit market buy
+    /// Short MIT: triggers when bar.high >= trigger_price → submit market sell
+    pub fn send_mit(
+        &mut self,
+        symbol: &str,
+        exchange: Exchange,
+        direction: Direction,
+        offset: Offset,
+        volume: f64,
+        trigger_price: f64,
+    ) -> u64 {
+        self.emulated_order_count += 1;
+        let id = self.emulated_order_count;
+
+        let order = BacktestEmulatedOrder {
+            id,
+            order_type: BacktestEmulatedType::Mit,
+            symbol: symbol.to_string(),
+            exchange,
+            direction,
+            offset,
+            volume,
+            trail_pct: None,
+            trail_abs: None,
+            trigger_price: Some(trigger_price),
+            limit_price: None,
+            current_stop: None,
+            highest_price: None,
+            lowest_price: None,
+            is_active: true,
+        };
+
+        self.emulated_orders.insert(id, order.clone());
+        self.active_emulated_orders.insert(id, order);
+
+        self.write_log(&format!(
+            "发送MIT单: id={}, 方向={:?}, 触发价={}",
+            id, direction, trigger_price
+        ));
+
+        id
+    }
+
+    /// Send a Limit-If-Touched order
+    ///
+    /// LIT: triggers like MIT, but submits a limit order at limit_price instead of market
+    pub fn send_lit(
+        &mut self,
+        symbol: &str,
+        exchange: Exchange,
+        direction: Direction,
+        offset: Offset,
+        volume: f64,
+        trigger_price: f64,
+        limit_price: f64,
+    ) -> u64 {
+        self.emulated_order_count += 1;
+        let id = self.emulated_order_count;
+
+        let order = BacktestEmulatedOrder {
+            id,
+            order_type: BacktestEmulatedType::Lit,
+            symbol: symbol.to_string(),
+            exchange,
+            direction,
+            offset,
+            volume,
+            trail_pct: None,
+            trail_abs: None,
+            trigger_price: Some(trigger_price),
+            limit_price: Some(limit_price),
+            current_stop: None,
+            highest_price: None,
+            lowest_price: None,
+            is_active: true,
+        };
+
+        self.emulated_orders.insert(id, order.clone());
+        self.active_emulated_orders.insert(id, order);
+
+        self.write_log(&format!(
+            "发送LIT单: id={}, 方向={:?}, 触发价={}, 限价={}",
+            id, direction, trigger_price, limit_price
+        ));
+
+        id
+    }
+
+    // ========================================================================
+    // Bracket order methods (Bracket, OCO, OTO)
+    // ========================================================================
+
+    /// Send a bracket order: entry → take_profit + stop_loss
+    ///
+    /// State machine: Pending → EntryActive → SecondaryActive → Completed
+    pub fn send_bracket_order(
+        &mut self,
+        entry_req: OrderRequest,
+        tp_req: OrderRequest,
+        sl_req: OrderRequest,
+    ) -> u64 {
+        self.bracket_group_count += 1;
+        let id = self.bracket_group_count;
+        let vt_symbol = format!("{}.{}", entry_req.symbol, entry_req.exchange.value());
+
+        let entry_child = BacktestChildOrder {
+            role: "entry".to_string(),
+            vt_orderid: None,
+            request: entry_req.clone(),
+            filled_volume: 0.0,
+            is_active: false,
+        };
+
+        let tp_child = BacktestChildOrder {
+            role: "take_profit".to_string(),
+            vt_orderid: None,
+            request: tp_req,
+            filled_volume: 0.0,
+            is_active: false,
+        };
+
+        let sl_child = BacktestChildOrder {
+            role: "stop_loss".to_string(),
+            vt_orderid: None,
+            request: sl_req,
+            filled_volume: 0.0,
+            is_active: false,
+        };
+
+        let mut children = HashMap::new();
+        children.insert("entry".to_string(), entry_child);
+        children.insert("take_profit".to_string(), tp_child);
+        children.insert("stop_loss".to_string(), sl_child);
+
+        let group = BacktestBracketGroup {
+            id,
+            bracket_type: BacktestBracketType::Bracket,
+            state: BacktestBracketState::Pending,
+            vt_symbol: vt_symbol.clone(),
+            children,
+        };
+
+        self.bracket_groups.insert(id, group.clone());
+        self.active_bracket_groups.insert(id, group);
+
+        // Submit entry order immediately
+        let entry_vt_orderid = self.send_limit_order(entry_req);
+        if let Some(group) = self.bracket_groups.get_mut(&id) {
+            group.state = BacktestBracketState::EntryActive;
+            if let Some(entry) = group.children.get_mut("entry") {
+                entry.vt_orderid = Some(entry_vt_orderid.clone());
+                entry.is_active = true;
+            }
+        }
+        if let Some(group) = self.active_bracket_groups.get_mut(&id) {
+            group.state = BacktestBracketState::EntryActive;
+            if let Some(entry) = group.children.get_mut("entry") {
+                entry.vt_orderid = Some(entry_vt_orderid.clone());
+                entry.is_active = true;
+            }
+        }
+
+        self.write_log(&format!(
+            "发送Bracket单: group_id={}, 入场单={}", id, entry_vt_orderid
+        ));
+
+        id
+    }
+
+    /// Send an OCO (One-Cancels-Other) order: two orders, if one fills, cancel the other
+    ///
+    /// State machine: Pending → SecondaryActive → Completed
+    pub fn send_oco_order(
+        &mut self,
+        order_a_req: OrderRequest,
+        order_b_req: OrderRequest,
+    ) -> u64 {
+        self.bracket_group_count += 1;
+        let id = self.bracket_group_count;
+        let vt_symbol = format!("{}.{}", order_a_req.symbol, order_a_req.exchange.value());
+
+        let child_a = BacktestChildOrder {
+            role: "order_a".to_string(),
+            vt_orderid: None,
+            request: order_a_req.clone(),
+            filled_volume: 0.0,
+            is_active: false,
+        };
+
+        let child_b = BacktestChildOrder {
+            role: "order_b".to_string(),
+            vt_orderid: None,
+            request: order_b_req.clone(),
+            filled_volume: 0.0,
+            is_active: false,
+        };
+
+        let mut children = HashMap::new();
+        children.insert("order_a".to_string(), child_a);
+        children.insert("order_b".to_string(), child_b);
+
+        let group = BacktestBracketGroup {
+            id,
+            bracket_type: BacktestBracketType::Oco,
+            state: BacktestBracketState::Pending,
+            vt_symbol: vt_symbol.clone(),
+            children,
+        };
+
+        self.bracket_groups.insert(id, group.clone());
+        self.active_bracket_groups.insert(id, group);
+
+        // Submit both orders immediately
+        let vt_a = self.send_limit_order(order_a_req);
+        let vt_b = self.send_limit_order(order_b_req);
+
+        if let Some(group) = self.bracket_groups.get_mut(&id) {
+            group.state = BacktestBracketState::SecondaryActive;
+            if let Some(a) = group.children.get_mut("order_a") {
+                a.vt_orderid = Some(vt_a.clone());
+                a.is_active = true;
+            }
+            if let Some(b) = group.children.get_mut("order_b") {
+                b.vt_orderid = Some(vt_b.clone());
+                b.is_active = true;
+            }
+        }
+        if let Some(group) = self.active_bracket_groups.get_mut(&id) {
+            group.state = BacktestBracketState::SecondaryActive;
+            if let Some(a) = group.children.get_mut("order_a") {
+                a.vt_orderid = Some(vt_a.clone());
+                a.is_active = true;
+            }
+            if let Some(b) = group.children.get_mut("order_b") {
+                b.vt_orderid = Some(vt_b.clone());
+                b.is_active = true;
+            }
+        }
+
+        self.write_log(&format!(
+            "发送OCO单: group_id={}, order_a={}, order_b={}", id, vt_a, vt_b
+        ));
+
+        id
+    }
+
+    /// Send an OTO (One-Triggers-Other) order: primary fills → submit secondary
+    ///
+    /// State machine: Pending → SecondaryActive → Completed
+    pub fn send_oto_order(
+        &mut self,
+        primary_req: OrderRequest,
+        secondary_req: OrderRequest,
+    ) -> u64 {
+        self.bracket_group_count += 1;
+        let id = self.bracket_group_count;
+        let vt_symbol = format!("{}.{}", primary_req.symbol, primary_req.exchange.value());
+
+        let primary_child = BacktestChildOrder {
+            role: "primary".to_string(),
+            vt_orderid: None,
+            request: primary_req.clone(),
+            filled_volume: 0.0,
+            is_active: false,
+        };
+
+        let secondary_child = BacktestChildOrder {
+            role: "secondary".to_string(),
+            vt_orderid: None,
+            request: secondary_req,
+            filled_volume: 0.0,
+            is_active: false,
+        };
+
+        let mut children = HashMap::new();
+        children.insert("primary".to_string(), primary_child);
+        children.insert("secondary".to_string(), secondary_child);
+
+        let group = BacktestBracketGroup {
+            id,
+            bracket_type: BacktestBracketType::Oto,
+            state: BacktestBracketState::Pending,
+            vt_symbol: vt_symbol.clone(),
+            children,
+        };
+
+        self.bracket_groups.insert(id, group.clone());
+        self.active_bracket_groups.insert(id, group);
+
+        // Submit primary order immediately
+        let vt_primary = self.send_limit_order(primary_req);
+        if let Some(group) = self.bracket_groups.get_mut(&id) {
+            group.state = BacktestBracketState::EntryActive;
+            if let Some(p) = group.children.get_mut("primary") {
+                p.vt_orderid = Some(vt_primary.clone());
+                p.is_active = true;
+            }
+        }
+        if let Some(group) = self.active_bracket_groups.get_mut(&id) {
+            group.state = BacktestBracketState::EntryActive;
+            if let Some(p) = group.children.get_mut("primary") {
+                p.vt_orderid = Some(vt_primary.clone());
+                p.is_active = true;
+            }
+        }
+
+        self.write_log(&format!(
+            "发送OTO单: group_id={}, 主单={}", id, vt_primary
+        ));
+
+        id
+    }
+
+    // ========================================================================
+    // Emulated order crossing (called per bar)
+    // ========================================================================
+
+    /// Cross emulated orders against current bar
+    ///
+    /// For each active emulated order:
+    /// - TrailingStop: update trail, trigger if price crosses stop
+    /// - MIT: trigger if price touches trigger level
+    /// - LIT: trigger if price touches trigger level, submit limit order
+    fn cross_emulated_order(&mut self, bar: &BarData) {
+        let active_orders: Vec<_> = self.active_emulated_orders.iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+
+        let mut triggered_ids = Vec::new();
+
+        for (id, mut order) in active_orders {
+            let mut should_trigger = false;
+            let mut trigger_direction = order.direction;
+            let mut trigger_offset = order.offset;
+            let trigger_volume = order.volume;
+            let mut trigger_order_type = OrderType::Market;
+            let mut trigger_price = 0.0_f64;
+
+            match order.order_type {
+                BacktestEmulatedType::TrailingStopPct => {
+                    let trail_pct = order.trail_pct.unwrap_or(0.0);
+
+                    match order.direction {
+                        Direction::Long => {
+                            // Check if this is the first bar (highest not yet set)
+                            let was_first_bar = order.highest_price.is_none();
+
+                            // Update highest price seen
+                            let prev_highest = order.highest_price.unwrap_or(0.0);
+                            let new_highest = if bar.high_price > prev_highest {
+                                bar.high_price
+                            } else {
+                                prev_highest
+                            };
+                            order.highest_price = Some(new_highest);
+
+                            // Compute stop: highest * (1 - pct/100)
+                            let new_stop = new_highest * (1.0 - trail_pct / 100.0);
+                            // Only ratchet stop upward
+                            let prev_stop = order.current_stop.unwrap_or(0.0);
+                            order.current_stop = Some(if new_stop > prev_stop { new_stop } else { prev_stop });
+
+                            // Trigger if bar.low <= current_stop (only after stop has been established)
+                            if !was_first_bar && order.current_stop.unwrap_or(0.0) > 0.0 && bar.low_price <= order.current_stop.unwrap_or(0.0) {
+                                should_trigger = true;
+                                // Trailing stop for long triggers a sell (Short direction to close)
+                                trigger_direction = Direction::Short;
+                                trigger_offset = Offset::Close;
+                                trigger_order_type = OrderType::Market;
+                                trigger_price = order.current_stop.unwrap_or(0.0);
+                            }
+                        }
+                        Direction::Short => {
+                            // Check if this is the first bar (lowest not yet set)
+                            let was_first_bar = order.lowest_price.is_none();
+
+                            // Update lowest price seen
+                            let prev_lowest = order.lowest_price.unwrap_or(f64::MAX);
+                            let new_lowest = if bar.low_price < prev_lowest {
+                                bar.low_price
+                            } else {
+                                prev_lowest
+                            };
+                            order.lowest_price = Some(new_lowest);
+
+                            // Compute stop: lowest * (1 + pct/100)
+                            let new_stop = new_lowest * (1.0 + trail_pct / 100.0);
+                            // Only ratchet stop downward
+                            let prev_stop = order.current_stop.unwrap_or(f64::MAX);
+                            order.current_stop = Some(if new_stop < prev_stop { new_stop } else { prev_stop });
+
+                            // Trigger if bar.high >= current_stop (only after stop has been established)
+                            let stop = order.current_stop.unwrap_or(f64::MAX);
+                            if !was_first_bar && stop < f64::MAX && bar.high_price >= stop {
+                                should_trigger = true;
+                                // Trailing stop for short triggers a buy (Long direction to close)
+                                trigger_direction = Direction::Long;
+                                trigger_offset = Offset::Close;
+                                trigger_order_type = OrderType::Market;
+                                trigger_price = stop;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                BacktestEmulatedType::TrailingStopAbs => {
+                    let trail_abs = order.trail_abs.unwrap_or(0.0);
+
+                    match order.direction {
+                        Direction::Long => {
+                            // Check if this is the first bar
+                            let was_first_bar = order.highest_price.is_none();
+
+                            let prev_highest = order.highest_price.unwrap_or(0.0);
+                            let new_highest = if bar.high_price > prev_highest { bar.high_price } else { prev_highest };
+                            order.highest_price = Some(new_highest);
+
+                            let new_stop = new_highest - trail_abs;
+                            let prev_stop = order.current_stop.unwrap_or(0.0);
+                            order.current_stop = Some(if new_stop > prev_stop { new_stop } else { prev_stop });
+
+                            // Only trigger after stop has been established
+                            if !was_first_bar && order.current_stop.unwrap_or(0.0) > 0.0 && bar.low_price <= order.current_stop.unwrap_or(0.0) {
+                                should_trigger = true;
+                                trigger_direction = Direction::Short;
+                                trigger_offset = Offset::Close;
+                                trigger_order_type = OrderType::Market;
+                                trigger_price = order.current_stop.unwrap_or(0.0);
+                            }
+                        }
+                        Direction::Short => {
+                            // Check if this is the first bar
+                            let was_first_bar = order.lowest_price.is_none();
+
+                            let prev_lowest = order.lowest_price.unwrap_or(f64::MAX);
+                            let new_lowest = if bar.low_price < prev_lowest { bar.low_price } else { prev_lowest };
+                            order.lowest_price = Some(new_lowest);
+
+                            let new_stop = new_lowest + trail_abs;
+                            let prev_stop = order.current_stop.unwrap_or(f64::MAX);
+                            order.current_stop = Some(if new_stop < prev_stop { new_stop } else { prev_stop });
+
+                            let stop = order.current_stop.unwrap_or(f64::MAX);
+                            // Only trigger after stop has been established
+                            if !was_first_bar && stop < f64::MAX && bar.high_price >= stop {
+                                should_trigger = true;
+                                trigger_direction = Direction::Long;
+                                trigger_offset = Offset::Close;
+                                trigger_order_type = OrderType::Market;
+                                trigger_price = stop;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                BacktestEmulatedType::Mit => {
+                    let trigger = order.trigger_price.unwrap_or(0.0);
+                    match order.direction {
+                        Direction::Long => {
+                            if bar.low_price <= trigger {
+                                should_trigger = true;
+                                trigger_order_type = OrderType::Market;
+                                trigger_price = trigger;
+                            }
+                        }
+                        Direction::Short => {
+                            if bar.high_price >= trigger {
+                                should_trigger = true;
+                                trigger_order_type = OrderType::Market;
+                                trigger_price = trigger;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                BacktestEmulatedType::Lit => {
+                    let trigger = order.trigger_price.unwrap_or(0.0);
+                    match order.direction {
+                        Direction::Long => {
+                            if bar.low_price <= trigger {
+                                should_trigger = true;
+                                trigger_order_type = OrderType::Limit;
+                                trigger_price = order.limit_price.unwrap_or(trigger);
+                            }
+                        }
+                        Direction::Short => {
+                            if bar.high_price >= trigger {
+                                should_trigger = true;
+                                trigger_order_type = OrderType::Limit;
+                                trigger_price = order.limit_price.unwrap_or(trigger);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            if should_trigger {
+                order.is_active = false;
+
+                // Update the stored order
+                if let Some(stored) = self.emulated_orders.get_mut(&id) {
+                    stored.is_active = false;
+                    stored.current_stop = order.current_stop;
+                    stored.highest_price = order.highest_price;
+                    stored.lowest_price = order.lowest_price;
+                }
+
+                triggered_ids.push(id);
+
+                // Submit the generated order
+                let req = OrderRequest {
+                    symbol: order.symbol.clone(),
+                    exchange: order.exchange,
+                    direction: trigger_direction,
+                    order_type: trigger_order_type,
+                    volume: trigger_volume,
+                    price: trigger_price,
+                    offset: trigger_offset,
+                    reference: format!("EMULATED_{}", id),
+                };
+
+                self.send_limit_order(req);
+
+                self.write_log(&format!(
+                    "模拟订单触发: id={}, 类型={:?}, 方向={:?}",
+                    id, order.order_type, trigger_direction
+                ));
+            } else {
+                // Update tracking prices even if not triggered
+                if let Some(stored) = self.emulated_orders.get_mut(&id) {
+                    stored.current_stop = order.current_stop;
+                    stored.highest_price = order.highest_price;
+                    stored.lowest_price = order.lowest_price;
+                }
+                if let Some(stored) = self.active_emulated_orders.get_mut(&id) {
+                    stored.current_stop = order.current_stop;
+                    stored.highest_price = order.highest_price;
+                    stored.lowest_price = order.lowest_price;
+                }
+            }
+        }
+
+        // Remove triggered orders from active set
+        for id in triggered_ids {
+            self.active_emulated_orders.remove(&id);
+        }
+    }
+
+    // ========================================================================
+    // Bracket order processing (called after each fill)
+    // ========================================================================
+
+    /// Process bracket order state machine after a trade fill
+    ///
+    /// Bracket: entry fill → submit TP+SL; TP fill → cancel SL; SL fill → cancel TP
+    /// OCO: one fills → cancel the other
+    /// OTO: primary fills → submit secondary; secondary fills → complete
+    fn process_bracket_on_trade(&mut self, trade: &TradeData) {
+        let trade_orderid = &trade.orderid;
+
+        // Find which bracket group this trade belongs to
+        let mut matching_group_id: Option<u64> = None;
+        let mut matching_role: Option<String> = None;
+
+        for (group_id, group) in &self.active_bracket_groups {
+            for (role, child) in &group.children {
+                if let Some(ref vt_orderid) = child.vt_orderid {
+                    if vt_orderid == trade_orderid {
+                        matching_group_id = Some(*group_id);
+                        matching_role = Some(role.clone());
+                        break;
+                    }
+                }
+            }
+            if matching_group_id.is_some() {
+                break;
+            }
+        }
+
+        let (group_id, role) = match (matching_group_id, matching_role) {
+            (Some(g), Some(r)) => (g, r),
+            _ => return, // Trade doesn't belong to any bracket group
+        };
+
+        // Update filled volume in the child order
+        if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+            if let Some(child) = group.children.get_mut(&role) {
+                child.filled_volume += trade.volume;
+            }
+        }
+        if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+            if let Some(child) = group.children.get_mut(&role) {
+                child.filled_volume += trade.volume;
+            }
+        }
+
+        // Get bracket_type from the stored group (we need to read before mutating)
+        let bracket_type = self.bracket_groups.get(&group_id)
+            .map(|g| g.bracket_type)
+            .unwrap_or(BacktestBracketType::Bracket);
+
+        match bracket_type {
+            BacktestBracketType::Bracket => {
+                match role.as_str() {
+                    "entry" => {
+                        // Entry filled → submit TP (limit) and SL (stop)
+                        let tp_req = self.bracket_groups.get(&group_id)
+                            .and_then(|g| g.children.get("take_profit"))
+                            .map(|c| c.request.clone());
+                        let sl_req = self.bracket_groups.get(&group_id)
+                            .and_then(|g| g.children.get("stop_loss"))
+                            .map(|c| c.request.clone());
+
+                        if let Some(req) = tp_req {
+                            let vt_id = self.send_limit_order(req);
+                            if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                                group.state = BacktestBracketState::SecondaryActive;
+                                if let Some(tp) = group.children.get_mut("take_profit") {
+                                    tp.vt_orderid = Some(vt_id.clone());
+                                    tp.is_active = true;
+                                }
+                            }
+                            if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                                group.state = BacktestBracketState::SecondaryActive;
+                                if let Some(tp) = group.children.get_mut("take_profit") {
+                                    tp.vt_orderid = Some(vt_id.clone());
+                                    tp.is_active = true;
+                                }
+                            }
+                        }
+
+                        if let Some(req) = sl_req {
+                            let vt_id = self.send_stop_order(req);
+                            if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                                if let Some(sl) = group.children.get_mut("stop_loss") {
+                                    sl.vt_orderid = Some(vt_id.clone());
+                                    sl.is_active = true;
+                                }
+                            }
+                            if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                                if let Some(sl) = group.children.get_mut("stop_loss") {
+                                    sl.vt_orderid = Some(vt_id);
+                                    sl.is_active = true;
+                                }
+                            }
+                        }
+
+                        // Deactivate entry child
+                        if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                            if let Some(entry) = group.children.get_mut("entry") {
+                                entry.is_active = false;
+                            }
+                        }
+                        if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                            if let Some(entry) = group.children.get_mut("entry") {
+                                entry.is_active = false;
+                            }
+                        }
+
+                        self.write_log(&format!("Bracket入场成交: group_id={}", group_id));
+                    }
+                    "take_profit" => {
+                        // TP filled → cancel SL → Completed
+                        let sl_vt_orderid = self.bracket_groups.get(&group_id)
+                            .and_then(|g| g.children.get("stop_loss"))
+                            .and_then(|c| c.vt_orderid.clone());
+
+                        if let Some(sl_id) = sl_vt_orderid {
+                            self.cancel_order(&sl_id);
+                        }
+
+                        if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                            group.state = BacktestBracketState::Completed;
+                            if let Some(tp) = group.children.get_mut("take_profit") {
+                                tp.is_active = false;
+                            }
+                            if let Some(sl) = group.children.get_mut("stop_loss") {
+                                sl.is_active = false;
+                            }
+                        }
+                        if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                            group.state = BacktestBracketState::Completed;
+                            if let Some(tp) = group.children.get_mut("take_profit") {
+                                tp.is_active = false;
+                            }
+                            if let Some(sl) = group.children.get_mut("stop_loss") {
+                                sl.is_active = false;
+                            }
+                        }
+
+                        self.active_bracket_groups.remove(&group_id);
+                        self.write_log(&format!("Bracket止盈成交: group_id={}, 已取消止损", group_id));
+                    }
+                    "stop_loss" => {
+                        // SL filled → cancel TP → Completed
+                        let tp_vt_orderid = self.bracket_groups.get(&group_id)
+                            .and_then(|g| g.children.get("take_profit"))
+                            .and_then(|c| c.vt_orderid.clone());
+
+                        if let Some(tp_id) = tp_vt_orderid {
+                            self.cancel_order(&tp_id);
+                        }
+
+                        if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                            group.state = BacktestBracketState::Completed;
+                            if let Some(tp) = group.children.get_mut("take_profit") {
+                                tp.is_active = false;
+                            }
+                            if let Some(sl) = group.children.get_mut("stop_loss") {
+                                sl.is_active = false;
+                            }
+                        }
+                        if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                            group.state = BacktestBracketState::Completed;
+                            if let Some(tp) = group.children.get_mut("take_profit") {
+                                tp.is_active = false;
+                            }
+                            if let Some(sl) = group.children.get_mut("stop_loss") {
+                                sl.is_active = false;
+                            }
+                        }
+
+                        self.active_bracket_groups.remove(&group_id);
+                        self.write_log(&format!("Bracket止损成交: group_id={}, 已取消止盈", group_id));
+                    }
+                    _ => {}
+                }
+            }
+            BacktestBracketType::Oco => {
+                // One fills → cancel the other
+                let other_role = if role == "order_a" { "order_b" } else { "order_a" };
+
+                let other_vt_orderid = self.bracket_groups.get(&group_id)
+                    .and_then(|g| g.children.get(other_role))
+                    .and_then(|c| c.vt_orderid.clone());
+
+                if let Some(other_id) = other_vt_orderid {
+                    self.cancel_order(&other_id);
+                }
+
+                if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                    group.state = BacktestBracketState::Completed;
+                    if let Some(child) = group.children.get_mut(&role) {
+                        child.is_active = false;
+                    }
+                    if let Some(other) = group.children.get_mut(other_role) {
+                        other.is_active = false;
+                    }
+                }
+                if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                    group.state = BacktestBracketState::Completed;
+                    if let Some(child) = group.children.get_mut(&role) {
+                        child.is_active = false;
+                    }
+                    if let Some(other) = group.children.get_mut(other_role) {
+                        other.is_active = false;
+                    }
+                }
+
+                self.active_bracket_groups.remove(&group_id);
+                self.write_log(&format!(
+                    "OCO单成交: group_id={}, 成交方={}, 已取消{}",
+                    group_id, role, other_role
+                ));
+            }
+            BacktestBracketType::Oto => {
+                match role.as_str() {
+                    "primary" => {
+                        // Primary filled → submit secondary
+                        let sec_req = self.bracket_groups.get(&group_id)
+                            .and_then(|g| g.children.get("secondary"))
+                            .map(|c| c.request.clone());
+
+                        if let Some(req) = sec_req {
+                            let vt_id = self.send_limit_order(req);
+                            if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                                group.state = BacktestBracketState::SecondaryActive;
+                                if let Some(sec) = group.children.get_mut("secondary") {
+                                    sec.vt_orderid = Some(vt_id.clone());
+                                    sec.is_active = true;
+                                }
+                            }
+                            if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                                group.state = BacktestBracketState::SecondaryActive;
+                                if let Some(sec) = group.children.get_mut("secondary") {
+                                    sec.vt_orderid = Some(vt_id.clone());
+                                    sec.is_active = true;
+                                }
+                            }
+                        }
+
+                        if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                            if let Some(p) = group.children.get_mut("primary") {
+                                p.is_active = false;
+                            }
+                        }
+                        if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                            if let Some(p) = group.children.get_mut("primary") {
+                                p.is_active = false;
+                            }
+                        }
+
+                        self.write_log(&format!("OTO主单成交: group_id={}", group_id));
+                    }
+                    "secondary" => {
+                        // Secondary filled → Completed
+                        if let Some(group) = self.bracket_groups.get_mut(&group_id) {
+                            group.state = BacktestBracketState::Completed;
+                            if let Some(sec) = group.children.get_mut("secondary") {
+                                sec.is_active = false;
+                            }
+                        }
+                        if let Some(group) = self.active_bracket_groups.get_mut(&group_id) {
+                            group.state = BacktestBracketState::Completed;
+                            if let Some(sec) = group.children.get_mut("secondary") {
+                                sec.is_active = false;
+                            }
+                        }
+
+                        self.active_bracket_groups.remove(&group_id);
+                        self.write_log(&format!("OTO副单成交: group_id={}", group_id));
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -1965,5 +3002,788 @@ mod tests {
         let result = engine.load_data_from_binance().await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("起始日期必须小于结束日期"));
+    }
+
+    // ========================================================================
+    // Emulated order tests
+    // ========================================================================
+
+    #[test]
+    fn test_send_trailing_stop_pct() {
+        let mut engine = BacktestingEngine::new();
+        let id = engine.send_trailing_stop_pct(
+            "BTCUSDT", Exchange::Binance, Direction::Long,
+            Offset::Close, 1.0, 5.0,
+        );
+        assert_eq!(id, 1);
+        assert_eq!(engine.emulated_order_count, 1);
+        assert!(engine.emulated_orders.contains_key(&id));
+        assert!(engine.active_emulated_orders.contains_key(&id));
+        let order = &engine.emulated_orders[&id];
+        assert_eq!(order.order_type, BacktestEmulatedType::TrailingStopPct);
+        assert_eq!(order.direction, Direction::Long);
+        assert!((order.trail_pct.unwrap_or(0.0) - 5.0).abs() < 1e-10);
+        assert!(order.is_active);
+    }
+
+    #[test]
+    fn test_trailing_stop_long_triggers() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.pricetick = 0.01;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
+
+        let id = engine.send_trailing_stop_pct(
+            "BTCUSDT", Exchange::Binance, Direction::Long,
+            Offset::Close, 1.0, 5.0,  // 5% trailing
+        );
+
+        // Bar 1: price rises, highest=51000, stop = 51000*(1-0.05) = 48450
+        let bar1 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 51000.0,
+            low_price: 49900.0,
+            close_price: 50900.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar1);
+        // Should not trigger yet
+        assert!(engine.active_emulated_orders.contains_key(&id));
+        // Stop should be updated
+        let order = &engine.active_emulated_orders[&id];
+        let expected_stop = 51000.0 * (1.0 - 5.0 / 100.0); // 48450.0
+        assert!((order.current_stop.unwrap_or(0.0) - expected_stop).abs() < 1e-6);
+
+        // Bar 2: price drops below stop (low=48000 < 48450)
+        let bar2 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 48500.0,
+            high_price: 48600.0,
+            low_price: 48000.0,
+            close_price: 48100.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar2);
+        // Should be triggered and removed from active
+        assert!(!engine.active_emulated_orders.contains_key(&id));
+        assert!(!engine.emulated_orders[&id].is_active);
+    }
+
+    #[test]
+    fn test_trailing_stop_short_triggers() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.pricetick = 0.01;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
+
+        let id = engine.send_trailing_stop_pct(
+            "BTCUSDT", Exchange::Binance, Direction::Short,
+            Offset::Close, 1.0, 5.0,  // 5% trailing
+        );
+
+        // Bar 1: price falls, lowest=49000, stop = 49000*(1+0.05) = 51450
+        let bar1 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 50100.0,
+            low_price: 49000.0,
+            close_price: 49100.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar1);
+        assert!(engine.active_emulated_orders.contains_key(&id));
+        let order = &engine.active_emulated_orders[&id];
+        let expected_stop = 49000.0 * (1.0 + 5.0 / 100.0); // 51450.0
+        assert!((order.current_stop.unwrap_or(0.0) - expected_stop).abs() < 1e-6);
+
+        // Bar 2: price rises above stop (high=52000 > 51450)
+        let bar2 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 51300.0,
+            high_price: 52000.0,
+            low_price: 51200.0,
+            close_price: 51900.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar2);
+        assert!(!engine.active_emulated_orders.contains_key(&id));
+        assert!(!engine.emulated_orders[&id].is_active);
+    }
+
+    #[test]
+    fn test_mit_order_triggers() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
+
+        // Long MIT: triggers when bar.low <= trigger_price
+        let id = engine.send_mit(
+            "BTCUSDT", Exchange::Binance, Direction::Long,
+            Offset::Open, 1.0, 49000.0,
+        );
+
+        // Bar where low=48900 <= 49000 → should trigger
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 49500.0,
+            high_price: 49600.0,
+            low_price: 48900.0,
+            close_price: 49100.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar);
+
+        // Should be triggered
+        assert!(!engine.active_emulated_orders.contains_key(&id));
+        assert!(!engine.emulated_orders[&id].is_active);
+        // A limit order should have been submitted (via send_limit_order)
+        assert_eq!(engine.limit_order_count, 1);
+    }
+
+    #[test]
+    fn test_mit_order_no_trigger() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+
+        let id = engine.send_mit(
+            "BTCUSDT", Exchange::Binance, Direction::Long,
+            Offset::Open, 1.0, 48000.0,
+        );
+
+        // Bar where low=49000 > 48000 → should NOT trigger
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 49500.0,
+            high_price: 49600.0,
+            low_price: 49000.0,
+            close_price: 49100.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar);
+        assert!(engine.active_emulated_orders.contains_key(&id));
+    }
+
+    #[test]
+    fn test_lit_order_triggers() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
+
+        // Long LIT: triggers when bar.low <= trigger_price, submits limit at limit_price
+        let id = engine.send_lit(
+            "BTCUSDT", Exchange::Binance, Direction::Long,
+            Offset::Open, 1.0, 49000.0, 48900.0,
+        );
+
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 49500.0,
+            high_price: 49600.0,
+            low_price: 48900.0,
+            close_price: 49100.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar);
+
+        assert!(!engine.active_emulated_orders.contains_key(&id));
+        assert!(!engine.emulated_orders[&id].is_active);
+        // A limit order should have been submitted with limit price
+        assert_eq!(engine.limit_order_count, 1);
+        // The submitted order should have the limit_price (48900)
+        let submitted = engine.active_limit_orders.values().next().unwrap();
+        assert!((submitted.price - 48900.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_trailing_stop_abs_triggers() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.pricetick = 0.01;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
+
+        // Long trailing stop with absolute distance of 1000
+        let id = engine.send_trailing_stop_abs(
+            "BTCUSDT", Exchange::Binance, Direction::Long,
+            Offset::Close, 1.0, 1000.0,
+        );
+
+        // Bar 1: highest=51000, stop = 51000-1000 = 50000
+        let bar1 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 51000.0,
+            low_price: 49900.0,
+            close_price: 50900.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar1);
+        assert!(engine.active_emulated_orders.contains_key(&id));
+
+        // Bar 2: low=49900 < 50000 → triggers
+        let bar2 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50100.0,
+            high_price: 50200.0,
+            low_price: 49900.0,
+            close_price: 49950.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_emulated_order(&bar2);
+        assert!(!engine.active_emulated_orders.contains_key(&id));
+    }
+
+    // ========================================================================
+    // Bracket order tests
+    // ========================================================================
+
+    #[test]
+    fn test_send_bracket_order() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+
+        let entry_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 50000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let tp_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 51000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+        let sl_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Stop,
+            volume: 1.0,
+            price: 49000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+
+        let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
+        assert_eq!(group_id, 1);
+        assert_eq!(engine.bracket_group_count, 1);
+        assert!(engine.bracket_groups.contains_key(&group_id));
+        assert!(engine.active_bracket_groups.contains_key(&group_id));
+
+        let group = &engine.bracket_groups[&group_id];
+        assert_eq!(group.bracket_type, BacktestBracketType::Bracket);
+        assert_eq!(group.state, BacktestBracketState::EntryActive);
+        assert!(group.children.contains_key("entry"));
+        assert!(group.children.contains_key("take_profit"));
+        assert!(group.children.contains_key("stop_loss"));
+        // Entry should be active
+        assert!(group.children["entry"].is_active);
+        // TP/SL should not be active yet
+        assert!(!group.children["take_profit"].is_active);
+        assert!(!group.children["stop_loss"].is_active);
+        // An entry limit order should have been submitted
+        assert_eq!(engine.limit_order_count, 1);
+    }
+
+    #[test]
+    fn test_bracket_entry_fills_activates_tp_sl() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.1)));
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+
+        let entry_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 50000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let tp_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 51000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+        let sl_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Stop,
+            volume: 1.0,
+            price: 49000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+
+        let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
+
+        // Get entry order id
+        let entry_vt_orderid = engine.bracket_groups[&group_id].children["entry"].vt_orderid.clone().unwrap_or_default();
+
+        // Bar that fills the entry order
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50100.0,
+            high_price: 50200.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        engine.cross_limit_order(&bar);
+
+        // After entry fills: state should be SecondaryActive
+        let group = &engine.bracket_groups[&group_id];
+        assert_eq!(group.state, BacktestBracketState::SecondaryActive);
+        // TP should now be active (limit order submitted)
+        assert!(group.children["take_profit"].is_active);
+        assert!(group.children["take_profit"].vt_orderid.is_some());
+        // SL should now be active (stop order submitted)
+        assert!(group.children["stop_loss"].is_active);
+        assert!(group.children["stop_loss"].vt_orderid.is_some());
+        // Entry should be inactive
+        assert!(!group.children["entry"].is_active);
+    }
+
+    #[test]
+    fn test_bracket_tp_fills_cancels_sl() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.rate = 0.0;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.0)));
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+
+        let entry_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 50000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let tp_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 51000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+        let sl_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Stop,
+            volume: 1.0,
+            price: 49000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+
+        let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
+
+        // Fill entry order
+        let bar1 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50100.0,
+            high_price: 50200.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_limit_order(&bar1);
+
+        // Get TP and SL order ids
+        let tp_vt_orderid = engine.bracket_groups[&group_id].children["take_profit"].vt_orderid.clone().unwrap_or_default();
+        let sl_vt_orderid = engine.bracket_groups[&group_id].children["stop_loss"].vt_orderid.clone().unwrap_or_default();
+
+        // Fill TP order (sell limit at 51000, bar high >= 51000)
+        let bar2 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 51000.0,
+            high_price: 51200.0,
+            low_price: 50900.0,
+            close_price: 51100.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_limit_order(&bar2);
+
+        // After TP fills: bracket should be Completed
+        let group = &engine.bracket_groups[&group_id];
+        assert_eq!(group.state, BacktestBracketState::Completed);
+        // SL should be cancelled (removed from active)
+        assert!(!engine.active_stop_orders.contains_key(&sl_vt_orderid));
+        // TP child should be inactive
+        assert!(!group.children["take_profit"].is_active);
+        assert!(!group.children["stop_loss"].is_active);
+    }
+
+    #[test]
+    fn test_send_oco_order() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+
+        let order_a_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 51000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let order_b_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 49000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+
+        let group_id = engine.send_oco_order(order_a_req, order_b_req);
+        assert_eq!(group_id, 1);
+        assert_eq!(engine.bracket_group_count, 1);
+
+        let group = &engine.bracket_groups[&group_id];
+        assert_eq!(group.bracket_type, BacktestBracketType::Oco);
+        assert_eq!(group.state, BacktestBracketState::SecondaryActive);
+        // Both orders should be active
+        assert!(group.children["order_a"].is_active);
+        assert!(group.children["order_b"].is_active);
+        // Both limit orders should have been submitted
+        assert_eq!(engine.limit_order_count, 2);
+    }
+
+    #[test]
+    fn test_oco_one_fills_cancels_other() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.rate = 0.0;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.0)));
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+
+        let order_a_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 51000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let order_b_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 49000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+
+        let group_id = engine.send_oco_order(order_a_req, order_b_req);
+
+        let order_b_vt = engine.bracket_groups[&group_id].children["order_b"].vt_orderid.clone().unwrap_or_default();
+
+        // Fill order_a (Short limit at 51000 → bar high >= 51000)
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 51000.0,
+            high_price: 51200.0,
+            low_price: 50900.0,
+            close_price: 51100.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_limit_order(&bar);
+
+        // After order_a fills: bracket should be Completed
+        let group = &engine.bracket_groups[&group_id];
+        assert_eq!(group.state, BacktestBracketState::Completed);
+        // order_b should be cancelled
+        assert!(!engine.active_limit_orders.contains_key(&order_b_vt));
+        assert!(!group.children["order_a"].is_active);
+        assert!(!group.children["order_b"].is_active);
+    }
+
+    #[test]
+    fn test_send_oto_order() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+
+        let primary_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 50000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let secondary_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 51000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+
+        let group_id = engine.send_oto_order(primary_req, secondary_req);
+        assert_eq!(group_id, 1);
+
+        let group = &engine.bracket_groups[&group_id];
+        assert_eq!(group.bracket_type, BacktestBracketType::Oto);
+        assert_eq!(group.state, BacktestBracketState::EntryActive);
+        // Primary should be active, secondary should not
+        assert!(group.children["primary"].is_active);
+        assert!(!group.children["secondary"].is_active);
+        // Only one limit order should be submitted (primary)
+        assert_eq!(engine.limit_order_count, 1);
+    }
+
+    #[test]
+    fn test_oto_primary_fills_submits_secondary() {
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.rate = 0.0;
+        engine.set_fill_model(Box::new(BestPriceFillModel::new(0.0)));
+        engine.position = crate::backtesting::position::Position::new(
+            crate::backtesting::position::Position::generate_position_id("BTCUSDT", Exchange::Binance, 0),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+        );
+
+        let primary_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 50000.0,
+            offset: Offset::Open,
+            reference: String::new(),
+        };
+        let secondary_req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Short,
+            order_type: OrderType::Limit,
+            volume: 1.0,
+            price: 51000.0,
+            offset: Offset::Close,
+            reference: String::new(),
+        };
+
+        let group_id = engine.send_oto_order(primary_req, secondary_req);
+
+        // Fill primary order
+        let bar = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: Utc::now(),
+            interval: Some(Interval::Minute),
+            open_price: 50100.0,
+            high_price: 50200.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        engine.cross_limit_order(&bar);
+
+        // After primary fills: secondary should be submitted
+        let group = &engine.bracket_groups[&group_id];
+        assert_eq!(group.state, BacktestBracketState::SecondaryActive);
+        assert!(!group.children["primary"].is_active);
+        assert!(group.children["secondary"].is_active);
+        assert!(group.children["secondary"].vt_orderid.is_some());
+    }
+
+    #[test]
+    fn test_clear_data_resets_emulated_and_bracket() {
+        let mut engine = BacktestingEngine::new();
+        engine.send_trailing_stop_pct(
+            "BTCUSDT", Exchange::Binance, Direction::Long,
+            Offset::Close, 1.0, 5.0,
+        );
+        engine.send_bracket_order(
+            OrderRequest::new("BTCUSDT".to_string(), Exchange::Binance, Direction::Long, OrderType::Limit, 1.0),
+            OrderRequest::new("BTCUSDT".to_string(), Exchange::Binance, Direction::Short, OrderType::Limit, 1.0),
+            OrderRequest::new("BTCUSDT".to_string(), Exchange::Binance, Direction::Short, OrderType::Stop, 1.0),
+        );
+
+        assert_eq!(engine.emulated_order_count, 1);
+        assert_eq!(engine.bracket_group_count, 1);
+
+        engine.clear_data();
+
+        assert_eq!(engine.emulated_order_count, 0);
+        assert!(engine.emulated_orders.is_empty());
+        assert!(engine.active_emulated_orders.is_empty());
+        assert_eq!(engine.bracket_group_count, 0);
+        assert!(engine.bracket_groups.is_empty());
+        assert!(engine.active_bracket_groups.is_empty());
     }
 }
