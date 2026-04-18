@@ -20,6 +20,7 @@
 //! - **ui**: Graphical user interface components (requires "gui" feature)
 
 pub mod alert;
+pub mod algo;
 pub mod app;
 pub mod bar_synthesizer;
 pub mod constant;
@@ -44,6 +45,7 @@ pub mod ui;
 
 // Re-exports for convenience
 pub use alert::{AlertChannel, AlertConfig, AlertEngine, AlertLevel, AlertMessage, LogAlertChannel, WebhookAlertChannel, WebhookConfig};
+pub use algo::{AlgoEngine, AlgoId, AlgoOrderState, AlgoStatus, AlgoType, TwapConfig, VwapConfig, OrderExecutor};
 pub use app::{AppInfo, BaseApp};
 pub use constant::{
     Currency, Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status,

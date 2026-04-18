@@ -464,6 +464,7 @@ pub struct MainEngine {
     log_engine: Arc<LogEngine>,
     risk_manager: Arc<RiskManager>,
     alert_engine: Arc<super::alert::AlertEngine>,
+    algo_engine: Arc<super::algo::AlgoEngine>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -503,6 +504,7 @@ impl MainEngine {
         let log_engine = Arc::new(LogEngine::new());
         let risk_manager = Arc::new(RiskManager::new());
         let alert_engine = Arc::new(super::alert::AlertEngine::new());
+        let algo_engine = Arc::new(super::algo::AlgoEngine::new());
         
         // Create OffsetConverter with contract lookup from OmsEngine
         let oms_for_converter = oms_engine.clone();
@@ -519,6 +521,7 @@ impl MainEngine {
             log_engine,
             risk_manager,
             alert_engine,
+            algo_engine,
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -538,6 +541,7 @@ impl MainEngine {
             engines.insert("log".to_string(), engine.log_engine.clone());
             engines.insert("risk".to_string(), engine.risk_manager.clone());
             engines.insert("alert".to_string(), engine.alert_engine.clone());
+            engines.insert("algo".to_string(), engine.algo_engine.clone());
         }
         
         engine
@@ -932,6 +936,11 @@ impl MainEngine {
     /// Get alert engine
     pub fn alert_engine(&self) -> &Arc<super::alert::AlertEngine> {
         &self.alert_engine
+    }
+
+    /// Get algo engine
+    pub fn algo_engine(&self) -> &Arc<super::algo::AlgoEngine> {
+        &self.algo_engine
     }
 
     /// Get tick data
@@ -1347,5 +1356,14 @@ mod tests {
         // No bar symbols subscribed, so status should be empty for bars
         let status = recorder.get_status().await;
         assert!(status.is_empty());
+    }
+}
+
+/// Implement OrderExecutor for MainEngine so AlgoEngine can send child orders
+#[async_trait::async_trait]
+impl super::algo::OrderExecutor for MainEngine {
+    async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String> {
+        // Call the real send_order (risk check + offset conversion + gateway dispatch)
+        self.send_order(req, gateway_name).await
     }
 }

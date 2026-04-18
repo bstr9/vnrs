@@ -74,6 +74,8 @@ pub use trader::{
     EventRecord, FileDatabase,
     // Alert engine
     AlertEngine, AlertChannel, AlertConfig, AlertLevel, AlertMessage, LogAlertChannel, WebhookAlertChannel, WebhookConfig,
+    // Algo engine
+    AlgoEngine, AlgoId, AlgoOrderState, AlgoStatus, AlgoType, TwapConfig, VwapConfig, OrderExecutor,
 };
 
 // Re-export Binance gateways
