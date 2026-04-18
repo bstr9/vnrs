@@ -8,9 +8,12 @@ use tracing::{debug, error, info, warn};
 use super::app::BaseApp;
 use super::constant::Exchange;
 use super::converter::OffsetConverter;
+use super::data_download::DataDownloadManager;
 use super::database::{BaseDatabase, EventRecord};
+use super::portfolio::PortfolioManager;
 use super::recorder::{DataRecorder, RecordStatus, RecorderConfig};
 use super::risk::RiskManager;
+use super::stop_order::StopOrderEngine;
 
 use super::event::*;
 use super::gateway::{BaseGateway, GatewayEvent, GatewaySettings};
@@ -465,6 +468,9 @@ pub struct MainEngine {
     risk_manager: Arc<RiskManager>,
     alert_engine: Arc<super::alert::AlertEngine>,
     algo_engine: Arc<super::algo::AlgoEngine>,
+    data_download_manager: Arc<DataDownloadManager>,
+    portfolio_manager: Arc<PortfolioManager>,
+    stop_order_engine: Arc<StopOrderEngine>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -505,6 +511,9 @@ impl MainEngine {
         let risk_manager = Arc::new(RiskManager::new());
         let alert_engine = Arc::new(super::alert::AlertEngine::new());
         let algo_engine = Arc::new(super::algo::AlgoEngine::new());
+        let data_download_manager = Arc::new(DataDownloadManager::new());
+        let portfolio_manager = Arc::new(PortfolioManager::new());
+        let stop_order_engine = Arc::new(StopOrderEngine::new());
         
         // Create OffsetConverter with contract lookup from OmsEngine
         let oms_for_converter = oms_engine.clone();
@@ -522,6 +531,9 @@ impl MainEngine {
             risk_manager,
             alert_engine,
             algo_engine,
+            data_download_manager,
+            portfolio_manager,
+            stop_order_engine,
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -534,7 +546,7 @@ impl MainEngine {
             event_id_counter: AtomicU64::new(0),
         };
         
-        // Register OMS engine, log engine, risk manager, and alert engine
+        // Register OMS engine, log engine, risk manager, alert engine, and new engines
         {
             let mut engines = engine.engines.write().unwrap_or_else(|e| e.into_inner());
             engines.insert("oms".to_string(), engine.oms_engine.clone());
@@ -542,6 +554,9 @@ impl MainEngine {
             engines.insert("risk".to_string(), engine.risk_manager.clone());
             engines.insert("alert".to_string(), engine.alert_engine.clone());
             engines.insert("algo".to_string(), engine.algo_engine.clone());
+            engines.insert("DataDownloadManager".to_string(), engine.data_download_manager.clone());
+            engines.insert("PortfolioManager".to_string(), engine.portfolio_manager.clone());
+            engines.insert("StopOrderEngine".to_string(), engine.stop_order_engine.clone());
         }
         
         engine
@@ -941,6 +956,21 @@ impl MainEngine {
     /// Get algo engine
     pub fn algo_engine(&self) -> &Arc<super::algo::AlgoEngine> {
         &self.algo_engine
+    }
+
+    /// Get data download manager
+    pub fn data_download_manager(&self) -> &Arc<DataDownloadManager> {
+        &self.data_download_manager
+    }
+
+    /// Get portfolio manager
+    pub fn portfolio_manager(&self) -> &Arc<PortfolioManager> {
+        &self.portfolio_manager
+    }
+
+    /// Get stop order engine
+    pub fn stop_order_engine(&self) -> &Arc<StopOrderEngine> {
+        &self.stop_order_engine
     }
 
     /// Get tick data

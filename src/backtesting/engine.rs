@@ -332,6 +332,63 @@ impl BacktestingEngine {
         Ok(())
     }
 
+    /// Load historical data from Binance REST API directly
+    ///
+    /// Reads gateway config from .rstrader/binance/gateway_configs.json,
+    /// constructs a REST client, downloads klines via DataDownloadManager,
+    /// and feeds them into the backtesting engine.
+    pub async fn load_data_from_binance(&mut self) -> Result<(), String> {
+        self.write_log("从Binance REST API加载历史数据");
+
+        if self.start >= self.end {
+            return Err("起始日期必须小于结束日期".to_string());
+        }
+
+        // 1. Load gateway config from disk
+        let configs = crate::gateway::binance::BinanceConfigs::load();
+        let config = configs.get("BINANCE_SPOT")
+            .or_else(|| configs.get("BINANCE"))
+            .ok_or_else(|| "未找到Binance网关配置，请先配置API密钥".to_string())?;
+
+        // 2. Determine REST host based on server mode
+        let host = if config.server.to_uppercase() == "TESTNET" {
+            crate::gateway::binance::SPOT_TESTNET_REST_HOST
+        } else {
+            crate::gateway::binance::SPOT_REST_HOST
+        };
+
+        // 3. Create and initialize REST client
+        let rest_client = crate::gateway::binance::BinanceRestClient::new();
+        rest_client.init(
+            &config.key,
+            &config.secret,
+            host,
+            &config.proxy_host,
+            config.proxy_port,
+        ).await;
+
+        // 4. Download klines via DataDownloadManager
+        let download_manager = crate::trader::data_download::DataDownloadManager::new();
+        let bars = download_manager.download_klines(
+            &rest_client,
+            &self.symbol,
+            self.exchange,
+            self.interval,
+            self.start,
+            self.end,
+        ).await?;
+
+        if bars.is_empty() {
+            return Err("下载的数据为空，请检查日期范围和网络连接".to_string());
+        }
+
+        // 5. Feed bars into backtesting engine
+        self.history_data = bars;
+        self.write_log(&format!("从Binance加载{}条Bar数据", self.history_data.len()));
+
+        Ok(())
+    }
+
     /// Load bar data from external source (to be called from Python)
     pub fn set_history_data(&mut self, bars: Vec<BarData>) {
         self.history_data = bars;
@@ -1895,6 +1952,17 @@ mod tests {
         engine.end = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
 
         let result = engine.load_data().await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("起始日期必须小于结束日期"));
+    }
+
+    #[tokio::test]
+    async fn test_load_data_from_binance_start_after_end() {
+        let mut engine = BacktestingEngine::new();
+        engine.start = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        engine.end = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+
+        let result = engine.load_data_from_binance().await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("起始日期必须小于结束日期"));
     }
