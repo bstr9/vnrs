@@ -45,3 +45,47 @@ This file records backtest results for the Volatility Strategy on BTCUSDT.
 - Key insight: fewer but higher-quality trades (22 trades vs 807 at default params) produce positive returns
 
 ---
+
+## Backtest Result — 2026-04-19 (Live Binance Data, Framework Integration Test)
+
+| Item | Value |
+|------|-------|
+| Strategy | VolBTC_Spot |
+| Symbol | BTCUSDT.BINANCE |
+| Data Source | Binance REST API (live download) |
+| Interval | 1m |
+| Period | 2026-04-11 to 2026-04-18 |
+| Trading Days | 8 |
+| **Sharpe Ratio** | **-6.1884** |
+| **Max Drawdown** | **15.33 (0.02%)** |
+| End Balance | 99,986.19 |
+| Total Net PnL | -13.81 |
+| Total Return | -0.01% |
+| Win Rate | 20.00% |
+| Total Trades | 20 |
+| Sortino Ratio | -4.4372 |
+| Calmar Ratio | -28.3779 |
+| Profit Days | 1 |
+| Loss Days | 4 |
+| Total Commission | 15.03 |
+
+**Parameters:**
+- `atr_length` = 14
+- `boll_length` = 20
+- `boll_dev` = 2.0
+- `natr_threshold` = 0.15
+- `tp_atr_mult` = 3.0
+- `sl_atr_mult` = 1.5
+- `fixed_size` = 0.01
+- `am_length` = 50
+
+**Notes:**
+- First end-to-end test using `BacktestingEngine::load_data_from_binance()` bridge method
+- Data downloaded directly from Binance REST API via DataDownloadManager
+- 7-day window with 1m bars (~10K bars), 50-bar ArrayManager window
+- Low NATR threshold (0.15) generated 20 signals but most were false breakouts
+- Commission dominates PnL at 0.01 BTC size — $15.03 commission vs -$13.81 net loss
+- Strategy needs either: larger position size, higher NATR filter, or longer data period
+- Framework integration verified: DataDownloadManager → BinanceRestClient → BacktestingEngine → VolatilityStrategy → Statistics pipeline works end-to-end
+
+---

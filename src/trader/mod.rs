@@ -23,6 +23,7 @@ pub mod alert;
 pub mod algo;
 pub mod app;
 pub mod bar_synthesizer;
+pub mod bracket_order;
 pub mod constant;
 pub mod converter;
 pub mod database;
@@ -42,6 +43,7 @@ pub mod setting;
 pub mod stop_order;
 pub mod sync_bar_generator;
 pub mod utility;
+pub mod order_emulator;
 
 #[cfg(feature = "gui")]
 pub mod ui;
@@ -50,6 +52,7 @@ pub mod ui;
 pub use alert::{AlertChannel, AlertConfig, AlertEngine, AlertLevel, AlertMessage, LogAlertChannel, WebhookAlertChannel, WebhookConfig};
 pub use algo::{AlgoEngine, AlgoId, AlgoOrderState, AlgoStatus, AlgoType, TwapConfig, VwapConfig, OrderExecutor};
 pub use app::{AppInfo, BaseApp};
+pub use bracket_order::{BracketOrderEngine, ContingencyType, OrderGroupState, OrderRole, OrderGroup, BracketOrderRequest, OcoOrderRequest, OtoOrderRequest, GroupId, ChildOrder};
 pub use constant::{
     Currency, Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status,
 };
@@ -72,6 +75,7 @@ pub use recorder::{DataRecorder, RecordStatus, RecorderConfig};
 pub use risk::{DailyStats, RiskCheckResult, RiskConfig, RiskManager};
 pub use setting::{Settings, SettingValue, SETTINGS};
 pub use stop_order::{StopOrderEngine, StopOrder, StopOrderRequest, StopOrderType, StopOrderStatus, StopOrderId};
+pub use order_emulator::{OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId, EmulatorSendOrderCallback, EmulatorCancelOrderCallback};
 pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use bar_synthesizer::BarSynthesizer;
 pub use utility::{

@@ -13,7 +13,9 @@ use super::database::{BaseDatabase, EventRecord};
 use super::portfolio::PortfolioManager;
 use super::recorder::{DataRecorder, RecordStatus, RecorderConfig};
 use super::risk::RiskManager;
+use super::bracket_order::BracketOrderEngine;
 use super::stop_order::StopOrderEngine;
+use super::order_emulator::OrderEmulator;
 
 use super::event::*;
 use super::gateway::{BaseGateway, GatewayEvent, GatewaySettings};
@@ -471,6 +473,8 @@ pub struct MainEngine {
     data_download_manager: Arc<DataDownloadManager>,
     portfolio_manager: Arc<PortfolioManager>,
     stop_order_engine: Arc<StopOrderEngine>,
+    bracket_order_engine: Arc<BracketOrderEngine>,
+    order_emulator: Arc<OrderEmulator>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -514,7 +518,9 @@ impl MainEngine {
         let data_download_manager = Arc::new(DataDownloadManager::new());
         let portfolio_manager = Arc::new(PortfolioManager::new());
         let stop_order_engine = Arc::new(StopOrderEngine::new());
-        
+        let bracket_order_engine = Arc::new(BracketOrderEngine::new());
+        let order_emulator = Arc::new(OrderEmulator::new());
+
         // Create OffsetConverter with contract lookup from OmsEngine
         let oms_for_converter = oms_engine.clone();
         let offset_converter = OffsetConverter::new(Box::new(move |vt_symbol: &str| {
@@ -534,6 +540,8 @@ impl MainEngine {
             data_download_manager,
             portfolio_manager,
             stop_order_engine,
+            bracket_order_engine,
+            order_emulator,
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -557,6 +565,8 @@ impl MainEngine {
             engines.insert("DataDownloadManager".to_string(), engine.data_download_manager.clone());
             engines.insert("PortfolioManager".to_string(), engine.portfolio_manager.clone());
             engines.insert("StopOrderEngine".to_string(), engine.stop_order_engine.clone());
+            engines.insert("BracketOrderEngine".to_string(), engine.bracket_order_engine.clone());
+            engines.insert("OrderEmulator".to_string(), engine.order_emulator.clone());
         }
         
         engine
@@ -971,6 +981,16 @@ impl MainEngine {
     /// Get stop order engine
     pub fn stop_order_engine(&self) -> &Arc<StopOrderEngine> {
         &self.stop_order_engine
+    }
+
+    /// Get bracket order engine
+    pub fn bracket_order_engine(&self) -> &Arc<BracketOrderEngine> {
+        &self.bracket_order_engine
+    }
+
+    /// Get order emulator engine
+    pub fn order_emulator(&self) -> &Arc<OrderEmulator> {
+        &self.order_emulator
     }
 
     /// Get tick data

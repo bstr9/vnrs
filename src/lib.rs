@@ -82,6 +82,11 @@ pub use trader::{
     PortfolioManager, PositionSummary, PortfolioSummary, PortfolioMetrics,
     // Stop order engine
     StopOrderEngine, StopOrder, StopOrderRequest, StopOrderType, StopOrderStatus, StopOrderId,
+    // Bracket order engine
+    BracketOrderEngine, ContingencyType, OrderGroupState, OrderRole, OrderGroup,
+    BracketOrderRequest, OcoOrderRequest, OtoOrderRequest, GroupId, ChildOrder,
+    // Order emulator engine
+    OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId,
 };
 
 // Re-export Binance gateways

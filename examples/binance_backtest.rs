@@ -22,9 +22,9 @@ async fn main() {
     // 1. Configure backtesting engine
     let mut engine = BacktestingEngine::new();
 
-    // Use last 3 days of data
+    // Use last 7 days of data (need enough bars for ArrayManager init + signals)
     let end = Utc::now();
-    let start = end - chrono::Duration::days(3);
+    let start = end - chrono::Duration::days(7);
 
     engine.set_parameters(
         "BTCUSDT.BINANCE".to_string(),
@@ -40,15 +40,17 @@ async fn main() {
     );
 
     // 2. Add VolatilityStrategy with custom parameters
+    //    Lower NATR threshold (0.15) to generate more signals in typical BTCUSDT volatility
+    //    am_length=50 allows faster strategy initialization (needs 50 bars instead of 100)
     let mut setting: StrategySetting = HashMap::new();
     setting.insert("atr_length".to_string(), serde_json::json!(14));
-    setting.insert("boll_length".to_string(), serde_json::json!(30));
+    setting.insert("boll_length".to_string(), serde_json::json!(20));
     setting.insert("boll_dev".to_string(), serde_json::json!(2.0));
-    setting.insert("natr_threshold".to_string(), serde_json::json!(0.3));
+    setting.insert("natr_threshold".to_string(), serde_json::json!(0.15));
     setting.insert("tp_atr_mult".to_string(), serde_json::json!(3.0));
     setting.insert("sl_atr_mult".to_string(), serde_json::json!(1.5));
     setting.insert("fixed_size".to_string(), serde_json::json!(0.01));
-    setting.insert("am_length".to_string(), serde_json::json!(100));
+    setting.insert("am_length".to_string(), serde_json::json!(50));
 
     let strategy = VolatilityStrategy::new(
         "VolBTC".to_string(),
