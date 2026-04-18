@@ -427,10 +427,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         });
         drop(event_engine);
         
-        let (mcp_server, _) = TradingMcpServer::new(main_engine);
+        let (mcp_server, main_engine) = TradingMcpServer::new(main_engine);
         runtime.block_on(async {
-            if let Err(e) = mcp_server.serve_stdio().await {
-                tracing::error!("MCP Server error: {}", e);
+            tokio::select! {
+                result = mcp_server.serve_stdio() => {
+                    if let Err(e) = result {
+                        tracing::error!("MCP Server error: {}", e);
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received Ctrl+C, shutting down gracefully...");
+                    main_engine.close().await;
+                    tracing::info!("Engine closed, exiting.");
+                }
             }
         });
         return Ok(());

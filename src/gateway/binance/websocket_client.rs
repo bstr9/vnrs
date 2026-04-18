@@ -2,7 +2,7 @@
 
 use std::io::{Error, ErrorKind};
 use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -267,6 +267,8 @@ pub struct BinanceWebSocketClient {
     on_disconnect: Arc<RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>,
     /// Flag to distinguish intentional disconnect from unexpected connection loss
     graceful_shutdown: Arc<AtomicBool>,
+    /// Reconnection attempt counter for exponential backoff
+    reconnect_attempts: Arc<AtomicU32>,
 }
 
 impl BinanceWebSocketClient {
@@ -285,6 +287,7 @@ impl BinanceWebSocketClient {
             subscriptions: Arc::new(RwLock::new(Vec::new())),
             on_disconnect: Arc::new(RwLock::new(None)),
             graceful_shutdown: Arc::new(AtomicBool::new(false)),
+            reconnect_attempts: Arc::new(AtomicU32::new(0)),
         }
     }
 
