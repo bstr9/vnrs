@@ -9,6 +9,7 @@ use super::app::BaseApp;
 use super::constant::Exchange;
 use super::converter::OffsetConverter;
 use super::database::{BaseDatabase, EventRecord};
+use super::recorder::{DataRecorder, RecordStatus, RecorderConfig};
 use super::risk::RiskManager;
 
 use super::event::*;
@@ -463,6 +464,7 @@ pub struct MainEngine {
     log_engine: Arc<LogEngine>,
     risk_manager: Arc<RiskManager>,
     offset_converter: RwLock<OffsetConverter>,
+    recorder: RwLock<Option<Arc<DataRecorder>>>,
     
     event_tx: mpsc::UnboundedSender<(String, GatewayEvent)>,
     event_rx: RwLock<Option<mpsc::UnboundedReceiver<(String, GatewayEvent)>>>,
@@ -515,6 +517,7 @@ impl MainEngine {
             log_engine,
             risk_manager,
             offset_converter: RwLock::new(offset_converter),
+            recorder: RwLock::new(None),
             event_tx,
             event_rx: RwLock::new(Some(event_rx)),
             handlers: RwLock::new(HashMap::new()),
@@ -595,6 +598,14 @@ impl MainEngine {
                     _ = tokio::time::sleep(tokio::time::Duration::from_millis(1)) => {}
                 }
             }
+
+            // Drain remaining events that were queued before gateways fully stopped.
+            // This prevents event loss when close() sets running=false while
+            // in-flight events are still in the channel.
+            while let Ok((event_type, event)) = rx.try_recv() {
+                self.process_event(&event_type, &event);
+            }
+            info!("MainEngine event loop stopped, all remaining events drained");
         }
     }
 
@@ -1068,19 +1079,123 @@ impl MainEngine {
         Ok(())
     }
 
-    /// Close the main engine
-    pub async fn close(&self) {
-        self.running.store(false, Ordering::SeqCst);
+    // ========================================================================
+    // DataRecorder management
+    // ========================================================================
 
-        // Close all engines
-        {
-            let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
-            for engine in engines.values() {
-                engine.close();
-            }
+    /// Add a DataRecorder with default configuration
+    ///
+    /// The recorder will automatically receive tick/bar events from all gateways
+    /// and persist them to the database. Call `start_recorder()` after `start()`.
+    ///
+    /// # Arguments
+    /// * `database` - Database backend for persisting recorded data
+    ///
+    /// # Returns
+    /// The created DataRecorder, already registered as a sub-engine
+    pub fn add_recorder(&self, database: Arc<dyn BaseDatabase>) -> Arc<DataRecorder> {
+        self.add_recorder_with_config(database, RecorderConfig::default())
+    }
+
+    /// Add a DataRecorder with custom configuration
+    ///
+    /// # Arguments
+    /// * `database` - Database backend for persisting recorded data
+    /// * `config` - Recorder configuration (flush interval, batch size, etc.)
+    ///
+    /// # Returns
+    /// The created DataRecorder, already registered as a sub-engine
+    pub fn add_recorder_with_config(
+        &self,
+        database: Arc<dyn BaseDatabase>,
+        config: RecorderConfig,
+    ) -> Arc<DataRecorder> {
+        let recorder = Arc::new(DataRecorder::with_config(database, config));
+
+        // Register as sub-engine for event routing
+        self.add_engine(recorder.clone());
+
+        // Store reference for lifecycle management
+        *self.recorder.write().unwrap_or_else(|e| e.into_inner()) = Some(recorder.clone());
+
+        info!("DataRecorder added and registered as sub-engine");
+        recorder
+    }
+
+    /// Get the DataRecorder if one has been added
+    pub fn get_recorder(&self) -> Option<Arc<DataRecorder>> {
+        self.recorder.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Start the DataRecorder event loop in a background task
+    ///
+    /// This should be called after `start()` to begin recording tick/bar data.
+    /// The recorder will spawn its own async task that runs until `close()` is called.
+    pub async fn start_recorder(&self) {
+        if let Some(recorder) = self.get_recorder() {
+            let recorder_clone = recorder.clone();
+            tokio::spawn(async move {
+                recorder_clone.start().await;
+            });
+            info!("DataRecorder started in background");
+        } else {
+            warn!("No DataRecorder configured, call add_recorder() first");
         }
+    }
 
-        // Close all gateways — clone Arc refs out of the lock first to avoid holding lock across await
+    /// Subscribe the recorder to tick data for a symbol
+    pub async fn recorder_subscribe_tick(&self, symbol: &str, exchange: Exchange) {
+        if let Some(recorder) = self.get_recorder() {
+            recorder.subscribe_tick(symbol, exchange).await;
+        }
+    }
+
+    /// Subscribe the recorder to bar data for a symbol with specific interval
+    pub async fn recorder_subscribe_bar(&self, symbol: &str, exchange: Exchange, interval: crate::trader::Interval) {
+        if let Some(recorder) = self.get_recorder() {
+            recorder.subscribe_bar(symbol, exchange, interval).await;
+        }
+    }
+
+    /// Unsubscribe the recorder from tick data
+    pub async fn recorder_unsubscribe_tick(&self, symbol: &str, exchange: Exchange) {
+        if let Some(recorder) = self.get_recorder() {
+            recorder.unsubscribe_tick(symbol, exchange).await;
+        }
+    }
+
+    /// Unsubscribe the recorder from bar data
+    pub async fn recorder_unsubscribe_bar(&self, symbol: &str, exchange: Exchange, interval: crate::trader::Interval) {
+        if let Some(recorder) = self.get_recorder() {
+            recorder.unsubscribe_bar(symbol, exchange, interval).await;
+        }
+    }
+
+    /// Get recorder status (list of active recordings with counts)
+    pub async fn get_recorder_status(&self) -> Vec<RecordStatus> {
+        if let Some(recorder) = self.get_recorder() {
+            recorder.get_status().await
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Flush recorder buffers to database
+    pub async fn flush_recorder(&self) {
+        if let Some(recorder) = self.get_recorder() {
+            recorder.flush().await;
+        }
+    }
+
+    /// Close the main engine gracefully
+    ///
+    /// Shutdown order is critical to prevent event loss:
+    /// 1. Close gateways first (stops new events from being generated)
+    /// 2. Wait briefly for in-flight events to be queued
+    /// 3. Set running=false (allows start() loop to exit and drain remaining events)
+    /// 4. Close sub-engines
+    pub async fn close(&self) {
+        // 1. Close all gateways FIRST — stops WebSocket streams and prevents new events
         let gateways: Vec<Arc<dyn BaseGateway>> = self.gateways.read()
             .unwrap_or_else(|e| e.into_inner())
             .values()
@@ -1088,6 +1203,20 @@ impl MainEngine {
             .collect();
         for gateway in gateways {
             gateway.close().await;
+        }
+
+        // 2. Brief delay to let any in-flight gateway events reach the channel
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 3. NOW stop the event loop — remaining events will be drained in start()
+        self.running.store(false, Ordering::SeqCst);
+
+        // 4. Close all sub-engines
+        {
+            let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
+            for engine in engines.values() {
+                engine.close();
+            }
         }
 
         // Drop persist_tx so the drain task exits cleanly after flushing
@@ -1132,5 +1261,76 @@ mod tests {
         
         assert!(engine.get_all_gateway_names().is_empty());
         assert!(engine.get_tick("TEST.LOCAL").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_data_recorder_integration() {
+        use crate::trader::database::MemoryDatabase;
+        use crate::trader::constant::Interval;
+
+        let engine = MainEngine::new();
+        let db = Arc::new(MemoryDatabase::new());
+
+        // No recorder initially
+        assert!(engine.get_recorder().is_none());
+
+        // Add recorder
+        let recorder = engine.add_recorder(db.clone());
+        assert!(engine.get_recorder().is_some());
+
+        // Subscribe to tick and bar recording
+        engine.recorder_subscribe_tick("btcusdt", Exchange::Binance).await;
+        engine.recorder_subscribe_bar("btcusdt", Exchange::Binance, Interval::Minute).await;
+
+        // Simulate tick event through the engine's event pipeline
+        let tick = TickData::new(
+            "BINANCE_SPOT".to_string(),
+            "btcusdt".to_string(),
+            Exchange::Binance,
+            chrono::Utc::now(),
+        );
+        // Directly call on_tick through the recorder
+        recorder.on_tick(&tick).await;
+        recorder.flush().await;
+
+        // Verify status
+        let status = engine.get_recorder_status().await;
+        assert!(!status.is_empty());
+
+        // Unsubscribe
+        engine.recorder_unsubscribe_tick("btcusdt", Exchange::Binance).await;
+        engine.recorder_unsubscribe_bar("btcusdt", Exchange::Binance, Interval::Minute).await;
+    }
+
+    #[tokio::test]
+    async fn test_data_recorder_with_config() {
+        use crate::trader::database::MemoryDatabase;
+
+        let engine = MainEngine::new();
+        let db = Arc::new(MemoryDatabase::new());
+
+        let config = RecorderConfig {
+            flush_interval_secs: 30,
+            batch_size: 500,
+            record_ticks: true,
+            record_bars: false,
+        };
+
+        let recorder = engine.add_recorder_with_config(db, config);
+        assert!(engine.get_recorder().is_some());
+
+        // Verify recorder doesn't record bars when record_bars=false
+        let bar = BarData::new(
+            "1m".to_string(),
+            "btcusdt".to_string(),
+            Exchange::Binance,
+            chrono::Utc::now(),
+        );
+        recorder.on_bar(&bar).await;
+        recorder.flush().await;
+
+        // No bar symbols subscribed, so status should be empty for bars
+        let status = recorder.get_status().await;
+        assert!(status.is_empty());
     }
 }

@@ -1033,6 +1033,8 @@ impl BaseGateway for BinanceSpotGateway {
     async fn close(&self) {
         self.market_ws.disconnect().await;
         self.trade_ws.disconnect().await;
+        // Clear event sender so in-flight spawned tasks can no longer send events
+        *self.event_sender.write().await = None;
         self.write_log("Gateway已关闭").await;
     }
 

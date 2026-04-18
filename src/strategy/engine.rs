@@ -693,6 +693,13 @@ impl StrategyEngine {
     }
 
     /// Load historical data for strategy initialization
+    ///
+    /// Data source priority:
+    /// 1. Database (if configured) — fast local access, no network calls
+    /// 2. Gateway REST API — fallback when database has no data
+    ///
+    /// Loads 30 days of 1-minute bars by default and feeds them into the
+    /// strategy's context for indicator warmup.
     async fn load_historical_data(
         &self,
         strategy_name: &str,
@@ -715,25 +722,74 @@ impl StrategyEngine {
                 let end = Utc::now();
                 let start = end - Duration::days(30);
 
-                let req = HistoryRequest {
-                    symbol,
-                    exchange,
-                    start,
-                    end: Some(end),
-                    interval: Some(Interval::Minute),
-                };
-
-                if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
-                    match self.main_engine.query_history(req, &gw_name).await {
-                        Ok(bars) => {
-                            tracing::info!("Loaded {} historical bars for {}", bars.len(), vt_symbol);
-                            // Store bars in strategy context (GAP 1 fix: previously discarded)
+                // Try loading from database first
+                let mut bars_loaded = false;
+                if let Some(db) = &self.database {
+                    match db.load_bar_data(&symbol, exchange, Interval::Minute, start, end).await {
+                        Ok(bars) if !bars.is_empty() => {
+                            tracing::info!(
+                                "Loaded {} historical bars for {} from database",
+                                bars.len(), vt_symbol
+                            );
                             for bar in &bars {
                                 context.update_bar(bar.clone());
                             }
+                            bars_loaded = true;
+                        }
+                        Ok(_) => {
+                            tracing::info!(
+                                "No historical bars in database for {}, falling back to gateway",
+                                vt_symbol
+                            );
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to load history for {}: {}", vt_symbol, e);
+                            tracing::warn!(
+                                "Failed to load history from database for {}: {}, falling back to gateway",
+                                vt_symbol, e
+                            );
+                        }
+                    }
+                }
+
+                // Fallback to gateway query if database had no data
+                if !bars_loaded {
+                    let req = HistoryRequest {
+                        symbol,
+                        exchange,
+                        start,
+                        end: Some(end),
+                        interval: Some(Interval::Minute),
+                    };
+
+                    if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+                        match self.main_engine.query_history(req, &gw_name).await {
+                            Ok(bars) => {
+                                tracing::info!(
+                                    "Loaded {} historical bars for {} from gateway",
+                                    bars.len(), vt_symbol
+                                );
+                                for bar in &bars {
+                                    context.update_bar(bar.clone());
+                                }
+
+                                // Save loaded bars to database for future warmups
+                                if !bars.is_empty() {
+                                    if let Some(db) = &self.database {
+                                        if let Err(e) = db.save_bar_data(bars, false).await {
+                                            tracing::warn!(
+                                                "Failed to cache historical bars for {}: {}",
+                                                vt_symbol, e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to load history for {} from gateway: {}",
+                                    vt_symbol, e
+                                );
+                            }
                         }
                     }
                 }

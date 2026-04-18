@@ -37,7 +37,7 @@ Requirements: Do not delete existing features. Each iteration must ensure the co
     # 3. Execute opencode
     $systemPrompt = "You are a top architect proficient in vn.py and nautilus_trader, vn.rs and other quantitative trading systems. Your current task is to analyze and complete a partially-built quantitative project. You must independently think about missing modules (e.g.: risk control, matching offset handling, multi-period synthesizer, etc.) and implement them one by one."
     $fullMessage = "$systemPrompt`n`n$instruction"
-    opencode run $fullMessage -c
+    opencode run $fullMessage -s ses_25e3145ffffeartr3enC5EsmLz
 
     # 4. Git commit
     if (git rev-parse --is-inside-work-tree 2>$null) {
