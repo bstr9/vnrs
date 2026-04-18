@@ -254,6 +254,12 @@ pub struct BinanceWebSocketClient {
     req_id: Arc<RwLock<i64>>,
     /// Gateway name for logging
     gateway_name: String,
+    /// Last pong received timestamp (for connection health monitoring)
+    last_pong: Arc<RwLock<Option<std::time::Instant>>>,
+    /// Connection URL for potential reconnect
+    connection_url: Arc<RwLock<Option<String>>>,
+    /// Proxy settings for potential reconnect
+    proxy_settings: Arc<RwLock<(String, u16)>>,
 }
 
 impl BinanceWebSocketClient {
@@ -266,6 +272,9 @@ impl BinanceWebSocketClient {
             active: Arc::new(RwLock::new(false)),
             req_id: Arc::new(RwLock::new(0)),
             gateway_name: gateway_name.to_string(),
+            last_pong: Arc::new(RwLock::new(None)),
+            connection_url: Arc::new(RwLock::new(None)),
+            proxy_settings: Arc::new(RwLock::new((String::new(), 0u16))),
         }
     }
 
@@ -282,6 +291,10 @@ impl BinanceWebSocketClient {
         proxy_port: u16,
     ) -> Result<(), String> {
         *self.url.write().await = url.to_string();
+
+        // Save connection parameters for potential reconnection
+        *self.connection_url.write().await = Some(url.to_string());
+        *self.proxy_settings.write().await = (proxy_host.to_string(), proxy_port);
 
         info!("{}: Connecting to WebSocket: {}", self.gateway_name, url);
 
@@ -358,17 +371,48 @@ impl BinanceWebSocketClient {
 
         *self.tx.write().await = Some(tx);
         *self.active.write().await = true;
+        *self.last_pong.write().await = Some(std::time::Instant::now());
 
-        // Spawn write task
+        // Spawn write task (with periodic ping for keepalive)
         let write_active = self.active.clone();
         let write_tx = self.tx.clone();
+        let last_pong_clone = self.last_pong.clone();
+        let gateway_name = self.gateway_name.clone();
         tokio::spawn(async move {
             let mut write = write;
             let mut rx = rx;
-            while let Some(msg) = rx.recv().await {
-                if let Err(e) = write.send(msg).await {
-                    error!("WebSocket write error: {}", e);
-                    break;
+            let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            ping_interval.tick().await; // First tick is immediate
+
+            loop {
+                tokio::select! {
+                    msg = rx.recv() => {
+                        match msg {
+                            Some(msg) => {
+                                if let Err(e) = write.send(msg).await {
+                                    error!("WebSocket write error: {}", e);
+                                    break;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    _ = ping_interval.tick() => {
+                        // Check if connection is still alive (pong received within last 60s)
+                        let pong_ok = {
+                            let last = last_pong_clone.read().await;
+                            last.map(|t| t.elapsed() < std::time::Duration::from_secs(60))
+                                .unwrap_or(false)
+                        };
+                        if !pong_ok {
+                            warn!("{}: No pong received in 60s, connection may be dead", gateway_name);
+                        }
+                        // Send ping to keep connection alive
+                        if let Err(e) = write.send(Message::Ping(vec![].into())).await {
+                            error!("{}: Failed to send ping: {}", gateway_name, e);
+                            break;
+                        }
+                    }
                 }
             }
             *write_active.write().await = false;
@@ -380,6 +424,7 @@ impl BinanceWebSocketClient {
         let handler = self.handler.clone();
         let read_active = self.active.clone();
         let gateway_name = self.gateway_name.clone();
+        let last_pong_read = self.last_pong.clone();
         tokio::spawn(async move {
             let mut read = read;
             while let Some(result) = read.next().await {
@@ -402,6 +447,7 @@ impl BinanceWebSocketClient {
                     }
                     Ok(Message::Pong(_)) => {
                         debug!("{}: Received pong", gateway_name);
+                        *last_pong_read.write().await = Some(std::time::Instant::now());
                     }
                     Ok(Message::Close(_)) => {
                         warn!("{}: WebSocket closed by server", gateway_name);
@@ -435,6 +481,34 @@ impl BinanceWebSocketClient {
     #[allow(dead_code)]
     pub async fn is_connected(&self) -> bool {
         *self.active.read().await
+    }
+
+    /// Get time since last pong (for connection health monitoring)
+    pub async fn time_since_last_pong(&self) -> Option<std::time::Duration> {
+        self.last_pong.read().await.map(|t| t.elapsed())
+    }
+
+    /// Attempt to reconnect using saved connection parameters
+    /// Returns Ok if reconnection succeeded, Err with reason if it failed
+    pub async fn reconnect(&self) -> Result<(), String> {
+        // Disconnect first
+        self.disconnect().await;
+
+        // Small delay before reconnecting
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Retrieve saved connection parameters
+        let (url, proxy_host, proxy_port) = {
+            let url_opt = self.connection_url.read().await.clone();
+            let proxy = self.proxy_settings.read().await.clone();
+            match url_opt {
+                Some(u) => (u, proxy.0, proxy.1),
+                None => return Err("No saved connection URL for reconnect".to_string()),
+            }
+        };
+
+        info!("{}: Attempting reconnect to {}", self.gateway_name, url);
+        self.connect(&url, &proxy_host, proxy_port).await
     }
 
     /// Send a message

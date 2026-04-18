@@ -14,4 +14,5 @@ mod usdt_gateway;
 pub use config::{BinanceConfigs, BinanceGatewayConfig};
 pub use spot_gateway::BinanceSpotGateway;
 pub use usdt_gateway::BinanceUsdtGateway;
+pub use rest_client::BinanceRestClient;
 pub use constants::*;

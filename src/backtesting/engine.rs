@@ -736,12 +736,23 @@ impl BacktestingEngine {
                     strategy.on_trade(&trade);
                     // Sync position cache so get_pos() / self.pos works
                     strategy.update_position(&self.vt_symbol, self.position.signed_qty());
+                    // Notify strategy that stop order was triggered
+                    strategy.on_stop_order(&stop_orderid);
                 }
-            }
 
-            stop_order.vt_orderid = Some(stop_orderid.clone());
-            self.stop_orders.insert(stop_orderid.clone(), stop_order);
-            self.active_stop_orders.remove(&stop_orderid);
+                stop_order.vt_orderid = Some(stop_orderid.clone());
+                self.stop_orders.insert(stop_orderid.clone(), stop_order);
+                self.active_stop_orders.remove(&stop_orderid);
+            } else {
+                // Not filled but still triggered — notify strategy anyway
+                if let Some(strategy) = &mut self.strategy {
+                    strategy.on_stop_order(&stop_orderid);
+                }
+
+                stop_order.vt_orderid = Some(stop_orderid.clone());
+                self.stop_orders.insert(stop_orderid.clone(), stop_order);
+                self.active_stop_orders.remove(&stop_orderid);
+            }
         }
     }
 
@@ -896,12 +907,23 @@ impl BacktestingEngine {
                     strategy.on_trade(&trade);
                     // Sync position cache so get_pos() / self.pos works
                     strategy.update_position(&self.vt_symbol, self.position.signed_qty());
+                    // Notify strategy that stop order was triggered
+                    strategy.on_stop_order(&stop_orderid);
                 }
-            }
 
-            stop_order.vt_orderid = Some(stop_orderid.clone());
-            self.stop_orders.insert(stop_orderid.clone(), stop_order);
-            self.active_stop_orders.remove(&stop_orderid);
+                stop_order.vt_orderid = Some(stop_orderid.clone());
+                self.stop_orders.insert(stop_orderid.clone(), stop_order);
+                self.active_stop_orders.remove(&stop_orderid);
+            } else {
+                // Not filled but still triggered — notify strategy anyway
+                if let Some(strategy) = &mut self.strategy {
+                    strategy.on_stop_order(&stop_orderid);
+                }
+
+                stop_order.vt_orderid = Some(stop_orderid.clone());
+                self.stop_orders.insert(stop_orderid.clone(), stop_order);
+                self.active_stop_orders.remove(&stop_orderid);
+            }
         }
     }
 

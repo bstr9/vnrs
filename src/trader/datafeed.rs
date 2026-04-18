@@ -1,7 +1,9 @@
 //! Datafeed module for connecting to different data sources.
 
 use async_trait::async_trait;
+use std::collections::HashMap;
 
+use super::constant::{Exchange, Interval};
 use super::object::{BarData, HistoryRequest, TickData};
 use super::setting::SETTINGS;
 
@@ -63,6 +65,147 @@ impl BaseDatafeed for EmptyDatafeed {
     }
 }
 
+/// Binance datafeed implementation using REST API for historical data.
+/// Supports both Spot and USDT-M Futures via the Binance klines API.
+/// Does not require API keys for public historical data.
+pub struct BinanceDatafeed {
+    /// REST client for Binance API
+    rest_client: crate::gateway::binance::BinanceRestClient,
+    /// Whether using futures API
+    futures: bool,
+}
+
+impl BinanceDatafeed {
+    /// Create a new BinanceDatafeed for Spot
+    pub fn new_spot() -> Self {
+        Self {
+            rest_client: crate::gateway::binance::BinanceRestClient::new(),
+            futures: false,
+        }
+    }
+
+    /// Create a new BinanceDatafeed for USDT-M Futures
+    pub fn new_futures() -> Self {
+        Self {
+            rest_client: crate::gateway::binance::BinanceRestClient::new(),
+            futures: true,
+        }
+    }
+
+    /// Initialize the REST client with proxy and API settings from gateway config
+    pub async fn init_with_config(&self, api_key: &str, api_secret: &str, proxy_host: &str, proxy_port: u16) {
+        let host = if self.futures {
+            crate::gateway::binance::USDT_REST_HOST
+        } else {
+            crate::gateway::binance::SPOT_REST_HOST
+        };
+        self.rest_client.init(api_key, api_secret, host, proxy_host, proxy_port).await
+    }
+
+    /// Get the appropriate klines endpoint based on market type
+    fn klines_endpoint(&self) -> &'static str {
+        if self.futures {
+            "/fapi/v1/klines"
+        } else {
+            "/api/v3/klines"
+        }
+    }
+
+    /// Get the appropriate exchange
+    fn exchange(&self) -> Exchange {
+        if self.futures {
+            Exchange::BinanceUsdm
+        } else {
+            Exchange::Binance
+        }
+    }
+}
+
+#[async_trait]
+impl BaseDatafeed for BinanceDatafeed {
+    async fn init(&self) -> Result<bool, String> {
+        tracing::info!(
+            "BinanceDatafeed initialized ({})",
+            if self.futures { "Futures" } else { "Spot" }
+        );
+        Ok(true)
+    }
+
+    async fn query_bar_history(&self, req: HistoryRequest) -> Result<Vec<BarData>, String> {
+        use crate::gateway::binance::{INTERVAL_VT2BINANCE, get_interval_seconds, Security};
+
+        let mut history = Vec::new();
+        let limit = 1000;
+        let mut start_time = req.start.timestamp() * 1000;
+        let interval = req.interval.unwrap_or(Interval::Minute);
+        let interval_str = INTERVAL_VT2BINANCE.get(&interval).unwrap_or(&"1m");
+        let interval_ms = get_interval_seconds(interval) * 1000;
+
+        loop {
+            let mut params = HashMap::new();
+            params.insert("symbol".to_string(), req.symbol.to_uppercase());
+            params.insert("interval".to_string(), interval_str.to_string());
+            params.insert("limit".to_string(), limit.to_string());
+            params.insert("startTime".to_string(), start_time.to_string());
+            if let Some(end) = req.end {
+                params.insert("endTime".to_string(), (end.timestamp() * 1000).to_string());
+            }
+
+            let data = self.rest_client.get(
+                self.klines_endpoint(),
+                &params,
+                Security::None,
+            ).await?;
+
+            let rows = match data.as_array() {
+                Some(r) if !r.is_empty() => r,
+                _ => break,
+            };
+
+            for row in rows {
+                if let Some(arr) = row.as_array() {
+                    let datetime = chrono::DateTime::from_timestamp_millis(arr[0].as_i64().unwrap_or(0))
+                        .unwrap_or_else(chrono::Utc::now);
+                    history.push(BarData {
+                        symbol: req.symbol.clone(),
+                        exchange: self.exchange(),
+                        datetime,
+                        interval: Some(interval),
+                        volume: arr[5].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                        turnover: arr[7].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                        open_interest: if self.futures {
+                            arr[9].as_str().unwrap_or("0").parse().unwrap_or(0.0)
+                        } else {
+                            0.0
+                        },
+                        open_price: arr[1].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                        high_price: arr[2].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                        low_price: arr[3].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                        close_price: arr[4].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                        gateway_name: if self.futures { "BINANCE_USDM" } else { "BINANCE_SPOT" }.to_string(),
+                        extra: None,
+                    });
+                }
+            }
+
+            if rows.len() < limit {
+                break;
+            }
+            if let Some(last) = rows.last().and_then(|r| r.as_array()) {
+                start_time = last[0].as_i64().unwrap_or(0) + interval_ms;
+            }
+        }
+
+        tracing::info!("BinanceDatafeed: 查询历史数据成功: {} 条", history.len());
+        Ok(history)
+    }
+
+    async fn query_tick_history(&self, _req: HistoryRequest) -> Result<Vec<TickData>, String> {
+        // Binance REST API doesn't provide tick-level historical data via klines
+        Err("Binance REST API不支持Tick级别历史数据查询".to_string())
+    }
+}
+
 /// Get the configured datafeed name
 pub fn get_datafeed_name() -> String {
     SETTINGS.get_string("datafeed.name").unwrap_or_default()
@@ -99,5 +242,25 @@ mod tests {
         
         let result = datafeed.query_bar_history(req).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_creation() {
+        let spot = BinanceDatafeed::new_spot();
+        assert!(!spot.futures);
+
+        let futures = BinanceDatafeed::new_futures();
+        assert!(futures.futures);
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_endpoints() {
+        let spot = BinanceDatafeed::new_spot();
+        assert_eq!(spot.klines_endpoint(), "/api/v3/klines");
+        assert_eq!(spot.exchange(), Exchange::Binance);
+
+        let futures = BinanceDatafeed::new_futures();
+        assert_eq!(futures.klines_endpoint(), "/fapi/v1/klines");
+        assert_eq!(futures.exchange(), Exchange::BinanceUsdm);
     }
 }

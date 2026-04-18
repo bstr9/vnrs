@@ -371,6 +371,7 @@ impl MainWindow {
                     StrategyState::Inited => "Inited",
                     StrategyState::Trading => "Trading",
                     StrategyState::Stopped => "Stopped",
+                    StrategyState::Error => "Error",
                 };
                 super::strategy_panel::StrategyRow {
                     name: name.clone(),
@@ -1142,6 +1143,20 @@ impl MainWindow {
                 });
             }
         }
+        if let Some(name) = self.strategy_panel.take_remove() {
+            if let Some(ref se) = self.strategy_engine {
+                let se = se.clone();
+                let n = name.clone();
+                // Clear selection since we're removing it
+                self.strategy_panel.clear_selection();
+                tokio::spawn(async move {
+                    match se.remove_strategy(&n).await {
+                        Ok(_) => tracing::info!("策略 {} 移除成功", n),
+                        Err(e) => tracing::error!("策略 {} 移除失败: {}", n, e),
+                    }
+                });
+            }
+        }
     }
     
     /// Handle dashboard card click actions
@@ -1264,7 +1279,9 @@ impl MainWindow {
         match interval {
             crate::trader::Interval::Second => Duration::hours(4),
             crate::trader::Interval::Minute => Duration::days(3),
+            crate::trader::Interval::Minute5 => Duration::days(7),
             crate::trader::Interval::Minute15 => Duration::days(14),
+            crate::trader::Interval::Minute30 => Duration::days(21),
             crate::trader::Interval::Hour => Duration::days(30),
             crate::trader::Interval::Hour4 => Duration::days(90),
             crate::trader::Interval::Daily => Duration::days(365),
@@ -1881,9 +1898,23 @@ impl TickBarAggregator {
                 dt.with_second(0).unwrap_or(*dt)
                     .with_nanosecond(0).unwrap_or(*dt)
             }
+            crate::trader::Interval::Minute5 => {
+                let minute = dt.minute();
+                let rounded_minute = (minute / 5) * 5;
+                dt.with_minute(rounded_minute).unwrap_or(*dt)
+                    .with_second(0).unwrap_or(*dt)
+                    .with_nanosecond(0).unwrap_or(*dt)
+            }
             crate::trader::Interval::Minute15 => {
                 let minute = dt.minute();
                 let rounded_minute = (minute / 15) * 15;
+                dt.with_minute(rounded_minute).unwrap_or(*dt)
+                    .with_second(0).unwrap_or(*dt)
+                    .with_nanosecond(0).unwrap_or(*dt)
+            }
+            crate::trader::Interval::Minute30 => {
+                let minute = dt.minute();
+                let rounded_minute = (minute / 30) * 30;
                 dt.with_minute(rounded_minute).unwrap_or(*dt)
                     .with_second(0).unwrap_or(*dt)
                     .with_nanosecond(0).unwrap_or(*dt)

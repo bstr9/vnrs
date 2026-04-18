@@ -174,7 +174,9 @@ pub static INTERVAL_VT2BINANCE: Lazy<HashMap<Interval, &'static str>> = Lazy::ne
     let mut m = HashMap::new();
     m.insert(Interval::Second, "1s");
     m.insert(Interval::Minute, "1m");
+    m.insert(Interval::Minute5, "5m");
     m.insert(Interval::Minute15, "15m");
+    m.insert(Interval::Minute30, "30m");
     m.insert(Interval::Hour, "1h");
     m.insert(Interval::Hour4, "4h");
     m.insert(Interval::Daily, "1d");
@@ -187,7 +189,9 @@ pub fn get_interval_seconds(interval: Interval) -> i64 {
     match interval {
         Interval::Second => 1,
         Interval::Minute => 60,
+        Interval::Minute5 => 300,
         Interval::Minute15 => 900,
+        Interval::Minute30 => 1800,
         Interval::Hour => 3600,
         Interval::Hour4 => 14400,
         Interval::Daily => 86400,

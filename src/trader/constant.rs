@@ -406,8 +406,12 @@ pub enum Interval {
     Second,
     /// 1 minute
     Minute,
+    /// 5 minutes
+    Minute5,
     /// 15 minutes
     Minute15,
+    /// 30 minutes
+    Minute30,
     /// 1 hour
     Hour,
     /// 4 hours
@@ -426,7 +430,9 @@ impl Interval {
         match self {
             Interval::Second => "1s",
             Interval::Minute => "1m",
+            Interval::Minute5 => "5m",
             Interval::Minute15 => "15m",
+            Interval::Minute30 => "30m",
             Interval::Hour => "1h",
             Interval::Hour4 => "4h",
             Interval::Daily => "d",
@@ -440,7 +446,9 @@ impl Interval {
         match self {
             Interval::Second => "1秒",
             Interval::Minute => "1分钟",
+            Interval::Minute5 => "5分钟",
             Interval::Minute15 => "15分钟",
+            Interval::Minute30 => "30分钟",
             Interval::Hour => "1小时",
             Interval::Hour4 => "4小时",
             Interval::Daily => "1日",
@@ -454,7 +462,9 @@ impl Interval {
         vec![
             Interval::Second,
             Interval::Minute,
+            Interval::Minute5,
             Interval::Minute15,
+            Interval::Minute30,
             Interval::Hour,
             Interval::Hour4,
             Interval::Daily,

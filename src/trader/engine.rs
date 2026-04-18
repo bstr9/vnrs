@@ -897,6 +897,18 @@ impl MainEngine {
             .push(handler);
     }
 
+    /// Unregister all handlers for a given event type
+    pub fn unregister_handlers(&self, event_type: &str) {
+        let mut handlers = self.handlers.write().unwrap_or_else(|e| e.into_inner());
+        handlers.remove(event_type);
+    }
+
+    /// Remove a sub-engine by name
+    pub fn remove_engine(&self, engine_name: &str) -> Option<Arc<dyn BaseEngine>> {
+        let mut engines = self.engines.write().unwrap_or_else(|e| e.into_inner());
+        engines.remove(engine_name)
+    }
+
     /// Get event sender for gateways
     pub fn get_event_sender(&self) -> mpsc::UnboundedSender<(String, GatewayEvent)> {
         self.event_tx.clone()

@@ -32,6 +32,8 @@ pub enum StrategyState {
     Trading,
     /// Stopped
     Stopped,
+    /// Error state (strategy encountered an error)
+    Error,
 }
 
 /// Stop order status

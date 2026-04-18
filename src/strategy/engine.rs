@@ -33,7 +33,12 @@ pub const EVENT_STRATEGY_TRADE: &str = "eStrategyTrade";
 pub struct StrategyEngine {
     /// Main trading engine
     main_engine: Arc<MainEngine>,
-    /// Event engine (kept for backward compatibility, not used for event routing since GAP 6 fix)
+    /// Event engine (DEPRECATED: kept for backward compatibility only)
+    /// 
+    /// **Note**: This sync EventEngine is never started. All event routing now flows
+    /// through MainEngine's async event loop via `process_event()`. This field exists
+    /// solely to maintain backward compatibility with existing code that passes an
+    /// EventEngine to the constructor. It should be removed in a future major version.
     #[allow(dead_code)]
     event_engine: Arc<EventEngine>,
     
@@ -58,6 +63,99 @@ pub struct StrategyEngine {
     
     /// Processed trade IDs (for deduplication)
     processed_tradeids: Arc<RwLock<std::collections::HashSet<String>>>,
+    
+    /// Multi-period bar synthesis accumulators: (strategy_name, vt_symbol) → (target_interval, bar_count, accumulated_bar)
+    /// Accumulates 1-minute bars and delivers higher-timeframe bars when complete
+    bar_synthesizers: Arc<RwLock<HashMap<(String, String), BarSynthesizer>>>,
+    
+    /// Per-strategy realized PnL: strategy_name → realized PnL
+    strategy_pnl: Arc<RwLock<HashMap<String, f64>>>,
+    /// Per-strategy unrealized PnL: strategy_name → unrealized PnL
+    strategy_unrealized_pnl: Arc<RwLock<HashMap<String, f64>>>,
+    /// Per-strategy trade count: strategy_name → number of trades
+    strategy_trade_count: Arc<RwLock<HashMap<String, usize>>>,
+    /// Per-strategy average entry price: (strategy_name, vt_symbol) → avg entry price
+    strategy_avg_price: Arc<RwLock<HashMap<(String, String), f64>>>,
+}
+
+/// Bar synthesizer for multi-period bar generation from 1-minute bars
+struct BarSynthesizer {
+    /// Target interval (e.g., Minute5, Minute15, Hour)
+    interval: Interval,
+    /// Number of 1-minute bars that make up one target bar
+    window: i32,
+    /// Current count of accumulated bars
+    count: i32,
+    /// Currently accumulated bar data
+    accumulated: Option<BarData>,
+}
+
+impl BarSynthesizer {
+    fn new(interval: Interval) -> Self {
+        let window = match interval {
+            Interval::Minute5 => 5,
+            Interval::Minute15 => 15,
+            Interval::Minute30 => 30,
+            Interval::Hour => 60,
+            Interval::Hour4 => 240,
+            Interval::Daily => 1440,
+            Interval::Weekly => 10080,
+            _ => 1, // Default: 1-to-1 (no synthesis)
+        };
+        Self {
+            interval,
+            window,
+            count: 0,
+            accumulated: None,
+        }
+    }
+
+    /// Feed a 1-minute bar into the synthesizer.
+    /// Returns Some(BarData) if a complete higher-timeframe bar was formed.
+    fn update(&mut self, bar: &BarData) -> Option<BarData> {
+        if self.window <= 1 {
+            return None;
+        }
+
+        if let Some(ref mut acc) = self.accumulated {
+            acc.high_price = acc.high_price.max(bar.high_price);
+            acc.low_price = acc.low_price.min(bar.low_price);
+            acc.close_price = bar.close_price;
+            acc.volume += bar.volume;
+            acc.turnover += bar.turnover;
+            acc.open_interest = bar.open_interest;
+            acc.datetime = bar.datetime;
+        } else {
+            self.accumulated = Some(BarData {
+                gateway_name: bar.gateway_name.clone(),
+                symbol: bar.symbol.clone(),
+                exchange: bar.exchange,
+                datetime: bar.datetime,
+                interval: Some(self.interval),
+                volume: bar.volume,
+                turnover: bar.turnover,
+                open_interest: bar.open_interest,
+                open_price: bar.open_price,
+                high_price: bar.high_price,
+                low_price: bar.low_price,
+                close_price: bar.close_price,
+                extra: None,
+            });
+        }
+
+        self.count += 1;
+
+        if self.count >= self.window {
+            let mut completed = self.accumulated.take();
+            if let Some(ref mut bar) = completed {
+                bar.interval = Some(self.interval);
+            }
+            self.count = 0;
+            completed
+        } else {
+            None
+        }
+    }
 }
 
 impl StrategyEngine {
@@ -74,6 +172,11 @@ impl StrategyEngine {
             stop_order_count: Arc::new(Mutex::new(0)),
             contexts: Arc::new(RwLock::new(HashMap::new())),
             processed_tradeids: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            bar_synthesizers: Arc::new(RwLock::new(HashMap::new())),
+            strategy_pnl: Arc::new(RwLock::new(HashMap::new())),
+            strategy_unrealized_pnl: Arc::new(RwLock::new(HashMap::new())),
+            strategy_trade_count: Arc::new(RwLock::new(HashMap::new())),
+            strategy_avg_price: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -150,6 +253,12 @@ impl StrategyEngine {
             for stop_orderid in triggered {
                 if let Some(stop_order) = stop_orders.get_mut(&stop_orderid) {
                     stop_order.status = StopOrderStatus::Triggered;
+                    let strategy_name = stop_order.strategy_name.clone();
+                    // Notify the owning strategy about the stop order trigger
+                    let mut strategies = self.strategies.blocking_write();
+                    if let Some(strategy) = strategies.get_mut(&strategy_name) {
+                        strategy.on_stop_order(&stop_orderid);
+                    }
                 }
             }
         }
@@ -172,6 +281,29 @@ impl StrategyEngine {
                 }
             }
         }
+
+        // Multi-period bar synthesis: feed base bars into synthesizers
+        // and deliver synthesized higher-timeframe bars to strategies
+        let mut synthesizers = self.bar_synthesizers.blocking_write();
+        for ((strategy_name, syn_vt_symbol), synthesizer) in synthesizers.iter_mut() {
+            // Only process synthesizers that match this bar's symbol
+            if syn_vt_symbol != &vt_symbol {
+                continue;
+            }
+
+            // Feed the base bar into the synthesizer
+            if let Some(synthesized_bar) = synthesizer.update(bar) {
+                // A higher-timeframe bar was completed — deliver to strategy
+                let contexts = self.contexts.blocking_read();
+                if let Some(context) = contexts.get(strategy_name) {
+                    context.update_bar(synthesized_bar.clone());
+                    let mut strategies = self.strategies.blocking_write();
+                    if let Some(strategy) = strategies.get_mut(strategy_name) {
+                        strategy.on_bar(&synthesized_bar, context);
+                    }
+                }
+            }
+        }
     }
 
     /// Process order event and dispatch to owning strategy
@@ -189,6 +321,7 @@ impl StrategyEngine {
     }
 
     /// Process trade event and dispatch to owning strategy (with deduplication)
+    /// Also tracks per-strategy realized PnL
     fn process_trade_event(&self, trade: &TradeData) {
         // Deduplicate trades
         let vt_tradeid = trade.vt_tradeid();
@@ -208,16 +341,78 @@ impl StrategyEngine {
             .cloned();
 
         if let Some(strategy_name) = strategy_name {
+            let volume_change = match trade.direction {
+                Some(Direction::Long) => trade.volume,
+                Some(Direction::Short) => -trade.volume,
+                Some(Direction::Net) => 0.0,
+                None => 0.0,
+            };
+
+            // Calculate realized PnL from this trade
+            let vt_symbol = trade.vt_symbol();
+            let key = (strategy_name.clone(), vt_symbol.clone());
+            let mut avg_prices = self.strategy_avg_price.blocking_write();
+            let mut pnl_map = self.strategy_pnl.blocking_write();
+            let mut trade_count_map = self.strategy_trade_count.blocking_write();
+
+            let current_pos = {
+                let strategies = self.strategies.blocking_read();
+                strategies.get(&strategy_name)
+                    .map(|s| s.get_position(&vt_symbol))
+                    .unwrap_or(0.0)
+            };
+
+            // Calculate realized PnL when reducing position
+            let mut realized_pnl = 0.0;
+            if current_pos != 0.0 && volume_change != 0.0 {
+                let is_closing = (current_pos > 0.0 && volume_change < 0.0)
+                    || (current_pos < 0.0 && volume_change > 0.0);
+                if is_closing {
+                    let avg_entry = avg_prices.get(&key).copied().unwrap_or(trade.price);
+                    let close_volume = volume_change.abs().min(current_pos.abs());
+                    if current_pos > 0.0 {
+                        // Long position closing: PnL = (trade price - avg entry) * close volume
+                        realized_pnl = (trade.price - avg_entry) * close_volume;
+                    } else {
+                        // Short position closing: PnL = (avg entry - trade price) * close volume
+                        realized_pnl = (avg_entry - trade.price) * close_volume;
+                    }
+                }
+            }
+
+            // Update average entry price
+            let new_pos = current_pos + volume_change;
+            if new_pos == 0.0 {
+                avg_prices.remove(&key);
+            } else if current_pos == 0.0 {
+                // Opening new position
+                avg_prices.insert(key.clone(), trade.price);
+            } else if (current_pos > 0.0 && volume_change > 0.0) || (current_pos < 0.0 && volume_change < 0.0) {
+                // Adding to position - recalculate average
+                let old_avg = avg_prices.get(&key).copied().unwrap_or(trade.price);
+                let new_avg = (old_avg * current_pos.abs() + trade.price * volume_change.abs())
+                    / (current_pos.abs() + volume_change.abs());
+                avg_prices.insert(key.clone(), new_avg);
+            }
+
+            // Update PnL tracking
+            if realized_pnl != 0.0 {
+                pnl_map.entry(strategy_name.clone())
+                    .and_modify(|pnl| *pnl += realized_pnl)
+                    .or_insert(realized_pnl);
+            }
+            trade_count_map.entry(strategy_name.clone())
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
+
+            drop(avg_prices);
+            drop(pnl_map);
+            drop(trade_count_map);
+
+            // Update strategy position and notify
             let mut strategies = self.strategies.blocking_write();
             if let Some(strategy) = strategies.get_mut(&strategy_name) {
-                let volume_change = match trade.direction {
-                    Some(Direction::Long) => trade.volume,
-                    Some(Direction::Short) => -trade.volume,
-                    Some(Direction::Net) => 0.0,
-                    None => 0.0,
-                };
-                let current_pos = strategy.get_position(&trade.vt_symbol());
-                strategy.update_position(&trade.vt_symbol(), current_pos + volume_change);
+                strategy.update_position(&vt_symbol, new_pos);
                 strategy.on_trade(trade);
             }
         }
@@ -412,6 +607,92 @@ impl StrategyEngine {
         Ok(())
     }
 
+    /// Remove a strategy from the engine
+    /// Stops the strategy if currently trading, then removes all associated mappings
+    pub async fn remove_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        // Stop the strategy first if it's trading
+        {
+            let strategies = self.strategies.read().await;
+            if let Some(strategy) = strategies.get(strategy_name) {
+                let state = strategy.state();
+                if state == StrategyState::Trading {
+                    drop(strategies);
+                    self.stop_strategy(strategy_name).await?;
+                }
+            } else {
+                return Err(format!("Strategy {} not found", strategy_name));
+            }
+        }
+
+        // Cancel all open orders for this strategy
+        self.cancel_all_orders(strategy_name).await;
+
+        // Remove from strategies map
+        {
+            let mut strategies = self.strategies.write().await;
+            strategies.remove(strategy_name);
+        }
+
+        // Remove from symbol-strategy mapping
+        {
+            let mut map = self.symbol_strategy_map.write().await;
+            for strategies in map.values_mut() {
+                strategies.retain(|name| name != strategy_name);
+            }
+            // Clean up empty entries
+            map.retain(|_, strategies| !strategies.is_empty());
+        }
+
+        // Remove from orderid-strategy mapping
+        {
+            let mut orderid_map = self.orderid_strategy_map.write().await;
+            let mut strategy_map = self.strategy_orderid_map.write().await;
+
+            if let Some(orderids) = strategy_map.remove(strategy_name) {
+                for orderid in &orderids {
+                    orderid_map.remove(orderid);
+                }
+            }
+        }
+
+        // Remove from stop orders
+        {
+            let mut stop_orders = self.stop_orders.write().await;
+            stop_orders.retain(|_, so| so.strategy_name != strategy_name);
+        }
+
+        // Remove context and settings
+        {
+            let mut contexts = self.contexts.write().await;
+            contexts.remove(strategy_name);
+        }
+        {
+            let mut settings = self.strategy_settings.write().await;
+            settings.remove(strategy_name);
+        }
+
+        // Remove PnL tracking data
+        {
+            let mut pnl = self.strategy_pnl.write().await;
+            pnl.remove(strategy_name);
+        }
+        {
+            let mut unrealized = self.strategy_unrealized_pnl.write().await;
+            unrealized.remove(strategy_name);
+        }
+        {
+            let mut trade_count = self.strategy_trade_count.write().await;
+            trade_count.remove(strategy_name);
+        }
+        {
+            let mut avg_prices = self.strategy_avg_price.write().await;
+            avg_prices.retain(|(name, _), _| name != strategy_name);
+        }
+
+        tracing::info!("Strategy {} removed", strategy_name);
+        Ok(())
+    }
+
     /// Cancel all orders for a strategy
     async fn cancel_all_orders(&self, strategy_name: &str) {
         let orderid_map = self.strategy_orderid_map.read().await;
@@ -581,6 +862,102 @@ impl StrategyEngine {
 
         self.main_engine.cancel_order(req, &gw_name).await
     }
+
+    /// Register a multi-period bar synthesizer for a strategy symbol.
+    /// When 1-minute bars arrive, they will be accumulated into the target interval
+    /// and delivered to the strategy via on_bar() when complete.
+    /// 
+    /// For example, if a strategy needs 5-minute bars for BTCUSDT.BINANCE,
+    /// call `register_bar_synthesizer("MyStrategy", "BTCUSDT.BINANCE", Interval::Minute5)`.
+    /// The engine will accumulate 5 consecutive 1-minute bars and deliver one 5-minute bar.
+    pub async fn register_bar_synthesizer(
+        &self,
+        strategy_name: &str,
+        vt_symbol: &str,
+        interval: Interval,
+    ) {
+        // Only create synthesizers for intervals other than Minute/Tick (base intervals)
+        if interval == Interval::Minute || interval == Interval::Tick || interval == Interval::Second {
+            return;
+        }
+
+        let key = (strategy_name.to_string(), vt_symbol.to_string());
+        let synthesizer = BarSynthesizer::new(interval);
+        
+        self.bar_synthesizers.write().await.insert(key, synthesizer);
+        tracing::info!(
+            "Registered bar synthesizer for {} on {} with interval {:?}",
+            strategy_name, vt_symbol, interval
+        );
+    }
+
+    /// Unregister all bar synthesizers for a strategy
+    async fn unregister_bar_synthesizers(&self, strategy_name: &str) {
+        let mut synthesizers = self.bar_synthesizers.write().await;
+        synthesizers.retain(|(name, _), _| name != strategy_name);
+    }
+
+    // ========================================================================
+    // Per-strategy PnL tracking
+    // ========================================================================
+
+    /// Get realized PnL for a strategy
+    pub async fn get_strategy_pnl(&self, strategy_name: &str) -> f64 {
+        self.strategy_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0)
+    }
+
+    /// Get unrealized PnL for a strategy
+    pub async fn get_strategy_unrealized_pnl(&self, strategy_name: &str) -> f64 {
+        self.strategy_unrealized_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0)
+    }
+
+    /// Get total PnL (realized + unrealized) for a strategy
+    pub async fn get_strategy_total_pnl(&self, strategy_name: &str) -> f64 {
+        let realized = self.strategy_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0);
+        let unrealized = self.strategy_unrealized_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0);
+        realized + unrealized
+    }
+
+    /// Get trade count for a strategy
+    pub async fn get_strategy_trade_count(&self, strategy_name: &str) -> usize {
+        self.strategy_trade_count.read().await.get(strategy_name).copied().unwrap_or(0)
+    }
+
+    /// Update unrealized PnL for a strategy based on current market prices
+    /// Call this when ticks arrive to keep unrealized PnL up to date
+    pub async fn update_unrealized_pnl(&self, strategy_name: &str, vt_symbol: &str) {
+        let strategies = self.strategies.read().await;
+        let pos = strategies.get(strategy_name)
+            .map(|s| s.get_position(vt_symbol))
+            .unwrap_or(0.0);
+        drop(strategies);
+
+        if pos == 0.0 {
+            self.strategy_unrealized_pnl.write().await.insert(strategy_name.to_string(), 0.0);
+            return;
+        }
+
+        // Get last price from context
+        let last_price = self.contexts.read().await
+            .get(strategy_name)
+            .and_then(|ctx| ctx.get_tick(vt_symbol))
+            .map(|tick| tick.last_price);
+
+        if let Some(last_price) = last_price {
+            let avg_entry = self.strategy_avg_price.read().await
+                .get(&(strategy_name.to_string(), vt_symbol.to_string()))
+                .copied()
+                .unwrap_or(last_price);
+
+            let unrealized = if pos > 0.0 {
+                (last_price - avg_entry) * pos
+            } else {
+                (avg_entry - last_price) * pos.abs()
+            };
+
+            self.strategy_unrealized_pnl.write().await.insert(strategy_name.to_string(), unrealized);
+        }
+    }
 }
 
 /// Implement BaseEngine for StrategyEngine so it can receive events directly from MainEngine
@@ -609,6 +986,11 @@ impl Clone for StrategyEngine {
             stop_order_count: self.stop_order_count.clone(),
             contexts: self.contexts.clone(),
             processed_tradeids: self.processed_tradeids.clone(),
+            bar_synthesizers: self.bar_synthesizers.clone(),
+            strategy_pnl: self.strategy_pnl.clone(),
+            strategy_unrealized_pnl: self.strategy_unrealized_pnl.clone(),
+            strategy_trade_count: self.strategy_trade_count.clone(),
+            strategy_avg_price: self.strategy_avg_price.clone(),
         }
     }
 }
@@ -791,5 +1173,57 @@ mod tests {
         fn get_position(&self, vt_symbol: &str) -> f64 {
             *self.positions.get(vt_symbol).unwrap_or(&0.0)
         }
+    }
+
+    #[tokio::test]
+    async fn test_remove_strategy() {
+        let engine = create_strategy_engine();
+        let strategy = MockStrategy::new("TestStrategy".to_string());
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+        assert!(engine.get_all_strategy_names().await.contains(&"TestStrategy".to_string()));
+
+        // Remove the strategy
+        let result = engine.remove_strategy("TestStrategy").await;
+        assert!(result.is_ok());
+        assert!(!engine.get_all_strategy_names().await.contains(&"TestStrategy".to_string()));
+
+        // Remove nonexistent should fail
+        let result = engine.remove_strategy("NonExistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_pnl_tracking_initial_state() {
+        let engine = create_strategy_engine();
+        
+        // PnL should be 0 for nonexistent strategy
+        let pnl = engine.get_strategy_pnl("NonExistent").await;
+        assert_eq!(pnl, 0.0);
+        
+        let unrealized = engine.get_strategy_unrealized_pnl("NonExistent").await;
+        assert_eq!(unrealized, 0.0);
+        
+        let total = engine.get_strategy_total_pnl("NonExistent").await;
+        assert_eq!(total, 0.0);
+        
+        let count = engine.get_strategy_trade_count("NonExistent").await;
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_register_bar_synthesizer() {
+        let engine = create_strategy_engine();
+        let strategy = MockStrategy::new("TestStrategy".to_string());
+        let setting = StrategySetting::new();
+
+        engine.add_strategy(Box::new(strategy), setting).await.unwrap();
+        
+        // Register a 5-minute synthesizer
+        engine.register_bar_synthesizer("TestStrategy", "BTCUSDT.BINANCE", Interval::Minute5).await;
+        
+        // Should not create synthesizer for base intervals
+        engine.register_bar_synthesizer("TestStrategy", "ETHUSDT.BINANCE", Interval::Minute).await;
     }
 }

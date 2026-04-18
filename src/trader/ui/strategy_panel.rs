@@ -24,6 +24,7 @@ fn state_color(state: &str) -> Color32 {
         "Inited" => Color32::from_rgb(100, 150, 255),
         "Trading" => Color32::GREEN,
         "Stopped" => Color32::RED,
+        "Error" => Color32::YELLOW,
         _ => Color32::GRAY,
     }
 }
@@ -35,6 +36,7 @@ fn state_label(state: &str) -> &str {
         "Inited" => "已初始化",
         "Trading" => "交易中",
         "Stopped" => "已停止",
+        "Error" => "错误",
         _ => state,
     }
 }
@@ -47,6 +49,7 @@ pub struct StrategyPanel {
     pending_init: Option<String>,
     pending_start: Option<String>,
     pending_stop: Option<String>,
+    pending_remove: Option<String>,
 }
 
 impl Default for StrategyPanel {
@@ -64,6 +67,7 @@ impl StrategyPanel {
             pending_init: None,
             pending_start: None,
             pending_stop: None,
+            pending_remove: None,
         }
     }
 
@@ -85,6 +89,16 @@ impl StrategyPanel {
     /// Take and clear pending stop action
     pub fn take_stop(&mut self) -> Option<String> {
         self.pending_stop.take()
+    }
+
+    /// Take and clear pending remove action
+    pub fn take_remove(&mut self) -> Option<String> {
+        self.pending_remove.take()
+    }
+
+    /// Clear the current selection
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
     }
 
     /// Sort strategy rows based on current sort state
@@ -195,6 +209,16 @@ impl StrategyPanel {
                 if ui.button("停止").clicked() {
                     if let Some(ref name) = self.selected {
                         self.pending_stop = Some(name.clone());
+                    }
+                }
+                // Remove button with destructive styling
+                let remove_button = ui.add(
+                    egui::Button::new(egui::RichText::new("移除").color(egui::Color32::WHITE))
+                        .fill(egui::Color32::from_rgb(180, 60, 60))
+                );
+                if remove_button.clicked() {
+                    if let Some(ref name) = self.selected {
+                        self.pending_remove = Some(name.clone());
                     }
                 }
             });
