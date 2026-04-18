@@ -5,6 +5,7 @@
 
 use crate::backtesting::position::Position;
 use crate::trader::{Direction, Offset, OrderData};
+use std::collections::HashMap;
 
 /// Result of a risk check
 #[derive(Debug, Clone)]
@@ -51,6 +52,15 @@ pub struct RiskConfig {
     pub check_open_orders: bool,
     pub check_daily_trades: bool,
     pub check_daily_turnover: bool,
+    /// Portfolio-level risk limits
+    /// Max total exposure / capital (e.g., 2.0 = 200%)
+    pub max_portfolio_exposure: f64,
+    /// Max leverage ratio
+    pub max_leverage: f64,
+    /// Max drawdown percentage before circuit breaker (0.0..1.0)
+    pub max_drawdown_pct: f64,
+    /// Max single position notional / total portfolio notional (0.0..1.0)
+    pub max_position_concentration: f64,
 }
 
 impl Default for RiskConfig {
@@ -68,6 +78,10 @@ impl Default for RiskConfig {
             check_open_orders: true,
             check_daily_trades: true,
             check_daily_turnover: true,
+            max_portfolio_exposure: f64::MAX,
+            max_leverage: f64::MAX,
+            max_drawdown_pct: 1.0,
+            max_position_concentration: 1.0,
         }
     }
 }
@@ -77,6 +91,12 @@ pub struct RiskEngine {
     config: RiskConfig,
     daily_trade_count: u64,
     daily_turnover: f64,
+    // Portfolio-level tracking
+    peak_equity: f64,
+    current_equity: f64,
+    is_halted: bool,
+    position_notional: HashMap<String, f64>,
+    total_notional: f64,
 }
 
 impl RiskEngine {
@@ -85,6 +105,11 @@ impl RiskEngine {
             config,
             daily_trade_count: 0,
             daily_turnover: 0.0,
+            peak_equity: 0.0,
+            current_equity: 0.0,
+            is_halted: false,
+            position_notional: HashMap::new(),
+            total_notional: 0.0,
         }
     }
 
@@ -102,6 +127,11 @@ impl RiskEngine {
             },
             daily_trade_count: 0,
             daily_turnover: 0.0,
+            peak_equity: 0.0,
+            current_equity: 0.0,
+            is_halted: false,
+            position_notional: HashMap::new(),
+            total_notional: 0.0,
         }
     }
 
@@ -213,5 +243,97 @@ impl RiskEngine {
     /// Update risk config
     pub fn set_config(&mut self, config: RiskConfig) {
         self.config = config;
+    }
+
+    // ── Portfolio-level risk checks ──────────────────────────────────
+
+    /// Check if adding additional notional exposure would exceed portfolio limits
+    pub fn check_portfolio_exposure(
+        &self,
+        additional_notional: f64,
+        capital: f64,
+    ) -> RiskCheckResult {
+        if capital <= 0.0 {
+            return RiskCheckResult::approved();
+        }
+        let projected_total = self.total_notional + additional_notional;
+        let exposure_ratio = projected_total / capital;
+        if exposure_ratio > self.config.max_portfolio_exposure {
+            return RiskCheckResult::rejected(&format!(
+                "Portfolio exposure {:.2}% would exceed max {:.2}%",
+                exposure_ratio * 100.0,
+                self.config.max_portfolio_exposure * 100.0,
+            ));
+        }
+        let leverage = projected_total / capital;
+        if leverage > self.config.max_leverage {
+            return RiskCheckResult::rejected(&format!(
+                "Leverage {:.2}x would exceed max {:.2}x",
+                leverage, self.config.max_leverage,
+            ));
+        }
+        RiskCheckResult::approved()
+    }
+
+    /// Check if a single position would exceed concentration limits
+    pub fn check_position_concentration(
+        &self,
+        symbol: &str,
+        additional_notional: f64,
+        capital: f64,
+    ) -> RiskCheckResult {
+        if capital <= 0.0 {
+            return RiskCheckResult::approved();
+        }
+        let current = self.position_notional.get(symbol).copied().unwrap_or(0.0);
+        let projected = current + additional_notional;
+        let concentration = projected / capital;
+        if concentration > self.config.max_position_concentration {
+            return RiskCheckResult::rejected(&format!(
+                "Position concentration for {} is {:.2}% which exceeds max {:.2}%",
+                symbol,
+                concentration * 100.0,
+                self.config.max_position_concentration * 100.0,
+            ));
+        }
+        RiskCheckResult::approved()
+    }
+
+    /// Update equity tracking and check drawdown circuit breaker.
+    /// Returns rejected if drawdown exceeds threshold (circuit breaker triggered).
+    pub fn update_equity(&mut self, equity: f64) -> RiskCheckResult {
+        self.current_equity = equity;
+        if equity > self.peak_equity {
+            self.peak_equity = equity;
+        }
+        if self.peak_equity <= 0.0 {
+            return RiskCheckResult::approved();
+        }
+        let drawdown = (self.peak_equity - equity) / self.peak_equity;
+        if drawdown >= self.config.max_drawdown_pct {
+            self.is_halted = true;
+            return RiskCheckResult::rejected(&format!(
+                "Drawdown {:.2}% exceeds max {:.2}% — circuit breaker triggered",
+                drawdown * 100.0,
+                self.config.max_drawdown_pct * 100.0,
+            ));
+        }
+        RiskCheckResult::approved()
+    }
+
+    /// Update the notional value tracked for a given symbol
+    pub fn update_position_notional(&mut self, symbol: &str, notional: f64) {
+        let old = self.position_notional.get(symbol).copied().unwrap_or(0.0);
+        self.total_notional = self.total_notional - old + notional;
+        if notional == 0.0 {
+            self.position_notional.remove(symbol);
+        } else {
+            self.position_notional.insert(symbol.to_string(), notional);
+        }
+    }
+
+    /// Returns true if the circuit breaker has been triggered
+    pub fn is_halted(&self) -> bool {
+        self.is_halted
     }
 }
