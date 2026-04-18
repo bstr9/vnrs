@@ -10,6 +10,8 @@ use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use trade_engine::trader::{MainEngine, GatewayEventSender};
+use trade_engine::trader::recorder::DataRecorder;
+use trade_engine::trader::database::MemoryDatabase;
 use trade_engine::event::EventEngine;
 use trade_engine::gateway::binance::{BinanceSpotGateway, BinanceUsdtGateway};
 
@@ -107,6 +109,9 @@ impl TradeEngineApp {
                 main_engine.clone(),
                 event_engine.clone(),
             ));
+            // Register strategy engine as a sub-engine of MainEngine so it receives
+            // tick/bar/order/trade events directly (GAP 6 fix)
+            main_engine.add_engine(strategy_engine.clone());
             {
                 let se = strategy_engine.clone();
                 runtime.spawn(async move {
@@ -114,6 +119,19 @@ impl TradeEngineApp {
                 });
             }
             main_window.set_strategy_engine(strategy_engine);
+            
+            // Create and wire DataRecorder engine for automatic tick/bar recording (GAP 5 fix)
+            let data_recorder = Arc::new(DataRecorder::new(
+                Arc::new(MemoryDatabase::new()),
+            ));
+            main_engine.add_engine(data_recorder.clone());
+            {
+                let recorder = data_recorder.clone();
+                runtime.spawn(async move {
+                    recorder.start().await;
+                });
+            }
+            info!("✅ DataRecorder 已注册并启动");
             
             // Apply dark theme
             main_window.setup_style(&cc.egui_ctx);

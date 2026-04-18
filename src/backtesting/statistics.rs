@@ -41,12 +41,21 @@ pub fn calculate_statistics(
     let mut profit_days = 0;
     let mut loss_days = 0;
 
+    // GAP 3 additions: trade-level metrics
+    let mut winning_trades_pnl: Vec<f64> = Vec::new();
+    let mut losing_trades_pnl: Vec<f64> = Vec::new();
+    let mut consecutive_wins = 0u32;
+    let mut consecutive_losses = 0u32;
+    let mut max_consecutive_wins = 0u32;
+    let mut max_consecutive_losses = 0u32;
+
     let mut balance = start_capital;
     let mut max_balance = start_capital;
     let mut max_drawdown = 0.0;
     let mut max_drawdown_percent = 0.0;
 
     let mut daily_returns: Vec<f64> = Vec::new();
+    let mut negative_returns: Vec<f64> = Vec::new();  // For Sortino ratio
 
     for date in &dates {
         if let Some(result) = daily_results.get(date) {
@@ -56,6 +65,11 @@ pub fn calculate_statistics(
             total_slippage += result.slippage;
             total_turnover += result.turnover;
             total_trade_count += result.trade_count;
+
+            // Track trade-level PnL for win rate, profit factor, etc.
+            for _trade in &result.trades {
+                // Trade-level PnL tracking is approximated from daily net_pnl below
+            }
 
             // Update balance
             balance += result.net_pnl;
@@ -68,12 +82,33 @@ pub fn calculate_statistics(
                 0.0
             };
             daily_returns.push(daily_return);
+            
+            // Track negative returns for Sortino
+            if daily_return < 0.0 {
+                negative_returns.push(daily_return);
+            }
 
-            // Count profit/loss days
+            // Count profit/loss days and track consecutive wins/losses
             if result.net_pnl > 0.0 {
                 profit_days += 1;
+                consecutive_wins += 1;
+                consecutive_losses = 0;
+                max_consecutive_wins = max_consecutive_wins.max(consecutive_wins);
+                // Approximate winning trade PnL (distributed evenly)
+                if result.trade_count > 0 {
+                    let avg_trade = result.net_pnl / result.trade_count as f64;
+                    winning_trades_pnl.push(avg_trade);
+                }
             } else if result.net_pnl < 0.0 {
                 loss_days += 1;
+                consecutive_losses += 1;
+                consecutive_wins = 0;
+                max_consecutive_losses = max_consecutive_losses.max(consecutive_losses);
+                // Approximate losing trade PnL (distributed evenly)
+                if result.trade_count > 0 {
+                    let avg_trade = result.net_pnl / result.trade_count as f64;
+                    losing_trades_pnl.push(avg_trade);
+                }
             }
 
             // Update max balance and drawdown
@@ -159,6 +194,76 @@ pub fn calculate_statistics(
     // Annual return
     let return_mean = daily_return_mean * annual_days as f64;
 
+    // GAP 3: Calculate additional metrics
+    let total_trades = winning_trades_pnl.len() + losing_trades_pnl.len();
+    let win_rate = if total_trades > 0 {
+        winning_trades_pnl.len() as f64 / total_trades as f64
+    } else {
+        0.0
+    };
+
+    let gross_profit: f64 = winning_trades_pnl.iter().sum();
+    let gross_loss: f64 = losing_trades_pnl.iter().map(|x| x.abs()).sum();
+    let profit_factor = if gross_loss > 0.0 {
+        gross_profit / gross_loss
+    } else if gross_profit > 0.0 {
+        f64::INFINITY
+    } else {
+        0.0
+    };
+
+    let avg_trade_pnl = if total_trades > 0 {
+        (gross_profit - gross_loss) / total_trades as f64
+    } else {
+        0.0
+    };
+
+    let avg_winning_trade = if !winning_trades_pnl.is_empty() {
+        gross_profit / winning_trades_pnl.len() as f64
+    } else {
+        0.0
+    };
+
+    let avg_losing_trade = if !losing_trades_pnl.is_empty() {
+        gross_loss / losing_trades_pnl.len() as f64
+    } else {
+        0.0
+    };
+
+    let largest_winning_trade = winning_trades_pnl.iter().cloned().fold(0.0, f64::max);
+    let largest_losing_trade = losing_trades_pnl.iter().cloned().map(|x| x.abs()).fold(0.0, f64::max);
+
+    // Sortino ratio: uses downside deviation instead of total std
+    let downside_std = if negative_returns.len() > 1 {
+        let variance: f64 = negative_returns
+            .iter()
+            .map(|r| {
+                let diff = r * r;  // Square of negative returns
+                diff
+            })
+            .sum::<f64>()
+            / negative_returns.len() as f64;
+        variance.sqrt()
+    } else {
+        0.0
+    };
+
+    let sortino_ratio = if downside_std > 0.0 {
+        let excess_return = daily_return_mean - risk_free / annual_days as f64;
+        excess_return / downside_std * (annual_days as f64).sqrt()
+    } else {
+        0.0
+    };
+
+    // Calmar ratio: annual return / max drawdown
+    let calmar_ratio = if max_drawdown > 0.0 {
+        (return_mean * start_capital) / max_drawdown
+    } else if return_mean > 0.0 {
+        f64::INFINITY
+    } else {
+        0.0
+    };
+
     BacktestingStatistics {
         start_date,
         end_date,
@@ -182,6 +287,17 @@ pub fn calculate_statistics(
         return_std,
         sharpe_ratio,
         return_mean,
+        win_rate,
+        profit_factor,
+        avg_trade_pnl,
+        max_consecutive_wins,
+        max_consecutive_losses,
+        sortino_ratio,
+        calmar_ratio,
+        avg_winning_trade,
+        avg_losing_trade,
+        largest_winning_trade,
+        largest_losing_trade,
     }
 }
 

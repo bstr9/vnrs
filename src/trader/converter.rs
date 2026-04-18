@@ -419,21 +419,18 @@ impl PositionHolding {
     }
 }
 
+/// Type-erased contract lookup function for use in MainEngine
+type ContractLookup = Box<dyn Fn(&str) -> Option<ContractData> + Send + Sync>;
+
 /// Offset converter for managing position holdings and order conversion
-pub struct OffsetConverter<F>
-where
-    F: Fn(&str) -> Option<ContractData>,
-{
+pub struct OffsetConverter {
     holdings: HashMap<String, PositionHolding>,
-    get_contract: F,
+    get_contract: ContractLookup,
 }
 
-impl<F> OffsetConverter<F>
-where
-    F: Fn(&str) -> Option<ContractData>,
-{
-    /// Create a new OffsetConverter
-    pub fn new(get_contract: F) -> Self {
+impl OffsetConverter {
+    /// Create a new OffsetConverter with a boxed contract lookup function
+    pub fn new(get_contract: ContractLookup) -> Self {
         Self {
             holdings: HashMap::new(),
             get_contract,
@@ -542,6 +539,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::constant::Product;
 
     #[test]
     fn test_position_holding_new() {
@@ -550,7 +548,7 @@ mod tests {
             "IF2312".to_string(),
             Exchange::Cffex,
             "沪深300指数期货".to_string(),
-            super::super::constant::Product::Futures,
+            Product::Futures,
             300.0,
             0.2,
         );
@@ -568,7 +566,7 @@ mod tests {
             "IF2312".to_string(),
             Exchange::Cffex,
             "沪深300指数期货".to_string(),
-            super::super::constant::Product::Futures,
+            Product::Futures,
             300.0,
             0.2,
         );
@@ -589,5 +587,11 @@ mod tests {
         assert_eq!(holding.long_pos, 10.0);
         assert_eq!(holding.long_yd, 5.0);
         assert_eq!(holding.long_td, 5.0);
+    }
+
+    #[test]
+    fn test_offset_converter_new() {
+        let converter = OffsetConverter::new(Box::new(|_vt_symbol| None));
+        assert!(converter.holdings.is_empty());
     }
 }

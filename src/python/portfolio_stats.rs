@@ -251,6 +251,18 @@ mod tests {
             return_std: 0.012,
             sharpe_ratio: 1.85,
             return_mean: 1.134,
+            // GAP 3 additions
+            win_rate: 0.65,
+            profit_factor: 2.5,
+            avg_trade_pnl: 200.0,
+            max_consecutive_wins: 5,
+            max_consecutive_losses: 3,
+            sortino_ratio: 2.1,
+            calmar_ratio: 3.2,
+            avg_winning_trade: 450.0,
+            avg_losing_trade: -180.0,
+            largest_winning_trade: 1200.0,
+            largest_losing_trade: -500.0,
         }
     }
 

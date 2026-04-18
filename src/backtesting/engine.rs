@@ -609,7 +609,7 @@ impl BacktestingEngine {
                     direction: order.direction,
                     offset: order.offset,
                     price: result.fill_price,
-                    volume: order.volume,
+                    volume: result.fill_qty,  // GAP 2 fix: use fill_qty, not order.volume
                     datetime: Some(bar.datetime),
                     extra: None,
                 };
@@ -639,8 +639,17 @@ impl BacktestingEngine {
                     strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
 
-                // Mark for removal
-                to_remove.push(vt_orderid.clone());
+                // Handle partial fills: if fill_qty < order volume, keep order active
+                let remaining = order.volume - order.traded - result.fill_qty;
+                if remaining > 1e-10 {
+                    // Partially filled - update order's traded amount and keep active
+                    if let Some(active_order) = self.active_limit_orders.get_mut(&vt_orderid) {
+                        active_order.traded += result.fill_qty;
+                    }
+                } else {
+                    // Fully filled - mark for removal
+                    to_remove.push(vt_orderid.clone());
+                }
             }
         }
 
@@ -703,7 +712,7 @@ impl BacktestingEngine {
                     direction: Some(stop_order.direction),
                     offset: stop_order.offset.unwrap_or(Offset::Open),
                     price: fill_result.fill_price,
-                    volume: stop_order.volume,
+                    volume: fill_result.fill_qty,  // GAP 2 fix: use fill_qty, not stop_order.volume
                     datetime: Some(bar.datetime),
                     extra: None,
                 };
@@ -761,7 +770,7 @@ impl BacktestingEngine {
                     direction: order.direction,
                     offset: order.offset,
                     price: result.fill_price,
-                    volume: order.volume,
+                    volume: result.fill_qty,  // GAP 2 fix: use fill_qty, not order.volume
                     datetime: Some(tick.datetime),
                     extra: None,
                 };
@@ -790,8 +799,17 @@ impl BacktestingEngine {
                     strategy.update_position(&self.vt_symbol, self.position.signed_qty());
                 }
 
-                // Mark for removal
-                to_remove.push(vt_orderid.clone());
+                // Handle partial fills: if fill_qty < order volume, keep order active
+                let remaining = order.volume - order.traded - result.fill_qty;
+                if remaining > 1e-10 {
+                    // Partially filled - update order's traded amount and keep active
+                    if let Some(active_order) = self.active_limit_orders.get_mut(&vt_orderid) {
+                        active_order.traded += result.fill_qty;
+                    }
+                } else {
+                    // Fully filled - mark for removal
+                    to_remove.push(vt_orderid.clone());
+                }
             }
         }
 
@@ -854,7 +872,7 @@ impl BacktestingEngine {
                     direction: Some(stop_order.direction),
                     offset: stop_order.offset.unwrap_or(Offset::Open),
                     price: fill_result.fill_price,
-                    volume: stop_order.volume,
+                    volume: fill_result.fill_qty,  // GAP 2 fix: use fill_qty, not stop_order.volume
                     datetime: Some(tick.datetime),
                     extra: None,
                 };
@@ -1000,6 +1018,25 @@ impl BacktestingEngine {
         // Calculate end capital
         let total_pnl: f64 = self.daily_results.values().map(|r| r.net_pnl).sum();
         result.end_capital = self.capital + total_pnl;
+
+        // Populate result fields from statistics
+        let stats = self.calculate_statistics(false);
+        result.total_return = if self.capital > 0.0 {
+            (result.end_capital - self.capital) / self.capital
+        } else {
+            0.0
+        };
+        result.annual_return = stats.return_mean;
+        result.max_drawdown = stats.max_drawdown;
+        result.max_drawdown_percent = stats.max_drawdown_percent;
+        result.sharpe_ratio = stats.sharpe_ratio;
+        result.total_trade_count = stats.total_trade_count;
+        result.total_days = stats.total_days;
+        result.profit_days = stats.profit_days;
+        result.loss_days = stats.loss_days;
+        result.total_commission = stats.total_commission;
+        result.total_slippage = stats.total_slippage;
+        result.total_turnover = stats.total_turnover;
         
         result
     }
@@ -1032,8 +1069,15 @@ impl BacktestingEngine {
         self.write_log(&format!("总收益: {:.2}", stats.total_net_pnl));
         self.write_log(&format!("最大回撤: {:.2} ({:.2}%)", stats.max_drawdown, stats.max_drawdown_percent));
         self.write_log(&format!("夏普比率: {:.4}", stats.sharpe_ratio));
+        self.write_log(&format!("索提诺比率: {:.4}", stats.sortino_ratio));
+        self.write_log(&format!("卡尔玛比率: {:.4}", stats.calmar_ratio));
         self.write_log(&format!("年化收益: {:.2}%", stats.return_mean * 100.0));
         self.write_log(&format!("总成交笔数: {}", stats.total_trade_count));
+        self.write_log(&format!("胜率: {:.2}%", stats.win_rate * 100.0));
+        self.write_log(&format!("盈亏比: {:.4}", stats.profit_factor));
+        self.write_log(&format!("平均每笔盈亏: {:.2}", stats.avg_trade_pnl));
+        self.write_log(&format!("最大连胜次数: {}", stats.max_consecutive_wins));
+        self.write_log(&format!("最大连亏次数: {}", stats.max_consecutive_losses));
         self.write_log(&format!("总手续费: {:.2}", stats.total_commission));
         self.write_log(&format!("总滑点: {:.2}", stats.total_slippage));
         self.write_log("====================================\n");

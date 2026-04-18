@@ -7,6 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use super::app::BaseApp;
 use super::constant::Exchange;
+use super::converter::OffsetConverter;
 use super::risk::RiskManager;
 
 use super::event::*;
@@ -452,6 +453,7 @@ pub struct MainEngine {
     oms_engine: Arc<OmsEngine>,
     log_engine: Arc<LogEngine>,
     risk_manager: Arc<RiskManager>,
+    offset_converter: RwLock<OffsetConverter>,
     
     event_tx: mpsc::UnboundedSender<(String, GatewayEvent)>,
     event_rx: RwLock<Option<mpsc::UnboundedReceiver<(String, GatewayEvent)>>>,
@@ -469,6 +471,12 @@ impl MainEngine {
         let log_engine = Arc::new(LogEngine::new());
         let risk_manager = Arc::new(RiskManager::new());
         
+        // Create OffsetConverter with contract lookup from OmsEngine
+        let oms_for_converter = oms_engine.clone();
+        let offset_converter = OffsetConverter::new(Box::new(move |vt_symbol: &str| {
+            oms_for_converter.get_contract(vt_symbol)
+        }));
+        
         let engine = Self {
             gateways: RwLock::new(HashMap::new()),
             engines: RwLock::new(HashMap::new()),
@@ -477,6 +485,7 @@ impl MainEngine {
             oms_engine,
             log_engine,
             risk_manager,
+            offset_converter: RwLock::new(offset_converter),
             event_tx,
             event_rx: RwLock::new(Some(event_rx)),
             handlers: RwLock::new(HashMap::new()),
@@ -534,6 +543,17 @@ impl MainEngine {
             GatewayEvent::Log(log) => {
                 self.log_engine.process_log(log);
                 self.oms_engine.process_log(log.clone());
+            }
+        }
+
+        // Update OffsetConverter with position/order/trade events (GAP 4 fix)
+        {
+            let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+            match event {
+                GatewayEvent::Position(position) => converter.update_position(position),
+                GatewayEvent::Order(order) => converter.update_order(order),
+                GatewayEvent::Trade(trade) => converter.update_trade(trade),
+                _ => {}
             }
         }
 
@@ -647,7 +667,7 @@ impl MainEngine {
         }
     }
 
-    /// Send an order (with risk check)
+    /// Send an order (with risk check and offset conversion)
     pub async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String> {
         // Pre-trade risk check
         match self.risk_manager.check_order(&req) {
@@ -658,11 +678,52 @@ impl MainEngine {
             }
         }
 
-        if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("委托下单 -> {}：{:?}", gateway_name, req), "MainEngine");
-            gateway.send_order(req).await
+        // Convert offset for SHFE/INE exchanges (GAP 4 fix)
+        let converted_reqs = {
+            let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+            converter.convert_order_request(&req, false, false)
+        };
+
+        // If the converter split the request into multiple sub-requests, send each one
+        if converted_reqs.len() == 1 && converted_reqs[0].offset == req.offset {
+            // No conversion needed — single request with same offset
+            if let Some(gateway) = self.get_gateway(gateway_name) {
+                self.write_log(format!("委托下单 -> {}：{:?}", gateway_name, req), "MainEngine");
+                let vt_orderid = gateway.send_order(req).await?;
+
+                // Update offset converter with the new order request
+                {
+                    let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+                    converter.update_order_request(&converted_reqs[0], &vt_orderid);
+                }
+
+                Ok(vt_orderid)
+            } else {
+                Err(format!("找不到底层接口：{}", gateway_name))
+            }
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            // Multiple sub-requests from offset conversion
+            let mut last_orderid = String::new();
+            for sub_req in converted_reqs {
+                if let Some(gateway) = self.get_gateway(gateway_name) {
+                    self.write_log(
+                        format!("委托下单(偏移转换) -> {}：offset={:?} vol={}", gateway_name, sub_req.offset, sub_req.volume),
+                        "MainEngine",
+                    );
+                    let vt_orderid = gateway.send_order(sub_req.clone()).await?;
+
+                    // Update offset converter
+                    {
+                        let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+                        converter.update_order_request(&sub_req, &vt_orderid);
+                    }
+
+                    last_orderid = vt_orderid;
+                } else {
+                    return Err(format!("找不到底层接口：{}", gateway_name));
+                }
+            }
+            Ok(last_orderid)
         }
     }
 

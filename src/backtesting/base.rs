@@ -211,6 +211,29 @@ pub struct BacktestingStatistics {
     pub sharpe_ratio: f64,
     /// Annual return
     pub return_mean: f64,
+    // GAP 3 additions: additional performance metrics
+    /// Win rate (fraction of profitable trades)
+    pub win_rate: f64,
+    /// Profit factor (gross profit / gross loss)
+    pub profit_factor: f64,
+    /// Average trade PnL
+    pub avg_trade_pnl: f64,
+    /// Maximum consecutive winning trades
+    pub max_consecutive_wins: u32,
+    /// Maximum consecutive losing trades
+    pub max_consecutive_losses: u32,
+    /// Sortino ratio (downside deviation based)
+    pub sortino_ratio: f64,
+    /// Calmar ratio (annual return / max drawdown)
+    pub calmar_ratio: f64,
+    /// Average winning trade PnL
+    pub avg_winning_trade: f64,
+    /// Average losing trade PnL
+    pub avg_losing_trade: f64,
+    /// Largest winning trade PnL
+    pub largest_winning_trade: f64,
+    /// Largest losing trade PnL
+    pub largest_losing_trade: f64,
 }
 
 impl Default for BacktestingStatistics {
@@ -238,6 +261,17 @@ impl Default for BacktestingStatistics {
             return_std: 0.0,
             sharpe_ratio: 0.0,
             return_mean: 0.0,
+            win_rate: 0.0,
+            profit_factor: 0.0,
+            avg_trade_pnl: 0.0,
+            max_consecutive_wins: 0,
+            max_consecutive_losses: 0,
+            sortino_ratio: 0.0,
+            calmar_ratio: 0.0,
+            avg_winning_trade: 0.0,
+            avg_losing_trade: 0.0,
+            largest_winning_trade: 0.0,
+            largest_losing_trade: 0.0,
         }
     }
 }

@@ -1,6 +1,9 @@
 //! Strategy Engine
 //! 
 //! Core engine for managing and executing trading strategies
+//! 
+//! Implements BaseEngine to receive events directly from MainEngine,
+//! eliminating the need for a separate sync EventEngine.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -10,7 +13,7 @@ use chrono::{Utc, Duration};
 use crate::trader::{
     MainEngine, TickData, OrderData, OrderRequest, TradeData, BarData,
     SubscribeRequest, CancelRequest, HistoryRequest,
-    Direction, Interval, Exchange,
+    Direction, Interval, Exchange, BaseEngine, GatewayEvent,
     EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE,
 };
 use crate::event::EventEngine;
@@ -30,7 +33,8 @@ pub const EVENT_STRATEGY_TRADE: &str = "eStrategyTrade";
 pub struct StrategyEngine {
     /// Main trading engine
     main_engine: Arc<MainEngine>,
-    /// Event engine
+    /// Event engine (kept for backward compatibility, not used for event routing since GAP 6 fix)
+    #[allow(dead_code)]
     event_engine: Arc<EventEngine>,
     
     /// Strategy instances
@@ -75,184 +79,148 @@ impl StrategyEngine {
 
     /// Initialize the engine
     pub async fn init(&self) {
-        // Register event handlers
-        self.register_event_handlers();
-        
         // Load strategy settings
         self.load_strategy_settings().await;
         
         tracing::info!("Strategy engine initialized successfully");
     }
 
-    /// Register event handlers
-    fn register_event_handlers(&self) {
-        // Clone Arc for use in closures
-        let strategies = Arc::clone(&self.strategies);
-        let contexts = Arc::clone(&self.contexts);
-        let symbol_strategy_map = Arc::clone(&self.symbol_strategy_map);
-        let orderid_strategy_map = Arc::clone(&self.orderid_strategy_map);
-        let processed_tradeids = Arc::clone(&self.processed_tradeids);
-
-        // Register tick event - listen to all ticks
-        let tick_strategies = Arc::clone(&strategies);
-        let tick_contexts = Arc::clone(&contexts);
-        let tick_symbol_map = Arc::clone(&symbol_strategy_map);
-        let tick_stop_orders = Arc::clone(&self.stop_orders);
-        
-        self.event_engine.register(EVENT_TICK, Arc::new(move |event| {
-            tracing::debug!("Tick event received");
-            let _ = (&tick_strategies, &tick_contexts, &tick_symbol_map, &tick_stop_orders);
-            if let Some(ref data) = event.data {
-                if let Ok(tick) = data.clone().downcast::<TickData>() {
-                    let strategies = tick_strategies.clone();
-                    let contexts = tick_contexts.clone();
-                    let symbol_map = tick_symbol_map.clone();
-                    let stop_orders = tick_stop_orders.clone();
-                    
-                    let vt_symbol = tick.vt_symbol();
-                    let strategy_names: Vec<String> = symbol_map.blocking_read()
-                        .get(&vt_symbol).cloned()
-                        .unwrap_or_default();
-                    
-                    for strategy_name in &strategy_names {
-                         let contexts_guard = contexts.blocking_read();
-                         if let Some(context) = contexts_guard.get(strategy_name) {
-                             context.update_tick((*tick).clone());
-                             let mut strategies_guard = strategies.blocking_write();
-                             if let Some(strategy) = strategies_guard.get_mut(strategy_name) {
-                                 strategy.on_tick(&tick, context);
-                             }
-                         }
-                     }
-                    
-                    {
-                        let mut stop_orders_guard = stop_orders.blocking_write();
-                        let mut triggered = Vec::new();
-                        for (stop_orderid, stop_order) in stop_orders_guard.iter() {
-                            if stop_order.vt_symbol != vt_symbol { continue; }
-                            if stop_order.status != StopOrderStatus::Waiting { continue; }
-                            let should_trigger = match stop_order.direction {
-                                Direction::Long => tick.last_price >= stop_order.price,
-                                Direction::Short => tick.last_price <= stop_order.price,
-                                Direction::Net => false,
-                            };
-                            if should_trigger {
-                                triggered.push(stop_orderid.clone());
-                            }
-                        }
-                        for stop_orderid in triggered {
-                            if let Some(stop_order) = stop_orders_guard.get_mut(&stop_orderid) {
-                                stop_order.status = StopOrderStatus::Triggered;
-                            }
-                        }
-                    }
+    /// Process gateway events from MainEngine (BaseEngine implementation)
+    /// Routes tick/bar/order/trade events to the appropriate strategies
+    fn process_event_internal(&self, event_type: &str, event: &GatewayEvent) {
+        match event_type {
+            EVENT_TICK => {
+                if let GatewayEvent::Tick(tick) = event {
+                    self.process_tick_event(tick);
                 }
             }
-        }));
-
-        // Register bar event
-        let bar_strategies = Arc::clone(&strategies);
-        let bar_contexts = Arc::clone(&contexts);
-        let bar_symbol_map = Arc::clone(&symbol_strategy_map);
-        
-        self.event_engine.register(EVENT_BAR, Arc::new(move |event| {
-            tracing::debug!("Bar event received");
-            if let Some(ref data) = event.data {
-                if let Ok(bar) = data.clone().downcast::<BarData>() {
-                    let strategies = bar_strategies.clone();
-                    let contexts = bar_contexts.clone();
-                    let symbol_map = bar_symbol_map.clone();
-                    
-                    let vt_symbol = bar.vt_symbol();
-                    let strategy_names: Vec<String> = symbol_map.blocking_read()
-                        .get(&vt_symbol).cloned()
-                        .unwrap_or_default();
-                    
-                    for strategy_name in &strategy_names {
-                        let contexts_guard = contexts.blocking_read();
-                        if let Some(context) = contexts_guard.get(strategy_name) {
-                            context.update_bar((*bar).clone());
-                            let mut strategies_guard = strategies.blocking_write();
-                            if let Some(strategy) = strategies_guard.get_mut(strategy_name) {
-                                strategy.on_bar(&bar, context);
-                            }
-                        }
-                    }
+            EVENT_BAR => {
+                if let GatewayEvent::Bar(bar) = event {
+                    self.process_bar_event(bar);
                 }
             }
-        }));
-
-        // Register order event
-        let order_strategies = Arc::clone(&strategies);
-        let order_orderid_map = Arc::clone(&orderid_strategy_map);
-        
-        self.event_engine.register(EVENT_ORDER, Arc::new(move |event| {
-            tracing::debug!("Order event received");
-            if let Some(ref data) = event.data {
-                if let Ok(order) = data.clone().downcast::<OrderData>() {
-                    let orderid_map = order_orderid_map.clone();
-                    let strategies = order_strategies.clone();
-                    
-                    let strategy_name = orderid_map.blocking_read()
-                        .get(&order.vt_orderid())
-                        .cloned();
-                    
-                    if let Some(strategy_name) = strategy_name {
-                        let mut strategies_guard = strategies.blocking_write();
-                        if let Some(strategy) = strategies_guard.get_mut(&strategy_name) {
-                            strategy.on_order(&order);
-                        }
-                    }
+            EVENT_ORDER => {
+                if let GatewayEvent::Order(order) = event {
+                    self.process_order_event(order);
                 }
             }
-        }));
-
-        // Register trade event
-        let trade_strategies = Arc::clone(&strategies);
-        let trade_orderid_map = Arc::clone(&orderid_strategy_map);
-        let trade_processed = Arc::clone(&processed_tradeids);
-        
-        self.event_engine.register(EVENT_TRADE, Arc::new(move |event| {
-            tracing::debug!("Trade event received");
-            if let Some(ref data) = event.data {
-                if let Ok(trade) = data.clone().downcast::<TradeData>() {
-                    let processed = trade_processed.clone();
-                    let orderid_map = trade_orderid_map.clone();
-                    let strategies = trade_strategies.clone();
-                    
-                    let vt_tradeid = trade.vt_tradeid();
-                    {
-                        let mut processed_guard = processed.blocking_write();
-                        if processed_guard.contains(&vt_tradeid) {
-                            return;
-                        }
-                        processed_guard.insert(vt_tradeid);
-                        if processed_guard.len() > 10000 {
-                            processed_guard.clear();
-                        }
-                    }
-                    
-                    let strategy_name = orderid_map.blocking_read()
-                        .get(&trade.vt_orderid())
-                        .cloned();
-                    
-                    if let Some(strategy_name) = strategy_name {
-                        let mut strategies_guard = strategies.blocking_write();
-                        if let Some(strategy) = strategies_guard.get_mut(&strategy_name) {
-                            let volume_change = match trade.direction {
-                                Some(Direction::Long) => trade.volume,
-                                Some(Direction::Short) => -trade.volume,
-                                Some(Direction::Net) => 0.0,
-                                None => 0.0,
-                            };
-                            let current_pos = strategy.get_position(&trade.vt_symbol());
-                            strategy.update_position(&trade.vt_symbol(), current_pos + volume_change);
-                            strategy.on_trade(&trade);
-                        }
-                    }
+            EVENT_TRADE => {
+                if let GatewayEvent::Trade(trade) = event {
+                    self.process_trade_event(trade);
                 }
             }
-        }));
+            _ => {}
+        }
+    }
+
+    /// Process tick event and dispatch to subscribed strategies
+    fn process_tick_event(&self, tick: &TickData) {
+        let vt_symbol = tick.vt_symbol();
+        let strategy_names: Vec<String> = self.symbol_strategy_map.blocking_read()
+            .get(&vt_symbol).cloned()
+            .unwrap_or_default();
+
+        for strategy_name in &strategy_names {
+            let contexts = self.contexts.blocking_read();
+            if let Some(context) = contexts.get(strategy_name) {
+                context.update_tick(tick.clone());
+                let mut strategies = self.strategies.blocking_write();
+                if let Some(strategy) = strategies.get_mut(strategy_name) {
+                    strategy.on_tick(tick, context);
+                }
+            }
+        }
+
+        // Check stop orders
+        {
+            let mut stop_orders = self.stop_orders.blocking_write();
+            let mut triggered = Vec::new();
+            for (stop_orderid, stop_order) in stop_orders.iter() {
+                if stop_order.vt_symbol != vt_symbol { continue; }
+                if stop_order.status != StopOrderStatus::Waiting { continue; }
+                let should_trigger = match stop_order.direction {
+                    Direction::Long => tick.last_price >= stop_order.price,
+                    Direction::Short => tick.last_price <= stop_order.price,
+                    Direction::Net => false,
+                };
+                if should_trigger {
+                    triggered.push(stop_orderid.clone());
+                }
+            }
+            for stop_orderid in triggered {
+                if let Some(stop_order) = stop_orders.get_mut(&stop_orderid) {
+                    stop_order.status = StopOrderStatus::Triggered;
+                }
+            }
+        }
+    }
+
+    /// Process bar event and dispatch to subscribed strategies
+    fn process_bar_event(&self, bar: &BarData) {
+        let vt_symbol = bar.vt_symbol();
+        let strategy_names: Vec<String> = self.symbol_strategy_map.blocking_read()
+            .get(&vt_symbol).cloned()
+            .unwrap_or_default();
+
+        for strategy_name in &strategy_names {
+            let contexts = self.contexts.blocking_read();
+            if let Some(context) = contexts.get(strategy_name) {
+                context.update_bar(bar.clone());
+                let mut strategies = self.strategies.blocking_write();
+                if let Some(strategy) = strategies.get_mut(strategy_name) {
+                    strategy.on_bar(bar, context);
+                }
+            }
+        }
+    }
+
+    /// Process order event and dispatch to owning strategy
+    fn process_order_event(&self, order: &OrderData) {
+        let strategy_name = self.orderid_strategy_map.blocking_read()
+            .get(&order.vt_orderid())
+            .cloned();
+
+        if let Some(strategy_name) = strategy_name {
+            let mut strategies = self.strategies.blocking_write();
+            if let Some(strategy) = strategies.get_mut(&strategy_name) {
+                strategy.on_order(order);
+            }
+        }
+    }
+
+    /// Process trade event and dispatch to owning strategy (with deduplication)
+    fn process_trade_event(&self, trade: &TradeData) {
+        // Deduplicate trades
+        let vt_tradeid = trade.vt_tradeid();
+        {
+            let mut processed = self.processed_tradeids.blocking_write();
+            if processed.contains(&vt_tradeid) {
+                return;
+            }
+            processed.insert(vt_tradeid);
+            if processed.len() > 10000 {
+                processed.clear();
+            }
+        }
+
+        let strategy_name = self.orderid_strategy_map.blocking_read()
+            .get(&trade.vt_orderid())
+            .cloned();
+
+        if let Some(strategy_name) = strategy_name {
+            let mut strategies = self.strategies.blocking_write();
+            if let Some(strategy) = strategies.get_mut(&strategy_name) {
+                let volume_change = match trade.direction {
+                    Some(Direction::Long) => trade.volume,
+                    Some(Direction::Short) => -trade.volume,
+                    Some(Direction::Net) => 0.0,
+                    None => 0.0,
+                };
+                let current_pos = strategy.get_position(&trade.vt_symbol());
+                strategy.update_position(&trade.vt_symbol(), current_pos + volume_change);
+                strategy.on_trade(trade);
+            }
+        }
     }
 
     /// Add a strategy
@@ -397,7 +365,7 @@ impl StrategyEngine {
     async fn load_historical_data(
         &self,
         strategy_name: &str,
-        _context: &StrategyContext,
+        context: &StrategyContext,
     ) -> Result<(), String> {
         let strategies = self.strategies.read().await;
         
@@ -428,6 +396,10 @@ impl StrategyEngine {
                     match self.main_engine.query_history(req, &gw_name).await {
                         Ok(bars) => {
                             tracing::info!("Loaded {} historical bars for {}", bars.len(), vt_symbol);
+                            // Store bars in strategy context (GAP 1 fix: previously discarded)
+                            for bar in &bars {
+                                context.update_bar(bar.clone());
+                            }
                         }
                         Err(e) => {
                             tracing::warn!("Failed to load history for {}: {}", vt_symbol, e);
@@ -608,6 +580,17 @@ impl StrategyEngine {
             .ok_or_else(|| format!("No gateway found for exchange {:?}", order.exchange))?;
 
         self.main_engine.cancel_order(req, &gw_name).await
+    }
+}
+
+/// Implement BaseEngine for StrategyEngine so it can receive events directly from MainEngine
+impl BaseEngine for StrategyEngine {
+    fn engine_name(&self) -> &str {
+        "strategy"
+    }
+
+    fn process_event(&self, event_type: &str, event: &GatewayEvent) {
+        self.process_event_internal(event_type, event);
     }
 }
 
