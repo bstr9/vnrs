@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use chrono::{Utc, Duration};
@@ -57,6 +57,8 @@ pub struct StrategyEngine {
     
     /// Processed trade IDs (for deduplication)
     processed_tradeids: Arc<RwLock<std::collections::HashSet<String>>>,
+    /// Order tracker for LRU eviction of processed_tradeids
+    processed_tradeids_order: Arc<RwLock<Vec<String>>>,
     
     /// Multi-period bar synthesis accumulators: (strategy_name, vt_symbol) �?(target_interval, bar_count, accumulated_bar)
     /// Accumulates 1-minute bars and delivers higher-timeframe bars when complete
@@ -193,6 +195,7 @@ impl StrategyEngine {
             stop_order_count: Arc::new(Mutex::new(0)),
             contexts: Arc::new(RwLock::new(HashMap::new())),
             processed_tradeids: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            processed_tradeids_order: Arc::new(RwLock::new(Vec::new())),
             bar_synthesizers: Arc::new(RwLock::new(HashMap::new())),
             strategy_pnl: Arc::new(RwLock::new(HashMap::new())),
             strategy_unrealized_pnl: Arc::new(RwLock::new(HashMap::new())),
@@ -406,16 +409,24 @@ impl StrategyEngine {
     /// Process trade event and dispatch to owning strategy (with deduplication)
     /// Also tracks per-strategy realized PnL and unfreezes close volume
     fn process_trade_event(&self, trade: &TradeData) {
-        // Deduplicate trades
+        // Deduplicate trades using LRU-style eviction instead of clear-all (#27)
+        const TRADEID_CAPACITY: usize = 10000;
         let vt_tradeid = trade.vt_tradeid();
         {
             let mut processed = self.processed_tradeids.blocking_write();
             if processed.contains(&vt_tradeid) {
                 return;
             }
-            processed.insert(vt_tradeid);
-            if processed.len() > 10000 {
-                processed.clear();
+            processed.insert(vt_tradeid.clone());
+            let mut order = self.processed_tradeids_order.blocking_write();
+            order.push(vt_tradeid);
+            // Evict oldest 50% when over capacity (instead of clearing all)
+            if order.len() > TRADEID_CAPACITY {
+                let evict_count = TRADEID_CAPACITY / 2;
+                let to_evict: Vec<String> = order.drain(..evict_count).collect();
+                for id in &to_evict {
+                    processed.remove(id);
+                }
             }
         }
 
@@ -1208,6 +1219,7 @@ impl Clone for StrategyEngine {
             stop_order_count: self.stop_order_count.clone(),
             contexts: self.contexts.clone(),
             processed_tradeids: self.processed_tradeids.clone(),
+            processed_tradeids_order: self.processed_tradeids_order.clone(),
             bar_synthesizers: self.bar_synthesizers.clone(),
             strategy_pnl: self.strategy_pnl.clone(),
             strategy_unrealized_pnl: self.strategy_unrealized_pnl.clone(),

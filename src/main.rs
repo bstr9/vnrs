@@ -54,9 +54,10 @@ impl TradeEngineApp {
         let event_engine = Arc::new(EventEngine::new(10)); // 10ms timer interval
         info!("✅ 事件引擎已创建");
         
-        // Create the main engine
-        let main_engine = Arc::new(MainEngine::new());
-        info!("✅ 主引擎已创建");
+        // Create the main engine with database persistence (#10, #11)
+        let db = Arc::new(FileDatabase::with_default_dir());
+        let main_engine = Arc::new(MainEngine::new_with_database(db));
+        info!("✅ 主引擎已创建 (含数据库持久化)");
         
         // Get event sender for gateways
         let event_sender = main_engine.get_event_sender();
@@ -403,7 +404,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     if std::env::var("MCP_MODE").is_ok() {
         // Run in MCP stdio mode (for Claude Desktop)
         let event_engine = Arc::new(EventEngine::new(10));
-        let main_engine = Arc::new(MainEngine::new());
+        let db = Arc::new(FileDatabase::with_default_dir());
+        let main_engine = Arc::new(MainEngine::new_with_database(db));
         
         // Register Binance gateways
         let binance_spot = Arc::new(BinanceSpotGateway::new("BINANCE_SPOT"));
@@ -427,7 +429,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         });
         drop(event_engine);
         
-        let (mcp_server, main_engine) = TradingMcpServer::new(main_engine);
+        // Clone main_engine before moving into MCP server for graceful shutdown
+        let main_engine_for_shutdown = main_engine.clone();
+        let (mcp_server, _) = TradingMcpServer::new(main_engine);
         runtime.block_on(async {
             tokio::select! {
                 result = mcp_server.serve_stdio() => {
@@ -437,7 +441,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("Received Ctrl+C, shutting down gracefully...");
-                    main_engine.close().await;
+                    main_engine_for_shutdown.close().await;
                     tracing::info!("Engine closed, exiting.");
                 }
             }

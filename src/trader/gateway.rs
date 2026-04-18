@@ -209,29 +209,45 @@ impl GatewayEventSender {
     /// Push a trade event
     pub fn on_trade(&self, trade: TradeData) {
         let event_type = format!("{}{}", EVENT_TRADE, trade.vt_symbol());
-        let _ = self.sender.send((event_type, GatewayEvent::Trade(trade.clone())));
-        let _ = self.sender.send((EVENT_TRADE.to_string(), GatewayEvent::Trade(trade)));
+        if let Err(e) = self.sender.send((event_type, GatewayEvent::Trade(trade.clone()))) {
+            tracing::warn!("Gateway event send failed for trade {}: {}", trade.vt_tradeid(), e);
+        }
+        if let Err(e) = self.sender.send((EVENT_TRADE.to_string(), GatewayEvent::Trade(trade))) {
+            tracing::warn!("Gateway event send failed for trade (base): {}", e);
+        }
     }
 
     /// Push an order event
     pub fn on_order(&self, order: OrderData) {
         let event_type = format!("{}{}", EVENT_ORDER, order.vt_orderid());
-        let _ = self.sender.send((event_type, GatewayEvent::Order(order.clone())));
-        let _ = self.sender.send((EVENT_ORDER.to_string(), GatewayEvent::Order(order)));
+        if let Err(e) = self.sender.send((event_type, GatewayEvent::Order(order.clone()))) {
+            tracing::warn!("Gateway event send failed for order {}: {}", order.vt_orderid(), e);
+        }
+        if let Err(e) = self.sender.send((EVENT_ORDER.to_string(), GatewayEvent::Order(order))) {
+            tracing::warn!("Gateway event send failed for order (base): {}", e);
+        }
     }
 
     /// Push a position event
     pub fn on_position(&self, position: PositionData) {
         let event_type = format!("{}{}", EVENT_POSITION, position.vt_symbol());
-        let _ = self.sender.send((event_type, GatewayEvent::Position(position.clone())));
-        let _ = self.sender.send((EVENT_POSITION.to_string(), GatewayEvent::Position(position)));
+        if let Err(e) = self.sender.send((event_type, GatewayEvent::Position(position.clone()))) {
+            tracing::warn!("Gateway event send failed for position {}: {}", position.vt_positionid(), e);
+        }
+        if let Err(e) = self.sender.send((EVENT_POSITION.to_string(), GatewayEvent::Position(position))) {
+            tracing::warn!("Gateway event send failed for position (base): {}", e);
+        }
     }
 
     /// Push an account event
     pub fn on_account(&self, account: AccountData) {
         let event_type = format!("{}{}", EVENT_ACCOUNT, account.vt_accountid());
-        let _ = self.sender.send((event_type, GatewayEvent::Account(account.clone())));
-        let _ = self.sender.send((EVENT_ACCOUNT.to_string(), GatewayEvent::Account(account)));
+        if let Err(e) = self.sender.send((event_type, GatewayEvent::Account(account.clone()))) {
+            tracing::warn!("Gateway event send failed for account {}: {}", account.vt_accountid(), e);
+        }
+        if let Err(e) = self.sender.send((EVENT_ACCOUNT.to_string(), GatewayEvent::Account(account))) {
+            tracing::warn!("Gateway event send failed for account (base): {}", e);
+        }
     }
 
     /// Push a quote event

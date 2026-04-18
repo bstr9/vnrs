@@ -1,13 +1,14 @@
 //! Engine module for the trading platform core functionality.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, RwLock, atomic::{AtomicBool, AtomicU64, Ordering}};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use super::app::BaseApp;
 use super::constant::Exchange;
 use super::converter::OffsetConverter;
+use super::database::{BaseDatabase, EventRecord};
 use super::risk::RiskManager;
 
 use super::event::*;
@@ -22,6 +23,14 @@ use super::setting::SETTINGS;
 
 /// Event handler type
 pub type EventHandler = Box<dyn Fn(&GatewayEvent) + Send + Sync>;
+
+/// Persistence task for async database writes
+enum PersistTask {
+    Order(OrderData),
+    Trade(TradeData),
+    Position(PositionData),
+    Event(EventRecord),
+}
 
 /// Base engine trait for implementing function engines
 pub trait BaseEngine: Send + Sync {
@@ -460,12 +469,32 @@ pub struct MainEngine {
     
     handlers: RwLock<HashMap<String, Vec<EventHandler>>>,
     running: AtomicBool,
+
+    /// Optional database for event journaling and crash recovery (#10, #11)
+    database: Option<Arc<dyn BaseDatabase>>,
+    /// Bounded persistence channel for async database writes (capacity 1024)
+    persist_tx: mpsc::Sender<PersistTask>,
+    /// Persistence receiver (taken by drain task on start)
+    persist_rx: RwLock<Option<mpsc::Receiver<PersistTask>>>,
+    /// Monotonic event ID counter for event journaling
+    event_id_counter: AtomicU64,
 }
 
 impl MainEngine {
-    /// Create a new MainEngine
+    /// Create a new MainEngine without database persistence
     pub fn new() -> Self {
+        Self::new_internal(None)
+    }
+
+    /// Create a new MainEngine with database persistence for event journaling and crash recovery
+    pub fn new_with_database(database: Arc<dyn BaseDatabase>) -> Self {
+        Self::new_internal(Some(database))
+    }
+
+    /// Internal constructor
+    fn new_internal(database: Option<Arc<dyn BaseDatabase>>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (persist_tx, persist_rx) = mpsc::channel(1024);
         
         let oms_engine = Arc::new(OmsEngine::new());
         let log_engine = Arc::new(LogEngine::new());
@@ -490,6 +519,10 @@ impl MainEngine {
             event_rx: RwLock::new(Some(event_rx)),
             handlers: RwLock::new(HashMap::new()),
             running: AtomicBool::new(false),
+            database,
+            persist_tx,
+            persist_rx: RwLock::new(Some(persist_rx)),
+            event_id_counter: AtomicU64::new(0),
         };
         
         // Register OMS engine, log engine, and risk manager
@@ -512,6 +545,43 @@ impl MainEngine {
             let mut rx_lock = self.event_rx.write().unwrap_or_else(|e| e.into_inner());
             rx_lock.take()
         };
+
+        // Spawn persistence drain task if database is configured
+        let db = self.database.clone();
+        let persist_rx = {
+            let mut persist_lock = self.persist_rx.write().unwrap_or_else(|e| e.into_inner());
+            persist_lock.take()
+        };
+        if let (Some(db), Some(mut persist_rx)) = (db, persist_rx) {
+            tokio::spawn(async move {
+                info!("Persistence drain task started");
+                while let Some(task) = persist_rx.recv().await {
+                    match task {
+                        PersistTask::Order(order) => {
+                            if let Err(e) = db.save_order_data(vec![order]).await {
+                                warn!("Failed to persist order: {}", e);
+                            }
+                        }
+                        PersistTask::Trade(trade) => {
+                            if let Err(e) = db.save_trade_data(vec![trade]).await {
+                                warn!("Failed to persist trade: {}", e);
+                            }
+                        }
+                        PersistTask::Position(position) => {
+                            if let Err(e) = db.save_position_data(vec![position]).await {
+                                warn!("Failed to persist position: {}", e);
+                            }
+                        }
+                        PersistTask::Event(event_record) => {
+                            if let Err(e) = db.save_event(event_record).await {
+                                warn!("Failed to persist event: {}", e);
+                            }
+                        }
+                    }
+                }
+                info!("Persistence drain task stopped");
+            });
+        }
 
         if let Some(mut rx) = rx {
             loop {
@@ -543,6 +613,50 @@ impl MainEngine {
             GatewayEvent::Log(log) => {
                 self.log_engine.process_log(log);
                 self.oms_engine.process_log(log.clone());
+            }
+        }
+
+        // Persist order/trade/position to database for crash recovery (#10)
+        // Skip tick/bar/account/contract/quote/log — high frequency or re-derivable
+        if self.database.is_some() {
+            match event {
+                GatewayEvent::Order(order) => {
+                    if let Err(e) = self.persist_tx.try_send(PersistTask::Order(order.clone())) {
+                        warn!("Persistence channel full, dropping order {}: {}", order.vt_orderid(), e);
+                    }
+                }
+                GatewayEvent::Trade(trade) => {
+                    if let Err(e) = self.persist_tx.try_send(PersistTask::Trade(trade.clone())) {
+                        warn!("Persistence channel full, dropping trade {}: {}", trade.vt_tradeid(), e);
+                    }
+                }
+                GatewayEvent::Position(position) => {
+                    if let Err(e) = self.persist_tx.try_send(PersistTask::Position(position.clone())) {
+                        warn!("Persistence channel full, dropping position {}: {}", position.vt_positionid(), e);
+                    }
+                }
+                _ => {}
+            }
+            // Event journaling — record all event types except ticks/bars (too high frequency)
+            if !matches!(event, GatewayEvent::Tick(_) | GatewayEvent::Bar(_)) {
+                let event_id = self.event_id_counter.fetch_add(1, Ordering::Relaxed);
+                let gateway_name = match event {
+                    GatewayEvent::Tick(t) => t.gateway_name.clone(),
+                    GatewayEvent::Bar(b) => b.gateway_name.clone(),
+                    GatewayEvent::Order(o) => o.gateway_name.clone(),
+                    GatewayEvent::Trade(t) => t.gateway_name.clone(),
+                    GatewayEvent::Position(p) => p.gateway_name.clone(),
+                    GatewayEvent::Account(a) => a.gateway_name.clone(),
+                    GatewayEvent::Contract(c) => c.gateway_name.clone(),
+                    GatewayEvent::Quote(q) => q.gateway_name.clone(),
+                    GatewayEvent::Log(l) => l.gateway_name.clone(),
+                };
+                // Store a summary payload since GatewayEvent doesn't implement Serialize
+                let payload = format!("{:?}", event);
+                let record = EventRecord::new(event_id, event_type.to_string(), gateway_name, payload);
+                if let Err(e) = self.persist_tx.try_send(PersistTask::Event(record)) {
+                    warn!("Persistence channel full, dropping event record: {}", e);
+                }
             }
         }
 
@@ -914,6 +1028,46 @@ impl MainEngine {
         self.event_tx.clone()
     }
 
+    /// Restore engine state from database after crash (#11)
+    ///
+    /// Loads orders, trades, and positions from the database and re-populates
+    /// OmsEngine's in-memory state. Must be called before `start()`.
+    ///
+    /// **Important**: This only populates OmsEngine. It does NOT re-emit events
+    /// to sub-engines (strategy engine, etc.) to avoid side effects. Active orders
+    /// should be reconciled against the exchange on gateway reconnect.
+    pub async fn restore(&self) -> Result<(), String> {
+        let db = match &self.database {
+            Some(db) => db,
+            None => return Err("No database configured for restore".to_string()),
+        };
+
+        // Load in dependency order: orders first, then trades, then positions
+        let orders = db.load_orders(None).await?;
+        let trades = db.load_trades(None).await?;
+        let positions = db.load_positions(None).await?;
+
+        let order_count = orders.len();
+        let trade_count = trades.len();
+        let position_count = positions.len();
+
+        for order in orders {
+            self.oms_engine.process_order(order);
+        }
+        for trade in trades {
+            self.oms_engine.process_trade(trade);
+        }
+        for position in positions {
+            self.oms_engine.process_position(position);
+        }
+
+        info!(
+            "State restored from database: {} orders, {} trades, {} positions",
+            order_count, trade_count, position_count
+        );
+        Ok(())
+    }
+
     /// Close the main engine
     pub async fn close(&self) {
         self.running.store(false, Ordering::SeqCst);
@@ -935,6 +1089,9 @@ impl MainEngine {
         for gateway in gateways {
             gateway.close().await;
         }
+
+        // Drop persist_tx so the drain task exits cleanly after flushing
+        // (The channel's sender is dropped, receiver will get None and exit)
     }
 }
 

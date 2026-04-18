@@ -388,6 +388,9 @@ impl BinanceWebSocketClient {
         *self.active.write().await = true;
         *self.last_pong.write().await = Some(std::time::Instant::now());
 
+        // Reset reconnect attempts counter — connection succeeded
+        self.reconnect_attempts.store(0, std::sync::atomic::Ordering::SeqCst);
+
         // Shared flag to ensure on_disconnect is called at most once per connection lifecycle
         let disconnect_notified = Arc::new(AtomicBool::new(false));
 
@@ -571,14 +574,35 @@ impl BinanceWebSocketClient {
         self.last_pong.read().await.map(|t| t.elapsed())
     }
 
+    /// Calculate exponential backoff delay with jitter for reconnect attempts.
+    /// Base: 1s, doubles each attempt, capped at 60s, ±25% jitter.
+    fn calculate_backoff_delay(attempt: u32) -> std::time::Duration {
+        let base_secs: u64 = 1u64.checked_shl(attempt).unwrap_or(60).min(60);
+        // Simple jitter using SystemTime as entropy source (no external rand crate)
+        let jitter_nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        // Map to [-0.25, +0.25] range
+        let jitter_pct = (jitter_nanos as f64 / u32::MAX as f64) * 0.5 - 0.25;
+        let final_secs = ((base_secs as f64) * (1.0 + jitter_pct)).max(1.0) as u64;
+        std::time::Duration::from_secs(final_secs)
+    }
+
     /// Attempt to reconnect using saved connection parameters
     /// Returns Ok if reconnection succeeded, Err with reason if it failed
     pub async fn reconnect(&self) -> Result<(), String> {
         // Disconnect first
         self.disconnect().await;
 
-        // Small delay before reconnecting
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // Exponential backoff with jitter: increment counter and calculate delay
+        let attempt = self.reconnect_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let delay = Self::calculate_backoff_delay(attempt);
+        info!(
+            "{}: Reconnect attempt {}, waiting {:?} before connecting",
+            self.gateway_name, attempt + 1, delay
+        );
+        tokio::time::sleep(delay).await;
 
         // Retrieve saved connection parameters
         let (url, proxy_host, proxy_port) = {
