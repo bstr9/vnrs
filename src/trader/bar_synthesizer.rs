@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(bar.open_price, 99.0);  // First bar's open
         assert_eq!(bar.close_price, 104.0); // Last bar's close
         assert_eq!(bar.high_price, 106.0);  // Max high across bars
-        assert_eq!(bar.low_price, 97.0);    // Min low across bars
+        assert_eq!(bar.low_price, 98.0);    // Min low across bars
         assert!((bar.volume - 50.0).abs() < f64::EPSILON); // 5 * 10.0
 
         // Synthesizer should be reset

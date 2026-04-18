@@ -7,6 +7,7 @@ use crate::trader::{
     MainEngine, TickData, OrderData, OrderRequest, TradeData, BarData,
     SubscribeRequest, CancelRequest, HistoryRequest,
     Direction, Interval, Exchange, Offset, Status, BaseEngine, GatewayEvent,
+    BarSynthesizer,
     EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE,
 };
 use crate::trader::database::BaseDatabase;
@@ -90,86 +91,6 @@ struct CloseOrderInfo {
     volume: f64,
     /// Remaining unfilled volume (decremented on partial fills)
     remaining: f64,
-}
-
-/// Bar synthesizer for multi-period bar generation from 1-minute bars
-struct BarSynthesizer {
-    /// Target interval (e.g., Minute5, Minute15, Hour)
-    interval: Interval,
-    /// Number of 1-minute bars that make up one target bar
-    window: i32,
-    /// Current count of accumulated bars
-    count: i32,
-    /// Currently accumulated bar data
-    accumulated: Option<BarData>,
-}
-
-impl BarSynthesizer {
-    fn new(interval: Interval) -> Self {
-        let window = match interval {
-            Interval::Minute5 => 5,
-            Interval::Minute15 => 15,
-            Interval::Minute30 => 30,
-            Interval::Hour => 60,
-            Interval::Hour4 => 240,
-            Interval::Daily => 1440,
-            Interval::Weekly => 10080,
-            _ => 1, // Default: 1-to-1 (no synthesis)
-        };
-        Self {
-            interval,
-            window,
-            count: 0,
-            accumulated: None,
-        }
-    }
-
-    /// Feed a 1-minute bar into the synthesizer.
-    /// Returns Some(BarData) if a complete higher-timeframe bar was formed.
-    fn update(&mut self, bar: &BarData) -> Option<BarData> {
-        if self.window <= 1 {
-            return None;
-        }
-
-        if let Some(ref mut acc) = self.accumulated {
-            acc.high_price = acc.high_price.max(bar.high_price);
-            acc.low_price = acc.low_price.min(bar.low_price);
-            acc.close_price = bar.close_price;
-            acc.volume += bar.volume;
-            acc.turnover += bar.turnover;
-            acc.open_interest = bar.open_interest;
-            acc.datetime = bar.datetime;
-        } else {
-            self.accumulated = Some(BarData {
-                gateway_name: bar.gateway_name.clone(),
-                symbol: bar.symbol.clone(),
-                exchange: bar.exchange,
-                datetime: bar.datetime,
-                interval: Some(self.interval),
-                volume: bar.volume,
-                turnover: bar.turnover,
-                open_interest: bar.open_interest,
-                open_price: bar.open_price,
-                high_price: bar.high_price,
-                low_price: bar.low_price,
-                close_price: bar.close_price,
-                extra: None,
-            });
-        }
-
-        self.count += 1;
-
-        if self.count >= self.window {
-            let mut completed = self.accumulated.take();
-            if let Some(ref mut bar) = completed {
-                bar.interval = Some(self.interval);
-            }
-            self.count = 0;
-            completed
-        } else {
-            None
-        }
-    }
 }
 
 impl StrategyEngine {
@@ -346,7 +267,7 @@ impl StrategyEngine {
             }
 
             // Feed the base bar into the synthesizer
-            if let Some(synthesized_bar) = synthesizer.update(bar) {
+            if let Some(synthesized_bar) = synthesizer.update_bar(bar) {
                 // A higher-timeframe bar was completed �?deliver to strategy
                 let contexts = self.contexts.blocking_read();
                 if let Some(context) = contexts.get(strategy_name) {
@@ -1247,7 +1168,7 @@ impl StrategyEngine {
         }
 
         let key = (strategy_name.to_string(), vt_symbol.to_string());
-        let synthesizer = BarSynthesizer::new(interval);
+        let synthesizer = BarSynthesizer::new(Interval::Minute, interval);
         
         self.bar_synthesizers.write().await.insert(key, synthesizer);
         tracing::info!(

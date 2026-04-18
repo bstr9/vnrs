@@ -5,7 +5,7 @@
 
 use crate::trader::constant::{Exchange, Interval};
 use crate::trader::object::{BarData, TickData};
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use std::collections::HashMap;
 
 /// Bar generator that aggregates ticks into bars
@@ -123,14 +123,15 @@ impl BarGenerator {
         let mut completed_bar = None;
 
         // Check if we have an existing bar for this symbol
-        if let Some(builder) = self.current_bars.get_mut(&vt_symbol) {
+        if let Some(builder) = self.current_bars.get(&vt_symbol) {
             // Check if the tick belongs to the current bar period
-            if tick.datetime >= builder.start_time
-                && tick.datetime < self.get_next_bar_time(&builder.start_time)
-            {
+            let next_time = self.get_next_bar_time(&builder.start_time);
+            let start_time = builder.start_time;
+
+            if tick.datetime >= start_time && tick.datetime < next_time {
                 // Same period - update the bar
-                builder.update(tick);
-            } else if tick.datetime < builder.start_time {
+                self.current_bars.get_mut(&vt_symbol).map(|b| b.update(tick));
+            } else if tick.datetime < start_time {
                 // Out-of-order tick, skip it
                 return None;
             } else {

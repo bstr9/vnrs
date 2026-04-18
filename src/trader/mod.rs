@@ -19,6 +19,7 @@
 //! - **ui**: Graphical user interface components (requires "gui" feature)
 
 pub mod app;
+pub mod bar_synthesizer;
 pub mod constant;
 pub mod converter;
 pub mod database;
@@ -61,6 +62,7 @@ pub use recorder::{DataRecorder, RecordStatus, RecorderConfig};
 pub use risk::{DailyStats, RiskCheckResult, RiskConfig, RiskManager};
 pub use setting::{Settings, SettingValue, SETTINGS};
 pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
+pub use bar_synthesizer::BarSynthesizer;
 pub use utility::{
     ceil_to, extract_vt_symbol, floor_to, generate_vt_symbol, get_digits, get_file_path,
     get_folder_path, load_json, round_to, save_json, ArrayManager, BarGenerator, TEMP_DIR,

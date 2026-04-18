@@ -811,8 +811,8 @@ impl MainEngine {
 
     /// Send an order (with risk check and offset conversion)
     pub async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String> {
-        // Pre-trade risk check
-        match self.risk_manager.check_order(&req) {
+        // Pre-trade risk check (with gateway context for balance check)
+        match self.risk_manager.check_order_with_gateway(&req, gateway_name) {
             super::risk::RiskCheckResult::Approved => {}
             super::risk::RiskCheckResult::Rejected(reason) => {
                 self.write_log(format!("风控拒绝 -> {}", reason), "RiskManager");

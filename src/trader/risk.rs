@@ -55,6 +55,9 @@ pub struct RiskConfig {
     pub max_total_position: f64,
     /// Maximum daily loss in base currency (0 = unlimited)
     pub max_daily_loss: f64,
+    /// Maximum balance usage percentage (0-100, 0 = no balance check)
+    /// e.g., 80 means only use 80% of available balance for new orders
+    pub max_balance_usage_pct: f64,
 }
 
 impl Default for RiskConfig {
@@ -69,6 +72,7 @@ impl Default for RiskConfig {
             max_position_per_symbol: 0.0,
             max_total_position: 0.0,
             max_daily_loss: 0.0,
+            max_balance_usage_pct: 0.0,
         }
     }
 }
@@ -86,6 +90,7 @@ impl RiskConfig {
             max_position_per_symbol: 0.0,
             max_total_position: 0.0,
             max_daily_loss: 0.0,
+            max_balance_usage_pct: 0.0,
         }
     }
 }
@@ -122,6 +127,9 @@ pub struct RiskManager {
     positions: RwLock<HashMap<String, f64>>,
     /// Previous balance per vt_accountid (for daily PnL tracking)
     prev_balance: RwLock<HashMap<String, f64>>,
+    /// Available balance per gateway_name (balance - frozen)
+    /// Updated on each AccountData event from the gateway
+    available_balance: RwLock<HashMap<String, f64>>,
     /// Trading state (kill switch)
     trading_state: RwLock<TradingState>,
     /// Running flag
@@ -146,6 +154,7 @@ impl RiskManager {
             total_active_orders: RwLock::new(0),
             positions: RwLock::new(HashMap::new()),
             prev_balance: RwLock::new(HashMap::new()),
+            available_balance: RwLock::new(HashMap::new()),
             trading_state: RwLock::new(TradingState::Running),
             running: AtomicBool::new(false),
             enabled: AtomicBool::new(true),
@@ -339,6 +348,45 @@ impl RiskManager {
         RiskCheckResult::Approved
     }
 
+    /// Check an order request with gateway context (includes balance check)
+    ///
+    /// In addition to all standard risk checks, also verifies that the order's
+    /// notional value does not exceed the available balance for the given gateway,
+    /// scaled by `max_balance_usage_pct`.
+    pub fn check_order_with_gateway(&self, req: &OrderRequest, gateway_name: &str) -> RiskCheckResult {
+        // Run all standard checks first
+        match self.check_order(req) {
+            RiskCheckResult::Rejected(reason) => return RiskCheckResult::Rejected(reason),
+            RiskCheckResult::Approved => {}
+        }
+
+        // Balance check (only if max_balance_usage_pct > 0)
+        let config = self.config.read().unwrap();
+        if config.max_balance_usage_pct > 0.0 && req.price > 0.0 {
+            let notional = req.volume * req.price;
+            let balances = self.available_balance.read().unwrap();
+            if let Some(&available) = balances.get(gateway_name) {
+                let max_usable = available * (config.max_balance_usage_pct / 100.0);
+                if notional > max_usable {
+                    return RiskCheckResult::Rejected(format!(
+                        "Order notional {:.2} exceeds max usable balance {:.2} (available={:.2}, usage_pct={:.0}%) for gateway {}",
+                        notional, max_usable, available, config.max_balance_usage_pct, gateway_name
+                    ));
+                }
+            }
+            // If no balance data for this gateway, we allow the order through
+            // (balance data hasn't arrived yet — don't block trading on startup)
+        }
+
+        RiskCheckResult::Approved
+    }
+
+    /// Get available balance for a gateway
+    pub fn get_available_balance(&self, gateway_name: &str) -> Option<f64> {
+        let balances = self.available_balance.read().unwrap();
+        balances.get(gateway_name).copied()
+    }
+
     /// Record a trade for daily statistics
     pub fn record_trade(&self, trade: &TradeData) {
         self.check_daily_reset();
@@ -358,19 +406,28 @@ impl RiskManager {
         positions.insert(vt_symbol, position.volume);
     }
 
-    /// Update account data (for daily PnL tracking)
+    /// Update account data (for daily PnL tracking and balance tracking)
     pub fn update_account(&self, account: &AccountData) {
         self.check_daily_reset();
         let vt_accountid = account.vt_accountid();
-        let mut prev = self.prev_balance.write().unwrap();
-        if let Some(&prev_balance) = prev.get(&vt_accountid) {
-            // Balance change ≈ realized PnL (approximation; deposits/withdrawals
-            // would also change balance but we have no way to distinguish them here)
-            let balance_change = account.balance - prev_balance;
-            let mut stats = self.daily_stats.write().unwrap();
-            stats.realized_pnl += balance_change;
+        {
+            let mut prev = self.prev_balance.write().unwrap();
+            if let Some(&prev_balance) = prev.get(&vt_accountid) {
+                // Balance change ≈ realized PnL (approximation; deposits/withdrawals
+                // would also change balance but we have no way to distinguish them here)
+                let balance_change = account.balance - prev_balance;
+                let mut stats = self.daily_stats.write().unwrap();
+                stats.realized_pnl += balance_change;
+            }
+            prev.insert(vt_accountid, account.balance);
         }
-        prev.insert(vt_accountid, account.balance);
+
+        // Track available balance per gateway for balance check
+        let available = (account.balance - account.frozen).max(0.0);
+        {
+            let mut balances = self.available_balance.write().unwrap();
+            balances.insert(account.gateway_name.clone(), available);
+        }
     }
 
     /// Increment active order count for a symbol
@@ -644,5 +701,105 @@ mod tests {
         rm.update_account(&account2);
         let stats = rm.get_daily_stats();
         assert!((stats.realized_pnl - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_risk_manager_balance_check_reject() {
+        let mut config = RiskConfig::default();
+        config.max_balance_usage_pct = 80.0; // Only use 80% of available balance
+        let rm = RiskManager::with_config(config);
+
+        // Set account balance: 10000 available, 2000 frozen → available = 8000
+        let account = AccountData {
+            accountid: "USDT".to_string(),
+            balance: 10000.0,
+            frozen: 2000.0,
+            gateway_name: "BINANCE_SPOT".to_string(),
+            extra: None,
+        };
+        rm.update_account(&account);
+
+        // Order notional = 0.1 * 70000 = 7000
+        // Max usable = 8000 * 0.8 = 6400
+        // 7000 > 6400 → should be rejected
+        let req = make_order("btcusdt", Exchange::Binance, Direction::Long, 70000.0, 0.1);
+        let result = rm.check_order_with_gateway(&req, "BINANCE_SPOT");
+        assert!(matches!(result, RiskCheckResult::Rejected(_)));
+    }
+
+    #[test]
+    fn test_risk_manager_balance_check_approve() {
+        let mut config = RiskConfig::default();
+        config.max_balance_usage_pct = 80.0;
+        let rm = RiskManager::with_config(config);
+
+        // Set account balance: 10000 available, 0 frozen → available = 10000
+        let account = AccountData {
+            accountid: "USDT".to_string(),
+            balance: 10000.0,
+            frozen: 0.0,
+            gateway_name: "BINANCE_SPOT".to_string(),
+            extra: None,
+        };
+        rm.update_account(&account);
+
+        // Order notional = 0.01 * 50000 = 500
+        // Max usable = 10000 * 0.8 = 8000
+        // 500 < 8000 → should be approved
+        let req = make_order("btcusdt", Exchange::Binance, Direction::Long, 50000.0, 0.01);
+        let result = rm.check_order_with_gateway(&req, "BINANCE_SPOT");
+        assert!(matches!(result, RiskCheckResult::Approved));
+    }
+
+    #[test]
+    fn test_risk_manager_balance_check_no_balance_data() {
+        let mut config = RiskConfig::default();
+        config.max_balance_usage_pct = 80.0;
+        let rm = RiskManager::with_config(config);
+
+        // No account data — should still allow orders (don't block on startup)
+        let req = make_order("btcusdt", Exchange::Binance, Direction::Long, 50000.0, 0.01);
+        let result = rm.check_order_with_gateway(&req, "BINANCE_SPOT");
+        assert!(matches!(result, RiskCheckResult::Approved));
+    }
+
+    #[test]
+    fn test_risk_manager_balance_check_disabled() {
+        // max_balance_usage_pct = 0 (default) means balance check is disabled
+        let rm = RiskManager::new();
+
+        // Set account balance
+        let account = AccountData {
+            accountid: "USDT".to_string(),
+            balance: 1000.0,
+            frozen: 0.0,
+            gateway_name: "BINANCE_SPOT".to_string(),
+            extra: None,
+        };
+        rm.update_account(&account);
+
+        // Huge order that would normally fail — should pass because check is disabled
+        let req = make_order("btcusdt", Exchange::Binance, Direction::Long, 70000.0, 1.0);
+        let result = rm.check_order_with_gateway(&req, "BINANCE_SPOT");
+        assert!(matches!(result, RiskCheckResult::Approved));
+    }
+
+    #[test]
+    fn test_risk_manager_available_balance_tracking() {
+        let rm = RiskManager::new();
+
+        // No data yet
+        assert_eq!(rm.get_available_balance("BINANCE_SPOT"), None);
+
+        // After account update
+        let account = AccountData {
+            accountid: "USDT".to_string(),
+            balance: 10000.0,
+            frozen: 3000.0,
+            gateway_name: "BINANCE_SPOT".to_string(),
+            extra: None,
+        };
+        rm.update_account(&account);
+        assert_eq!(rm.get_available_balance("BINANCE_SPOT"), Some(7000.0));
     }
 }

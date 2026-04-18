@@ -67,7 +67,7 @@ pub use trader::{
     // Typed identifiers
     ClientOrderId, InstrumentId, PositionId, StrategyId,
     // Utilities
-    ArrayManager, BarGenerator,
+    ArrayManager, BarGenerator, BarSynthesizer,
     // Synchronized bar generator
     SynchronizedBarGenerator, SynchronizedBars,
     // Database
