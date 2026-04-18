@@ -26,6 +26,7 @@ pub mod bar_synthesizer;
 pub mod constant;
 pub mod converter;
 pub mod database;
+pub mod data_download;
 pub mod datafeed;
 pub mod engine;
 pub mod event;
@@ -34,9 +35,11 @@ pub mod identifier;
 pub mod logger;
 pub mod object;
 pub mod optimize;
+pub mod portfolio;
 pub mod recorder;
 pub mod risk;
 pub mod setting;
+pub mod stop_order;
 pub mod sync_bar_generator;
 pub mod utility;
 
@@ -52,6 +55,7 @@ pub use constant::{
 };
 pub use converter::{OffsetConverter, PositionHolding};
 pub use database::{BarOverview, BaseDatabase, EventRecord, FileDatabase, MemoryDatabase, TickOverview};
+pub use data_download::{DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult};
 pub use datafeed::{BaseDatafeed, EmptyDatafeed};
 pub use engine::{BaseEngine, LogEngine, MainEngine, OmsEngine};
 pub use event::*;
@@ -63,9 +67,11 @@ pub use object::{
     OrderRequest, PositionData, QuoteData, QuoteRequest, SubscribeRequest, TickData, TradeData,
 };
 pub use optimize::{check_optimization_setting, run_bf_optimization, run_ga_optimization, OptimizationSetting};
+pub use portfolio::{PortfolioManager, PositionSummary, PortfolioSummary, PortfolioMetrics};
 pub use recorder::{DataRecorder, RecordStatus, RecorderConfig};
 pub use risk::{DailyStats, RiskCheckResult, RiskConfig, RiskManager};
 pub use setting::{Settings, SettingValue, SETTINGS};
+pub use stop_order::{StopOrderEngine, StopOrder, StopOrderRequest, StopOrderType, StopOrderStatus, StopOrderId};
 pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use bar_synthesizer::BarSynthesizer;
 pub use utility::{

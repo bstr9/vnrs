@@ -76,6 +76,12 @@ pub use trader::{
     AlertEngine, AlertChannel, AlertConfig, AlertLevel, AlertMessage, LogAlertChannel, WebhookAlertChannel, WebhookConfig,
     // Algo engine
     AlgoEngine, AlgoId, AlgoOrderState, AlgoStatus, AlgoType, TwapConfig, VwapConfig, OrderExecutor,
+    // Data download manager
+    DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult,
+    // Portfolio manager
+    PortfolioManager, PositionSummary, PortfolioSummary, PortfolioMetrics,
+    // Stop order engine
+    StopOrderEngine, StopOrder, StopOrderRequest, StopOrderType, StopOrderStatus, StopOrderId,
 };
 
 // Re-export Binance gateways
