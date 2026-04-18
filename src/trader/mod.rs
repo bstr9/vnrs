@@ -16,8 +16,10 @@
 //! - **logger**: Logging utilities
 //! - **optimize**: Parameter optimization utilities
 //! - **app**: Application trait for extending functionality
+//! - **alert**: Alert engine for notifications on critical events
 //! - **ui**: Graphical user interface components (requires "gui" feature)
 
+pub mod alert;
 pub mod app;
 pub mod bar_synthesizer;
 pub mod constant;
@@ -41,6 +43,7 @@ pub mod utility;
 pub mod ui;
 
 // Re-exports for convenience
+pub use alert::{AlertChannel, AlertConfig, AlertEngine, AlertLevel, AlertMessage, LogAlertChannel, WebhookAlertChannel, WebhookConfig};
 pub use app::{AppInfo, BaseApp};
 pub use constant::{
     Currency, Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status,

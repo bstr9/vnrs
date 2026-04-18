@@ -72,6 +72,8 @@ pub use trader::{
     SynchronizedBarGenerator, SynchronizedBars,
     // Database
     EventRecord, FileDatabase,
+    // Alert engine
+    AlertEngine, AlertChannel, AlertConfig, AlertLevel, AlertMessage, LogAlertChannel, WebhookAlertChannel, WebhookConfig,
 };
 
 // Re-export Binance gateways

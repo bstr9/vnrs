@@ -463,6 +463,7 @@ pub struct MainEngine {
     oms_engine: Arc<OmsEngine>,
     log_engine: Arc<LogEngine>,
     risk_manager: Arc<RiskManager>,
+    alert_engine: Arc<super::alert::AlertEngine>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -501,6 +502,7 @@ impl MainEngine {
         let oms_engine = Arc::new(OmsEngine::new());
         let log_engine = Arc::new(LogEngine::new());
         let risk_manager = Arc::new(RiskManager::new());
+        let alert_engine = Arc::new(super::alert::AlertEngine::new());
         
         // Create OffsetConverter with contract lookup from OmsEngine
         let oms_for_converter = oms_engine.clone();
@@ -516,6 +518,7 @@ impl MainEngine {
             oms_engine,
             log_engine,
             risk_manager,
+            alert_engine,
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -528,12 +531,13 @@ impl MainEngine {
             event_id_counter: AtomicU64::new(0),
         };
         
-        // Register OMS engine, log engine, and risk manager
+        // Register OMS engine, log engine, risk manager, and alert engine
         {
             let mut engines = engine.engines.write().unwrap_or_else(|e| e.into_inner());
             engines.insert("oms".to_string(), engine.oms_engine.clone());
             engines.insert("log".to_string(), engine.log_engine.clone());
             engines.insert("risk".to_string(), engine.risk_manager.clone());
+            engines.insert("alert".to_string(), engine.alert_engine.clone());
         }
         
         engine
@@ -816,6 +820,12 @@ impl MainEngine {
             super::risk::RiskCheckResult::Approved => {}
             super::risk::RiskCheckResult::Rejected(reason) => {
                 self.write_log(format!("风控拒绝 -> {}", reason), "RiskManager");
+                // Alert on risk rejection
+                self.alert_engine.alert_risk_reject(
+                    &reason,
+                    Some(&format!("{}.{}", req.symbol, req.exchange.value())),
+                    gateway_name,
+                );
                 return Err(reason);
             }
         }
@@ -917,6 +927,11 @@ impl MainEngine {
     /// Get risk manager
     pub fn risk_manager(&self) -> &Arc<RiskManager> {
         &self.risk_manager
+    }
+
+    /// Get alert engine
+    pub fn alert_engine(&self) -> &Arc<super::alert::AlertEngine> {
+        &self.alert_engine
     }
 
     /// Get tick data
