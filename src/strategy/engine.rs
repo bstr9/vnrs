@@ -264,6 +264,28 @@ impl StrategyEngine {
                     strategy.on_tick(tick, context);
                 }
             }
+
+            // Update unrealized PnL for this strategy on every tick
+            let pos = self.strategies.blocking_read()
+                .get(strategy_name)
+                .map(|s| s.get_position(&vt_symbol))
+                .unwrap_or(0.0);
+
+            if pos != 0.0 {
+                let avg_entry = self.strategy_avg_price.blocking_read()
+                    .get(&(strategy_name.to_string(), vt_symbol.clone()))
+                    .copied()
+                    .unwrap_or(tick.last_price);
+
+                let unrealized = if pos > 0.0 {
+                    (tick.last_price - avg_entry) * pos
+                } else {
+                    (avg_entry - tick.last_price) * pos.abs()
+                };
+
+                self.strategy_unrealized_pnl.blocking_write()
+                    .insert(strategy_name.to_string(), unrealized);
+            }
         }
 
         // Check stop orders
@@ -893,6 +915,104 @@ impl StrategyEngine {
 
         tracing::info!("Strategy {} removed", strategy_name);
         Ok(())
+    }
+
+    /// Load historical bars for a strategy (public API for on_init warmup)
+    ///
+    /// This method can be called during strategy initialization to load historical
+    /// bar data into the strategy's context. Data is loaded from the database first,
+    /// falling back to the gateway REST API if the database has no data.
+    ///
+    /// # Arguments
+    /// * `strategy_name` - Name of the strategy
+    /// * `vt_symbol` - Symbol in "SYMBOL.EXCHANGE" format
+    /// * `interval` - Bar interval (e.g., Interval::Minute)
+    /// * `days` - Number of days of history to load
+    ///
+    /// # Returns
+    /// Number of bars loaded, or error
+    pub async fn load_bars(
+        &self,
+        strategy_name: &str,
+        vt_symbol: &str,
+        interval: Interval,
+        days: i64,
+    ) -> Result<usize, String> {
+        let contexts = self.contexts.read().await;
+        let context = contexts.get(strategy_name)
+            .ok_or_else(|| format!("Context not found for strategy {}", strategy_name))?;
+
+        let parts: Vec<&str> = vt_symbol.split('.').collect();
+        if parts.len() != 2 {
+            return Err(format!("Invalid vt_symbol format: {}", vt_symbol));
+        }
+
+        let symbol = parts[0].to_string();
+        let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
+            .map(|(_, e)| e)
+            .unwrap_or(Exchange::Binance);
+
+        let end = Utc::now();
+        let start = end - Duration::days(days);
+
+        // Try database first
+        if let Some(db) = &self.database {
+            match db.load_bar_data(&symbol, exchange, interval, start, end).await {
+                Ok(bars) if !bars.is_empty() => {
+                    let count = bars.len();
+                    for bar in &bars {
+                        context.update_bar(bar.clone());
+                    }
+                    tracing::info!(
+                        "load_bars: {} bars from database for {} ({:?}, {}d)",
+                        count, vt_symbol, interval, days
+                    );
+                    return Ok(count);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!("load_bars: database error for {}: {}", vt_symbol, e);
+                }
+            }
+        }
+
+        // Fallback to gateway
+        let req = HistoryRequest {
+            symbol,
+            exchange,
+            start,
+            end: Some(end),
+            interval: Some(interval),
+        };
+
+        if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+            match self.main_engine.query_history(req, &gw_name).await {
+                Ok(bars) => {
+                    let count = bars.len();
+                    for bar in &bars {
+                        context.update_bar(bar.clone());
+                    }
+
+                    // Cache to database for future loads
+                    if !bars.is_empty() {
+                        if let Some(db) = &self.database {
+                            if let Err(e) = db.save_bar_data(bars, false).await {
+                                tracing::warn!("load_bars: failed to cache for {}: {}", vt_symbol, e);
+                            }
+                        }
+                    }
+
+                    tracing::info!(
+                        "load_bars: {} bars from gateway for {} ({:?}, {}d)",
+                        count, vt_symbol, interval, days
+                    );
+                    Ok(count)
+                }
+                Err(e) => Err(format!("Failed to load bars for {}: {}", vt_symbol, e)),
+            }
+        } else {
+            Err(format!("No gateway found for exchange {:?}", exchange))
+        }
     }
 
     /// Cancel all orders for a strategy
