@@ -45,7 +45,7 @@ pub use constant::{
     Currency, Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status,
 };
 pub use converter::{OffsetConverter, PositionHolding};
-pub use database::{BarOverview, BaseDatabase, MemoryDatabase, TickOverview};
+pub use database::{BarOverview, BaseDatabase, EventRecord, FileDatabase, MemoryDatabase, TickOverview};
 pub use datafeed::{BaseDatafeed, EmptyDatafeed};
 pub use engine::{BaseEngine, LogEngine, MainEngine, OmsEngine};
 pub use event::*;

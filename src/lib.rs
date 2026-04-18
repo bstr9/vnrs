@@ -70,6 +70,8 @@ pub use trader::{
     ArrayManager, BarGenerator,
     // Synchronized bar generator
     SynchronizedBarGenerator, SynchronizedBars,
+    // Database
+    EventRecord, FileDatabase,
 };
 
 // Re-export Binance gateways

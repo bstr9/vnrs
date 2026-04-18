@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::constant::{Exchange, Interval};
-use super::object::{BarData, TickData};
+use super::object::{BarData, TickData, OrderData, TradeData, PositionData};
 use super::setting::SETTINGS;
 
 /// Overview of bar data stored in database
@@ -27,6 +27,33 @@ pub struct TickOverview {
     pub count: i64,
     pub start: Option<DateTime<Utc>>,
     pub end: Option<DateTime<Utc>>,
+}
+
+/// Event record for persistent event journaling (event sourcing)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventRecord {
+    /// Unique event ID (auto-incrementing)
+    pub event_id: u64,
+    /// Event type string (e.g. "eTick", "eOrder", "eTrade")
+    pub event_type: String,
+    /// Gateway name that emitted the event
+    pub gateway_name: String,
+    /// Timestamp when the event was recorded
+    pub timestamp: DateTime<Utc>,
+    /// Serialized event payload as JSON string
+    pub payload: String,
+}
+
+impl EventRecord {
+    pub fn new(event_id: u64, event_type: String, gateway_name: String, payload: String) -> Self {
+        Self {
+            event_id,
+            event_type,
+            gateway_name,
+            timestamp: Utc::now(),
+            payload,
+        }
+    }
 }
 
 /// Abstract database trait for connecting to different databases
@@ -73,12 +100,37 @@ pub trait BaseDatabase: Send + Sync {
 
     /// Return tick data available in database
     async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, String>;
+
+    /// Save order data into database
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String>;
+
+    /// Save trade data into database
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String>;
+
+    /// Save position data into database
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String>;
+
+    /// Save an event record into database (event journaling)
+    async fn save_event(&self, event: EventRecord) -> Result<bool, String>;
+
+    /// Load order data from database, optionally filtered by gateway_name
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String>;
+
+    /// Load trade data from database, optionally filtered by gateway_name
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String>;
+
+    /// Load position data from database, optionally filtered by gateway_name
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String>;
 }
 
 /// In-memory database implementation for testing
 pub struct MemoryDatabase {
     bars: std::sync::RwLock<Vec<BarData>>,
     ticks: std::sync::RwLock<Vec<TickData>>,
+    orders: std::sync::RwLock<Vec<OrderData>>,
+    trades: std::sync::RwLock<Vec<TradeData>>,
+    positions: std::sync::RwLock<Vec<PositionData>>,
+    events: std::sync::RwLock<Vec<EventRecord>>,
 }
 
 impl MemoryDatabase {
@@ -86,6 +138,10 @@ impl MemoryDatabase {
         Self {
             bars: std::sync::RwLock::new(Vec::new()),
             ticks: std::sync::RwLock::new(Vec::new()),
+            orders: std::sync::RwLock::new(Vec::new()),
+            trades: std::sync::RwLock::new(Vec::new()),
+            positions: std::sync::RwLock::new(Vec::new()),
+            events: std::sync::RwLock::new(Vec::new()),
         }
     }
 }
@@ -265,6 +321,94 @@ impl BaseDatabase for MemoryDatabase {
         
         Ok(overviews)
     }
+
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String> {
+        let mut data = self.orders.write().map_err(|e| e.to_string())?;
+        let existing_keys: std::collections::HashSet<String> = data.iter()
+            .map(|o| o.vt_orderid())
+            .collect();
+        for order in orders {
+            let key = order.vt_orderid();
+            if !existing_keys.contains(&key) {
+                data.push(order);
+            }
+        }
+        if data.len() > 100_000 {
+            let excess = data.len() - 100_000;
+            data.drain(0..excess);
+        }
+        Ok(true)
+    }
+
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String> {
+        let mut data = self.trades.write().map_err(|e| e.to_string())?;
+        let existing_keys: std::collections::HashSet<String> = data.iter()
+            .map(|t| t.vt_tradeid())
+            .collect();
+        for trade in trades {
+            let key = trade.vt_tradeid();
+            if !existing_keys.contains(&key) {
+                data.push(trade);
+            }
+        }
+        if data.len() > 100_000 {
+            let excess = data.len() - 100_000;
+            data.drain(0..excess);
+        }
+        Ok(true)
+    }
+
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String> {
+        let mut data = self.positions.write().map_err(|e| e.to_string())?;
+        for position in positions {
+            let key = position.vt_positionid();
+            // Upsert: remove old, insert new
+            data.retain(|p| p.vt_positionid() != key);
+            data.push(position);
+        }
+        if data.len() > 10_000 {
+            let excess = data.len() - 10_000;
+            data.drain(0..excess);
+        }
+        Ok(true)
+    }
+
+    async fn save_event(&self, event: EventRecord) -> Result<bool, String> {
+        let mut data = self.events.write().map_err(|e| e.to_string())?;
+        data.push(event);
+        if data.len() > 100_000 {
+            let excess = data.len() - 100_000;
+            data.drain(0..excess);
+        }
+        Ok(true)
+    }
+
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
+        let data = self.orders.read().map_err(|e| e.to_string())?;
+        let result: Vec<OrderData> = data.iter()
+            .filter(|o| gateway_name.map_or(true, |gw| o.gateway_name == gw))
+            .cloned()
+            .collect();
+        Ok(result)
+    }
+
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
+        let data = self.trades.read().map_err(|e| e.to_string())?;
+        let result: Vec<TradeData> = data.iter()
+            .filter(|t| gateway_name.map_or(true, |gw| t.gateway_name == gw))
+            .cloned()
+            .collect();
+        Ok(result)
+    }
+
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
+        let data = self.positions.read().map_err(|e| e.to_string())?;
+        let result: Vec<PositionData> = data.iter()
+            .filter(|p| gateway_name.map_or(true, |gw| p.gateway_name == gw))
+            .cloned()
+            .collect();
+        Ok(result)
+    }
 }
 
 /// Get database timezone
@@ -368,6 +512,135 @@ impl FileDatabase {
             .map_err(|e| format!("Failed to serialize ticks: {}", e))?;
         std::fs::write(path, content)
             .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+    }
+
+    /// Get the file path for order data
+    fn order_file_path(&self, gateway_name: &str) -> std::path::PathBuf {
+        self.base_dir.join("orders")
+            .join(format!("{}.json", gateway_name))
+    }
+
+    /// Get the file path for trade data
+    fn trade_file_path(&self, gateway_name: &str) -> std::path::PathBuf {
+        self.base_dir.join("trades")
+            .join(format!("{}.json", gateway_name))
+    }
+
+    /// Get the file path for position data
+    fn position_file_path(&self, gateway_name: &str) -> std::path::PathBuf {
+        self.base_dir.join("positions")
+            .join(format!("{}.json", gateway_name))
+    }
+
+    /// Get the file path for event records
+    fn event_file_path(&self) -> std::path::PathBuf {
+        self.base_dir.join("events")
+            .join("events.json")
+    }
+
+    /// Load orders from a JSON file
+    fn load_orders_from_file(path: &std::path::Path) -> Result<Vec<OrderData>, String> {
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+    }
+
+    /// Save orders to a JSON file
+    fn save_orders_to_file(path: &std::path::Path, orders: &[OrderData]) -> Result<(), String> {
+        Self::ensure_parent_dir(path)?;
+        let content = serde_json::to_string(orders)
+            .map_err(|e| format!("Failed to serialize orders: {}", e))?;
+        std::fs::write(path, content)
+            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+    }
+
+    /// Load trades from a JSON file
+    fn load_trades_from_file(path: &std::path::Path) -> Result<Vec<TradeData>, String> {
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+    }
+
+    /// Save trades to a JSON file
+    fn save_trades_to_file(path: &std::path::Path, trades: &[TradeData]) -> Result<(), String> {
+        Self::ensure_parent_dir(path)?;
+        let content = serde_json::to_string(trades)
+            .map_err(|e| format!("Failed to serialize trades: {}", e))?;
+        std::fs::write(path, content)
+            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+    }
+
+    /// Load positions from a JSON file
+    fn load_positions_from_file(path: &std::path::Path) -> Result<Vec<PositionData>, String> {
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+    }
+
+    /// Save positions to a JSON file
+    fn save_positions_to_file(path: &std::path::Path, positions: &[PositionData]) -> Result<(), String> {
+        Self::ensure_parent_dir(path)?;
+        let content = serde_json::to_string(positions)
+            .map_err(|e| format!("Failed to serialize positions: {}", e))?;
+        std::fs::write(path, content)
+            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+    }
+
+    /// Load event records from a JSON file
+    fn load_events_from_file(path: &std::path::Path) -> Result<Vec<EventRecord>, String> {
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+    }
+
+    /// Save event records to a JSON file
+    fn save_events_to_file(path: &std::path::Path, events: &[EventRecord]) -> Result<(), String> {
+        Self::ensure_parent_dir(path)?;
+        let content = serde_json::to_string(events)
+            .map_err(|e| format!("Failed to serialize events: {}", e))?;
+        std::fs::write(path, content)
+            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+    }
+
+    /// Load all JSON files from a directory and merge into a single vector
+    fn load_all_from_dir<T: serde::de::DeserializeOwned>(
+        dir: &std::path::Path,
+    ) -> Result<Vec<T>, String> {
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut result = Vec::new();
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            let items: Vec<T> = serde_json::from_str(&content)
+                .map_err(|e| format!("Failed to parse {:?}: {}", path, e))?;
+            result.extend(items);
+        }
+        Ok(result)
     }
 }
 
@@ -648,6 +921,126 @@ impl BaseDatabase for FileDatabase {
 
         Ok(overviews)
     }
+
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String> {
+        // Group orders by gateway_name
+        let mut groups: std::collections::HashMap<String, Vec<OrderData>> = std::collections::HashMap::new();
+        for order in orders {
+            groups.entry(order.gateway_name.clone()).or_default().push(order);
+        }
+        for (gw, new_orders) in groups {
+            let path = self.order_file_path(&gw);
+            let mut existing = Self::load_orders_from_file(&path)?;
+            let existing_keys: std::collections::HashSet<String> = existing.iter()
+                .map(|o| o.vt_orderid())
+                .collect();
+            for order in &new_orders {
+                if !existing_keys.contains(&order.vt_orderid()) {
+                    existing.push(order.clone());
+                }
+            }
+            if existing.len() > 100_000 {
+                existing.drain(0..existing.len() - 100_000);
+            }
+            Self::save_orders_to_file(&path, &existing)?;
+        }
+        Ok(true)
+    }
+
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String> {
+        // Group trades by gateway_name
+        let mut groups: std::collections::HashMap<String, Vec<TradeData>> = std::collections::HashMap::new();
+        for trade in trades {
+            groups.entry(trade.gateway_name.clone()).or_default().push(trade);
+        }
+        for (gw, new_trades) in groups {
+            let path = self.trade_file_path(&gw);
+            let mut existing = Self::load_trades_from_file(&path)?;
+            let existing_keys: std::collections::HashSet<String> = existing.iter()
+                .map(|t| t.vt_tradeid())
+                .collect();
+            for trade in &new_trades {
+                if !existing_keys.contains(&trade.vt_tradeid()) {
+                    existing.push(trade.clone());
+                }
+            }
+            if existing.len() > 100_000 {
+                existing.drain(0..existing.len() - 100_000);
+            }
+            Self::save_trades_to_file(&path, &existing)?;
+        }
+        Ok(true)
+    }
+
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String> {
+        // Group positions by gateway_name
+        let mut groups: std::collections::HashMap<String, Vec<PositionData>> = std::collections::HashMap::new();
+        for position in positions {
+            groups.entry(position.gateway_name.clone()).or_default().push(position);
+        }
+        for (gw, new_positions) in groups {
+            let path = self.position_file_path(&gw);
+            let mut existing = Self::load_positions_from_file(&path)?;
+            // Upsert: replace existing positions with same ID
+            for position in &new_positions {
+                let key = position.vt_positionid();
+                existing.retain(|p| p.vt_positionid() != key);
+                existing.push(position.clone());
+            }
+            Self::save_positions_to_file(&path, &existing)?;
+        }
+        Ok(true)
+    }
+
+    async fn save_event(&self, event: EventRecord) -> Result<bool, String> {
+        let path = self.event_file_path();
+        let mut events = Self::load_events_from_file(&path)?;
+        events.push(event);
+        if events.len() > 100_000 {
+            events.drain(0..events.len() - 100_000);
+        }
+        Self::save_events_to_file(&path, &events)?;
+        Ok(true)
+    }
+
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
+        match gateway_name {
+            Some(gw) => {
+                let path = self.order_file_path(gw);
+                Self::load_orders_from_file(&path)
+            }
+            None => {
+                let dir = self.base_dir.join("orders");
+                Self::load_all_from_dir(&dir)
+            }
+        }
+    }
+
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
+        match gateway_name {
+            Some(gw) => {
+                let path = self.trade_file_path(gw);
+                Self::load_trades_from_file(&path)
+            }
+            None => {
+                let dir = self.base_dir.join("trades");
+                Self::load_all_from_dir(&dir)
+            }
+        }
+    }
+
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
+        match gateway_name {
+            Some(gw) => {
+                let path = self.position_file_path(gw);
+                Self::load_positions_from_file(&path)
+            }
+            None => {
+                let dir = self.base_dir.join("positions");
+                Self::load_all_from_dir(&dir)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -760,6 +1153,153 @@ mod tests {
             .await.expect("load should succeed");
         // Second save should not duplicate since timestamp is the same
         assert_eq!(bars.len(), 1);
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_memory_database_orders() {
+        use super::super::constant::{Direction, Offset, OrderType, Status};
+        
+        let db = MemoryDatabase::new();
+        
+        let order = OrderData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "test_order_1".to_string(),
+            order_type: OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::None,
+            price: 50000.0,
+            volume: 0.01,
+            traded: 0.0,
+            status: Status::NotTraded,
+            datetime: Some(Utc::now()),
+            reference: String::new(),
+            extra: None,
+        };
+        
+        db.save_order_data(vec![order.clone()]).await.expect("save_order_data should succeed");
+        
+        let loaded = db.load_orders(None).await.expect("load_orders should succeed");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].orderid, "test_order_1");
+        
+        let filtered = db.load_orders(Some("BINANCE_SPOT")).await.expect("load_orders filtered should succeed");
+        assert_eq!(filtered.len(), 1);
+        
+        let other = db.load_orders(Some("OTHER")).await.expect("load_orders other should succeed");
+        assert_eq!(other.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_memory_database_trades() {
+        use super::super::constant::Direction;
+        
+        let db = MemoryDatabase::new();
+        
+        let trade = TradeData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "order_1".to_string(),
+            tradeid: "trade_1".to_string(),
+            direction: Some(Direction::Long),
+            offset: super::super::constant::Offset::None,
+            price: 50000.0,
+            volume: 0.01,
+            datetime: Some(Utc::now()),
+            extra: None,
+        };
+        
+        db.save_trade_data(vec![trade]).await.expect("save_trade_data should succeed");
+        
+        let loaded = db.load_trades(None).await.expect("load_trades should succeed");
+        assert_eq!(loaded.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_memory_database_positions() {
+        use super::super::constant::Direction;
+        
+        let db = MemoryDatabase::new();
+        
+        let position = PositionData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            volume: 0.1,
+            frozen: 0.0,
+            price: 50000.0,
+            pnl: 0.0,
+            yd_volume: 0.0,
+            extra: None,
+        };
+        
+        db.save_position_data(vec![position]).await.expect("save_position_data should succeed");
+        
+        let loaded = db.load_positions(None).await.expect("load_positions should succeed");
+        assert_eq!(loaded.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_memory_database_events() {
+        let db = MemoryDatabase::new();
+        
+        let event = EventRecord::new(1, "eOrder".to_string(), "BINANCE_SPOT".to_string(), "{}".to_string());
+        
+        db.save_event(event).await.expect("save_event should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_file_database_orders() {
+        use super::super::constant::{Direction, Offset, OrderType, Status};
+        
+        let temp_dir = std::env::temp_dir().join("trade_engine_test_filedb_orders");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let db = FileDatabase::new(temp_dir.clone());
+        
+        let order = OrderData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "test_order_1".to_string(),
+            order_type: OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::None,
+            price: 50000.0,
+            volume: 0.01,
+            traded: 0.0,
+            status: Status::NotTraded,
+            datetime: Some(Utc::now()),
+            reference: String::new(),
+            extra: None,
+        };
+        
+        db.save_order_data(vec![order]).await.expect("save_order_data should succeed");
+        
+        let loaded = db.load_orders(Some("BINANCE_SPOT")).await.expect("load_orders should succeed");
+        assert_eq!(loaded.len(), 1);
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_file_database_events() {
+        let temp_dir = std::env::temp_dir().join("trade_engine_test_filedb_events");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let db = FileDatabase::new(temp_dir.clone());
+        
+        let event = EventRecord::new(1, "eOrder".to_string(), "BINANCE_SPOT".to_string(), "{}".to_string());
+        db.save_event(event).await.expect("save_event should succeed");
+        
+        // Load and verify
+        let path = db.event_file_path();
+        let events = FileDatabase::load_events_from_file(&path).expect("load should succeed");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "eOrder");
         
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

@@ -11,7 +11,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 use trade_engine::trader::{MainEngine, GatewayEventSender};
 use trade_engine::trader::recorder::DataRecorder;
-use trade_engine::trader::database::MemoryDatabase;
+use trade_engine::trader::database::FileDatabase;
 use trade_engine::event::EventEngine;
 use trade_engine::gateway::binance::{BinanceSpotGateway, BinanceUsdtGateway};
 
@@ -122,7 +122,7 @@ impl TradeEngineApp {
             
             // Create and wire DataRecorder engine for automatic tick/bar recording (GAP 5 fix)
             let data_recorder = Arc::new(DataRecorder::new(
-                Arc::new(MemoryDatabase::new()),
+                Arc::new(FileDatabase::with_default_dir()),
             ));
             main_engine.add_engine(data_recorder.clone());
             {
