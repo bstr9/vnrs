@@ -23,11 +23,11 @@ use crate::trader::utility::ArrayManager;
 ///
 /// Parameters (passed via StrategySetting):
 /// - `atr_length`: ATR period (default 14)
-/// - `boll_length`: Bollinger Band period (default 20)
+/// - `boll_length`: Bollinger Band period (default 30)
 /// - `boll_dev`: Bollinger Band deviation multiplier (default 2.0)
-/// - `natr_threshold`: Minimum NATR to allow trading (default 1.5, i.e. 1.5%)
-/// - `tp_atr_mult`: Take-profit trailing stop ATR multiplier (default 3.0)
-/// - `sl_atr_mult`: Stop-loss ATR multiplier (default 2.0)
+/// - `natr_threshold`: Minimum NATR to allow trading (default 0.6, i.e. 0.6%)
+/// - `tp_atr_mult`: Take-profit trailing stop ATR multiplier (default 4.0)
+/// - `sl_atr_mult`: Stop-loss ATR multiplier (default 1.0)
 /// - `fixed_size`: Order size per trade (default 0.01)
 /// - `am_length`: ArrayManager window size (default 100)
 pub struct VolatilityStrategy {
@@ -64,7 +64,7 @@ impl VolatilityStrategy {
         let boll_length = setting
             .get("boll_length")
             .and_then(|v| v.as_u64())
-            .unwrap_or(20) as usize;
+            .unwrap_or(30) as usize;
         let boll_dev = setting
             .get("boll_dev")
             .and_then(|v| v.as_f64())
@@ -72,15 +72,15 @@ impl VolatilityStrategy {
         let natr_threshold = setting
             .get("natr_threshold")
             .and_then(|v| v.as_f64())
-            .unwrap_or(1.5);
+            .unwrap_or(0.6);
         let tp_atr_mult = setting
             .get("tp_atr_mult")
             .and_then(|v| v.as_f64())
-            .unwrap_or(3.0);
+            .unwrap_or(4.0);
         let sl_atr_mult = setting
             .get("sl_atr_mult")
             .and_then(|v| v.as_f64())
-            .unwrap_or(2.0);
+            .unwrap_or(1.0);
         let fixed_size = setting
             .get("fixed_size")
             .and_then(|v| v.as_f64())
