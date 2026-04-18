@@ -10,8 +10,9 @@ use super::base::{StrategySetting, StrategyState, StrategyType};
 #[cfg(feature = "gui")]
 use crate::chart::Indicator;
 use crate::trader::{
-    BarData, Direction, Interval, Offset, OrderData, OrderRequest, TickData, TradeData,
+    BarData, Direction, Exchange, Interval, Offset, OrderData, OrderRequest, TickData, TradeData,
 };
+use crate::trader::database::BaseDatabase;
 
 #[cfg(feature = "gui")]
 type IndicatorMap = Arc<Mutex<HashMap<String, Vec<Box<dyn Indicator>>>>>;
@@ -21,6 +22,8 @@ pub struct StrategyContext {
     pub tick_cache: Arc<Mutex<HashMap<String, TickData>>>,
     pub bar_cache: Arc<Mutex<HashMap<String, BarData>>>,
     pub historical_bars: Arc<Mutex<HashMap<String, Vec<BarData>>>>,
+    /// Optional database for loading historical data
+    database: Option<Arc<dyn BaseDatabase>>,
     #[cfg(feature = "gui")]
     indicators: IndicatorMap,
 }
@@ -31,9 +34,27 @@ impl StrategyContext {
             tick_cache: Arc::new(Mutex::new(HashMap::new())),
             bar_cache: Arc::new(Mutex::new(HashMap::new())),
             historical_bars: Arc::new(Mutex::new(HashMap::new())),
+            database: None,
             #[cfg(feature = "gui")]
             indicators: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Create a StrategyContext with a database backend
+    pub fn with_database(database: Arc<dyn BaseDatabase>) -> Self {
+        Self {
+            tick_cache: Arc::new(Mutex::new(HashMap::new())),
+            bar_cache: Arc::new(Mutex::new(HashMap::new())),
+            historical_bars: Arc::new(Mutex::new(HashMap::new())),
+            database: Some(database),
+            #[cfg(feature = "gui")]
+            indicators: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Set the database backend
+    pub fn set_database(&mut self, database: Arc<dyn BaseDatabase>) {
+        self.database = Some(database);
     }
 
     /// Get latest tick for symbol
@@ -67,6 +88,41 @@ impl StrategyContext {
         } else {
             Vec::new()
         }
+    }
+
+    /// Load historical bars from database (synchronous wrapper for async operation)
+    /// Returns bars for the specified symbol, exchange, and interval over the given number of days
+    pub fn load_bar(
+        &self,
+        vt_symbol: &str,
+        exchange: Exchange,
+        interval: Interval,
+        days: i64,
+    ) -> Option<Vec<BarData>> {
+        // Try to get bars from cache first
+        let cached = self.get_bars(vt_symbol, days as usize * 1440); // rough estimate
+        if !cached.is_empty() {
+            return Some(cached);
+        }
+
+        // If no database, return None
+        let db = self.database.as_ref()?;
+        
+        // Calculate time range
+        let end = Utc::now();
+        let start = end - chrono::Duration::days(days);
+        let symbol = vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string();
+
+        // Use tokio runtime to call async database method
+        // This is a blocking call, but strategies typically call this during on_init
+        let db_clone = Arc::clone(db);
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                db_clone.load_bar_data(&symbol, exchange, interval, start, end).await
+            })
+        });
+
+        result.ok()
     }
 
     /// Update tick data
@@ -433,9 +489,9 @@ impl BaseStrategy {
         std::mem::take(&mut *orders)
     }
 
-    /// Load historical bar data
+    /// Load historical bar data (placeholder — use StrategyContext.load_bar instead)
     pub fn load_bar(&self, _vt_symbol: &str, _days: i64, _interval: Interval) -> Vec<BarData> {
-        // This will be implemented through the engine
+        // This cannot access the database directly. Use context.load_bar() in on_init instead.
         Vec::new()
     }
 

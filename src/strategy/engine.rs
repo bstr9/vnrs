@@ -16,6 +16,7 @@ use crate::trader::{
     Direction, Interval, Exchange, BaseEngine, GatewayEvent,
     EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE,
 };
+use crate::trader::database::BaseDatabase;
 use crate::event::EventEngine;
 use super::template::{StrategyTemplate, StrategyContext};
 use super::base::{
@@ -76,6 +77,8 @@ pub struct StrategyEngine {
     strategy_trade_count: Arc<RwLock<HashMap<String, usize>>>,
     /// Per-strategy average entry price: (strategy_name, vt_symbol) → avg entry price
     strategy_avg_price: Arc<RwLock<HashMap<(String, String), f64>>>,
+    /// Optional database for loading historical data
+    database: Option<Arc<dyn BaseDatabase>>,
 }
 
 /// Bar synthesizer for multi-period bar generation from 1-minute bars
@@ -160,6 +163,15 @@ impl BarSynthesizer {
 
 impl StrategyEngine {
     pub fn new(main_engine: Arc<MainEngine>, event_engine: Arc<EventEngine>) -> Self {
+        Self::with_database(main_engine, event_engine, None)
+    }
+
+    /// Create a StrategyEngine with an optional database backend
+    pub fn with_database(
+        main_engine: Arc<MainEngine>,
+        event_engine: Arc<EventEngine>,
+        database: Option<Arc<dyn BaseDatabase>>,
+    ) -> Self {
         Self {
             main_engine,
             event_engine,
@@ -177,7 +189,13 @@ impl StrategyEngine {
             strategy_unrealized_pnl: Arc::new(RwLock::new(HashMap::new())),
             strategy_trade_count: Arc::new(RwLock::new(HashMap::new())),
             strategy_avg_price: Arc::new(RwLock::new(HashMap::new())),
+            database,
         }
+    }
+
+    /// Set the database backend
+    pub fn set_database(&mut self, database: Arc<dyn BaseDatabase>) {
+        self.database = Some(database);
     }
 
     /// Initialize the engine
@@ -435,8 +453,11 @@ impl StrategyEngine {
             strategies.insert(strategy_name.clone(), strategy);
         }
 
-        // Create context for this strategy
-        let context = StrategyContext::new();
+        // Create context for this strategy (with database if available)
+        let context = match &self.database {
+            Some(db) => StrategyContext::with_database(Arc::clone(db)),
+            None => StrategyContext::new(),
+        };
         
         // Subscribe to symbols
         for vt_symbol in self.strategies.read().await.get(&strategy_name)
@@ -991,6 +1012,7 @@ impl Clone for StrategyEngine {
             strategy_unrealized_pnl: self.strategy_unrealized_pnl.clone(),
             strategy_trade_count: self.strategy_trade_count.clone(),
             strategy_avg_price: self.strategy_avg_price.clone(),
+            database: self.database.clone(),
         }
     }
 }
