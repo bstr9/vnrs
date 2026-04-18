@@ -311,6 +311,51 @@ where
         self.last_tick = Some(tick);
     }
 
+    /// Update with a completed bar (e.g., from another BarGenerator's on_bar callback).
+    /// This is the primary method for multi-period bar synthesis.
+    /// When `window` bars have been accumulated, fires `on_window_bar`.
+    pub fn update_bar(&mut self, bar: BarData) {
+        // Accumulate into window_bar
+        if let Some(ref mut window_bar) = self.window_bar {
+            window_bar.high_price = window_bar.high_price.max(bar.high_price);
+            window_bar.low_price = window_bar.low_price.min(bar.low_price);
+            window_bar.close_price = bar.close_price;
+            window_bar.volume += bar.volume;
+            window_bar.turnover += bar.turnover;
+            window_bar.open_interest = bar.open_interest;
+            window_bar.datetime = bar.datetime;
+        } else {
+            self.window_bar = Some(BarData {
+                gateway_name: bar.gateway_name.clone(),
+                symbol: bar.symbol.clone(),
+                exchange: bar.exchange,
+                datetime: bar.datetime,
+                interval: Some(Interval::Minute),
+                volume: bar.volume,
+                turnover: bar.turnover,
+                open_interest: bar.open_interest,
+                open_price: bar.open_price,
+                high_price: bar.high_price,
+                low_price: bar.low_price,
+                close_price: bar.close_price,
+                extra: None,
+            });
+        }
+
+        self.interval_count += 1;
+
+        // When we've accumulated enough bars, fire on_window_bar
+        if self.window > 0 && self.interval_count >= self.window {
+            if let Some(mut finished_window_bar) = self.window_bar.take() {
+                finished_window_bar.interval = Some(self.interval);
+                if let Some(ref mut on_window_bar) = self.on_window_bar {
+                    on_window_bar(finished_window_bar);
+                }
+            }
+            self.interval_count = 0;
+        }
+    }
+
     /// Generate the bar data and call callback immediately
     pub fn generate(&mut self) -> Option<BarData> {
         if let Some(mut bar) = self.bar.take() {

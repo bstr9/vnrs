@@ -285,6 +285,9 @@ pub struct BaseStrategy {
     // Active order tracking
     pub active_orderids: Arc<Mutex<Vec<String>>>,
 
+    // Pending orders queue (for order routing)
+    pub pending_orders: Arc<Mutex<Vec<OrderRequest>>>,
+
     // Trading parameters
     pub parameters: HashMap<String, String>,
     pub variables: HashMap<String, String>,
@@ -310,43 +313,103 @@ impl BaseStrategy {
             positions: Arc::new(Mutex::new(HashMap::new())),
             targets: Arc::new(Mutex::new(HashMap::new())),
             active_orderids: Arc::new(Mutex::new(Vec::new())),
+            pending_orders: Arc::new(Mutex::new(Vec::new())),
             parameters,
             variables: HashMap::new(),
         }
     }
 
     /// Buy order (open long for futures, buy for spot)
-    pub fn buy(&self, vt_symbol: &str, _price: f64, _volume: f64, _lock: bool) -> String {
-        // This will be called through the engine
-        format!("BUY_{}_{}", vt_symbol, Utc::now().timestamp_millis())
+    pub fn buy(&self, vt_symbol: &str, price: f64, volume: f64, lock: bool) -> String {
+        let req = self.create_order_request(vt_symbol, Direction::Long, price, volume, lock, Offset::Open);
+        let vt_orderid = format!("BUY_{}_{}", vt_symbol, Utc::now().timestamp_millis());
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req);
+        vt_orderid
     }
 
     /// Sell order (close long for futures, sell for spot)
-    pub fn sell(&self, vt_symbol: &str, _price: f64, _volume: f64, _lock: bool) -> String {
-        format!("SELL_{}_{}", vt_symbol, Utc::now().timestamp_millis())
+    pub fn sell(&self, vt_symbol: &str, price: f64, volume: f64, lock: bool) -> String {
+        let offset = if self.strategy_type == StrategyType::Spot || lock {
+            Offset::None
+        } else {
+            Offset::Close
+        };
+        let req = self.create_order_request(vt_symbol, Direction::Short, price, volume, lock, offset);
+        let vt_orderid = format!("SELL_{}_{}", vt_symbol, Utc::now().timestamp_millis());
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req);
+        vt_orderid
     }
 
     /// Short order (open short for futures, not supported for spot)
-    pub fn short(&self, vt_symbol: &str, _price: f64, _volume: f64, _lock: bool) -> String {
+    pub fn short(&self, vt_symbol: &str, price: f64, volume: f64, lock: bool) -> String {
         if self.strategy_type == StrategyType::Spot {
             tracing::warn!("Short not supported for spot trading");
             return String::new();
         }
-        format!("SHORT_{}_{}", vt_symbol, Utc::now().timestamp_millis())
+        let req = self.create_order_request(vt_symbol, Direction::Short, price, volume, lock, Offset::Open);
+        let vt_orderid = format!("SHORT_{}_{}", vt_symbol, Utc::now().timestamp_millis());
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req);
+        vt_orderid
     }
 
     /// Cover order (close short for futures, not supported for spot)
-    pub fn cover(&self, vt_symbol: &str, _price: f64, _volume: f64, _lock: bool) -> String {
+    pub fn cover(&self, vt_symbol: &str, price: f64, volume: f64, lock: bool) -> String {
         if self.strategy_type == StrategyType::Spot {
             tracing::warn!("Cover not supported for spot trading");
             return String::new();
         }
-        format!("COVER_{}_{}", vt_symbol, Utc::now().timestamp_millis())
+        let offset = if lock { Offset::CloseYesterday } else { Offset::Close };
+        let req = self.create_order_request(vt_symbol, Direction::Long, price, volume, lock, offset);
+        let vt_orderid = format!("COVER_{}_{}", vt_symbol, Utc::now().timestamp_millis());
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req);
+        vt_orderid
+    }
+
+    /// Create an OrderRequest from the given parameters
+    fn create_order_request(
+        &self,
+        vt_symbol: &str,
+        direction: Direction,
+        price: f64,
+        volume: f64,
+        _lock: bool,
+        offset: Offset,
+    ) -> OrderRequest {
+        let (symbol, exchange) = crate::trader::utility::extract_vt_symbol(vt_symbol)
+            .unwrap_or((vt_symbol.to_string(), crate::trader::constant::Exchange::Local));
+        OrderRequest {
+            symbol,
+            exchange,
+            direction,
+            order_type: crate::trader::constant::OrderType::Limit,
+            volume,
+            price,
+            offset,
+            reference: self.strategy_name.clone(),
+        }
     }
 
     /// Cancel order
     pub fn cancel_order(&self, vt_orderid: &str) {
         tracing::info!("Cancelling order: {}", vt_orderid);
+        // Remove from active orderids
+        let mut orderids = self
+            .active_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        orderids.retain(|id| id != vt_orderid);
     }
 
     /// Cancel all orders
@@ -354,10 +417,20 @@ impl BaseStrategy {
         let orderids = self
             .active_orderids
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         for orderid in orderids.iter() {
             self.cancel_order(orderid);
         }
+    }
+
+    /// Drain pending orders (called by engine after on_bar/on_tick callback)
+    pub fn drain_pending_orders(&self) -> Vec<OrderRequest> {
+        let mut orders = self
+            .pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *orders)
     }
 
     /// Load historical bar data

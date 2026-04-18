@@ -6,6 +6,9 @@ pub const EVENT_TIMER: &str = "eTimer";
 /// Tick data event type (with optional symbol suffix)
 pub const EVENT_TICK: &str = "eTick.";
 
+/// Bar data event type (with optional symbol suffix)
+pub const EVENT_BAR: &str = "eBar.";
+
 /// Trade data event type (with optional symbol suffix)
 pub const EVENT_TRADE: &str = "eTrade.";
 

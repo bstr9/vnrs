@@ -7,6 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use super::app::BaseApp;
 use super::constant::Exchange;
+use super::risk::RiskManager;
 
 use super::event::*;
 use super::gateway::{BaseGateway, GatewayEvent, GatewaySettings};
@@ -28,11 +29,15 @@ pub trait BaseEngine: Send + Sync {
 
     /// Close the engine
     fn close(&self) {}
+
+    /// Process a gateway event (optional override for sub-engines that need event routing)
+    fn process_event(&self, _event_type: &str, _event: &GatewayEvent) {}
 }
 
 /// OMS (Order Management System) Engine data container
 pub struct OmsData {
     pub ticks: HashMap<String, TickData>,
+    pub bars: HashMap<String, BarData>,
     pub orders: HashMap<String, OrderData>,
     pub trades: HashMap<String, TradeData>,
     pub positions: HashMap<String, PositionData>,
@@ -48,6 +53,7 @@ impl OmsData {
     pub fn new() -> Self {
         Self {
             ticks: HashMap::new(),
+            bars: HashMap::new(),
             orders: HashMap::new(),
             trades: HashMap::new(),
             positions: HashMap::new(),
@@ -87,6 +93,15 @@ impl OmsEngine {
             e.into_inner()
         });
         data.ticks.insert(tick.vt_symbol(), tick);
+    }
+
+    /// Process bar event
+    pub fn process_bar(&self, bar: BarData) {
+        let mut data = self.data.write().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.bars.insert(bar.vt_symbol(), bar);
     }
 
     /// Process order event
@@ -172,6 +187,15 @@ impl OmsEngine {
         data.ticks.get(vt_symbol).cloned()
     }
 
+    /// Get latest bar data by vt_symbol
+    pub fn get_bar(&self, vt_symbol: &str) -> Option<BarData> {
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.bars.get(vt_symbol).cloned()
+    }
+
     /// Get latest order data by vt_orderid
     pub fn get_order(&self, vt_orderid: &str) -> Option<OrderData> {
         let data = self.data.read().unwrap_or_else(|e| {
@@ -233,6 +257,15 @@ impl OmsEngine {
             e.into_inner()
         });
         data.ticks.values().cloned().collect()
+    }
+
+    /// Get all bar data
+    pub fn get_all_bars(&self) -> Vec<BarData> {
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+        data.bars.values().cloned().collect()
     }
 
     /// Get all order data
@@ -418,6 +451,7 @@ pub struct MainEngine {
     
     oms_engine: Arc<OmsEngine>,
     log_engine: Arc<LogEngine>,
+    risk_manager: Arc<RiskManager>,
     
     event_tx: mpsc::UnboundedSender<(String, GatewayEvent)>,
     event_rx: RwLock<Option<mpsc::UnboundedReceiver<(String, GatewayEvent)>>>,
@@ -433,6 +467,7 @@ impl MainEngine {
         
         let oms_engine = Arc::new(OmsEngine::new());
         let log_engine = Arc::new(LogEngine::new());
+        let risk_manager = Arc::new(RiskManager::new());
         
         let engine = Self {
             gateways: RwLock::new(HashMap::new()),
@@ -441,17 +476,19 @@ impl MainEngine {
             exchanges: RwLock::new(Vec::new()),
             oms_engine,
             log_engine,
+            risk_manager,
             event_tx,
             event_rx: RwLock::new(Some(event_rx)),
             handlers: RwLock::new(HashMap::new()),
             running: AtomicBool::new(false),
         };
         
-        // Register OMS engine
+        // Register OMS engine, log engine, and risk manager
         {
             let mut engines = engine.engines.write().unwrap_or_else(|e| e.into_inner());
             engines.insert("oms".to_string(), engine.oms_engine.clone());
             engines.insert("log".to_string(), engine.log_engine.clone());
+            engines.insert("risk".to_string(), engine.risk_manager.clone());
         }
         
         engine
@@ -487,6 +524,7 @@ impl MainEngine {
         // Process in OMS engine
         match event {
             GatewayEvent::Tick(tick) => self.oms_engine.process_tick(tick.clone()),
+            GatewayEvent::Bar(bar) => self.oms_engine.process_bar(bar.clone()),
             GatewayEvent::Order(order) => self.oms_engine.process_order(order.clone()),
             GatewayEvent::Trade(trade) => self.oms_engine.process_trade(trade.clone()),
             GatewayEvent::Position(position) => self.oms_engine.process_position(position.clone()),
@@ -496,6 +534,18 @@ impl MainEngine {
             GatewayEvent::Log(log) => {
                 self.log_engine.process_log(log);
                 self.oms_engine.process_log(log.clone());
+            }
+        }
+
+        // Dispatch event to all registered sub-engines (except oms/log which already processed above)
+        {
+            let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
+            for engine in engines.values() {
+                let name = engine.engine_name();
+                if name == "oms" || name == "log" {
+                    continue; // Already processed above
+                }
+                engine.process_event(event_type, event);
             }
         }
 
@@ -526,6 +576,20 @@ impl MainEngine {
         gateways.insert(gateway_name, gateway.clone());
         
         gateway
+    }
+
+    /// Add a sub-engine for event routing
+    /// The engine will receive all gateway events via its process_event() method
+    pub fn add_engine(&self, engine: Arc<dyn BaseEngine>) {
+        let engine_name = engine.engine_name().to_string();
+        let mut engines = self.engines.write().unwrap_or_else(|e| e.into_inner());
+        engines.insert(engine_name, engine);
+    }
+
+    /// Get a sub-engine by name
+    pub fn get_engine(&self, engine_name: &str) -> Option<Arc<dyn BaseEngine>> {
+        let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
+        engines.get(engine_name).cloned()
     }
 
     /// Get a gateway by name
@@ -583,8 +647,17 @@ impl MainEngine {
         }
     }
 
-    /// Send an order
+    /// Send an order (with risk check)
     pub async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String> {
+        // Pre-trade risk check
+        match self.risk_manager.check_order(&req) {
+            super::risk::RiskCheckResult::Approved => {}
+            super::risk::RiskCheckResult::Rejected(reason) => {
+                self.write_log(format!("风控拒绝 -> {}", reason), "RiskManager");
+                return Err(reason);
+            }
+        }
+
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("委托下单 -> {}：{:?}", gateway_name, req), "MainEngine");
             gateway.send_order(req).await
@@ -638,9 +711,19 @@ impl MainEngine {
         &self.oms_engine
     }
 
+    /// Get risk manager
+    pub fn risk_manager(&self) -> &Arc<RiskManager> {
+        &self.risk_manager
+    }
+
     /// Get tick data
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
         self.oms_engine.get_tick(vt_symbol)
+    }
+
+    /// Get bar data
+    pub fn get_bar(&self, vt_symbol: &str) -> Option<BarData> {
+        self.oms_engine.get_bar(vt_symbol)
     }
 
     /// Get order data
@@ -676,6 +759,11 @@ impl MainEngine {
     /// Get all ticks
     pub fn get_all_ticks(&self) -> Vec<TickData> {
         self.oms_engine.get_all_ticks()
+    }
+
+    /// Get all bars
+    pub fn get_all_bars(&self) -> Vec<BarData> {
+        self.oms_engine.get_all_bars()
     }
 
     /// Get all orders

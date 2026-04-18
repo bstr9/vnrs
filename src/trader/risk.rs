@@ -11,6 +11,7 @@ use tracing::{info, warn};
 
 use super::constant::Direction;
 use super::engine::BaseEngine;
+use super::gateway::GatewayEvent;
 use super::object::{AccountData, OrderRequest, PositionData, TradeData};
 
 /// Risk check result
@@ -369,6 +370,37 @@ impl BaseEngine for RiskManager {
 
     fn close(&self) {
         self.running.store(false, Ordering::SeqCst);
+    }
+
+    fn process_event(&self, _event_type: &str, event: &GatewayEvent) {
+        match event {
+            GatewayEvent::Trade(trade) => {
+                self.record_trade(trade);
+            }
+            GatewayEvent::Position(position) => {
+                self.update_position(position);
+            }
+            GatewayEvent::Account(account) => {
+                self.update_account(account);
+            }
+            GatewayEvent::Order(order) => {
+                // Track active order counts
+                let vt_symbol = order.vt_symbol();
+                match order.status {
+                    crate::trader::constant::Status::NotTraded
+                    | crate::trader::constant::Status::PartTraded => {
+                        self.order_submitted(&vt_symbol);
+                    }
+                    crate::trader::constant::Status::AllTraded
+                    | crate::trader::constant::Status::Cancelled
+                    | crate::trader::constant::Status::Rejected => {
+                        self.order_completed(&vt_symbol);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
     }
 }
 

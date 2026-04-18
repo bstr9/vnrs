@@ -17,6 +17,7 @@ use super::object::{
 #[derive(Debug, Clone)]
 pub enum GatewayEvent {
     Tick(TickData),
+    Bar(BarData),
     Trade(TradeData),
     Order(OrderData),
     Position(PositionData),
@@ -196,6 +197,13 @@ impl GatewayEventSender {
         let event_type = format!("{}{}", EVENT_TICK, tick.vt_symbol());
         let _ = self.sender.send((event_type, GatewayEvent::Tick(tick.clone())));
         let _ = self.sender.send((EVENT_TICK.to_string(), GatewayEvent::Tick(tick)));
+    }
+
+    /// Push a bar event
+    pub fn on_bar(&self, bar: BarData) {
+        let event_type = format!("{}{}", EVENT_BAR, bar.vt_symbol());
+        let _ = self.sender.send((event_type, GatewayEvent::Bar(bar.clone())));
+        let _ = self.sender.send((EVENT_BAR.to_string(), GatewayEvent::Bar(bar)));
     }
 
     /// Push a trade event

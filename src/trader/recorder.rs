@@ -14,6 +14,7 @@ use tracing::{debug, error, info, warn};
 use super::constant::{Exchange, Interval};
 use super::database::BaseDatabase;
 use super::engine::BaseEngine;
+use super::gateway::GatewayEvent;
 use super::object::{BarData, TickData};
 
 /// Default flush interval in seconds
@@ -390,6 +391,20 @@ impl BaseEngine for DataRecorder {
 
     fn close(&self) {
         self.stop();
+    }
+
+    fn process_event(&self, _event_type: &str, event: &GatewayEvent) {
+        // Route gateway events to the recorder's internal event channel
+        // The async event loop will pick them up and call on_tick/on_bar
+        match event {
+            GatewayEvent::Tick(tick) => {
+                let _ = self.event_tx.send(RecorderEvent::Tick(tick.clone()));
+            }
+            GatewayEvent::Bar(bar) => {
+                let _ = self.event_tx.send(RecorderEvent::Bar(bar.clone()));
+            }
+            _ => {}
+        }
     }
 }
 

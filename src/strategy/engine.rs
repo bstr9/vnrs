@@ -8,10 +8,10 @@ use tokio::sync::RwLock;
 use chrono::{Utc, Duration};
 
 use crate::trader::{
-    MainEngine, TickData, OrderData, TradeData,
+    MainEngine, TickData, OrderData, OrderRequest, TradeData, BarData,
     SubscribeRequest, CancelRequest, HistoryRequest,
     Direction, Interval, Exchange,
-    EVENT_TICK, EVENT_ORDER, EVENT_TRADE,
+    EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE,
 };
 use crate::event::EventEngine;
 use super::template::{StrategyTemplate, StrategyContext};
@@ -143,6 +143,38 @@ impl StrategyEngine {
                         for stop_orderid in triggered {
                             if let Some(stop_order) = stop_orders_guard.get_mut(&stop_orderid) {
                                 stop_order.status = StopOrderStatus::Triggered;
+                            }
+                        }
+                    }
+                }
+            }
+        }));
+
+        // Register bar event
+        let bar_strategies = Arc::clone(&strategies);
+        let bar_contexts = Arc::clone(&contexts);
+        let bar_symbol_map = Arc::clone(&symbol_strategy_map);
+        
+        self.event_engine.register(EVENT_BAR, Arc::new(move |event| {
+            tracing::debug!("Bar event received");
+            if let Some(ref data) = event.data {
+                if let Ok(bar) = data.clone().downcast::<BarData>() {
+                    let strategies = bar_strategies.clone();
+                    let contexts = bar_contexts.clone();
+                    let symbol_map = bar_symbol_map.clone();
+                    
+                    let vt_symbol = bar.vt_symbol();
+                    let strategy_names: Vec<String> = symbol_map.blocking_read()
+                        .get(&vt_symbol).cloned()
+                        .unwrap_or_default();
+                    
+                    for strategy_name in &strategy_names {
+                        let contexts_guard = contexts.blocking_read();
+                        if let Some(context) = contexts_guard.get(strategy_name) {
+                            context.update_bar((*bar).clone());
+                            let mut strategies_guard = strategies.blocking_write();
+                            if let Some(strategy) = strategies_guard.get_mut(strategy_name) {
+                                strategy.on_bar(&bar, context);
                             }
                         }
                     }
@@ -512,6 +544,70 @@ impl StrategyEngine {
         } else {
             None
         }
+    }
+
+    /// Send an order on behalf of a strategy, routing through MainEngine (with risk check)
+    /// Also populates orderid_strategy_map and strategy_orderid_map for callback routing
+    pub async fn send_order(
+        &self,
+        strategy_name: &str,
+        req: OrderRequest,
+    ) -> Result<String, String> {
+        let exchange = req.exchange;
+        let gw_name = self.main_engine.find_gateway_name_for_exchange(exchange)
+            .ok_or_else(|| format!("No gateway found for exchange {:?}", exchange))?;
+
+        let result = self.main_engine.send_order(req, &gw_name).await?;
+
+        // Track order -> strategy mapping for callback routing
+        {
+            let mut orderid_map = self.orderid_strategy_map.write().await;
+            orderid_map.insert(result.clone(), strategy_name.to_string());
+        }
+        {
+            let mut strategy_map = self.strategy_orderid_map.write().await;
+            strategy_map.entry(strategy_name.to_string())
+                .or_default()
+                .push(result.clone());
+        }
+
+        Ok(result)
+    }
+
+    /// Process pending orders from a strategy (called after on_bar/on_tick callbacks)
+    pub async fn process_pending_orders(&self, strategy_name: &str) -> Vec<Result<String, String>> {
+        let pending: Vec<OrderRequest> = {
+            let mut strategies = self.strategies.write().await;
+            if let Some(strategy) = strategies.get_mut(strategy_name) {
+                strategy.drain_pending_orders()
+            } else {
+                return Vec::new()
+            }
+        };
+
+        let mut results = Vec::new();
+        for req in pending {
+            let result = self.send_order(strategy_name, req).await;
+            results.push(result);
+        }
+        results
+    }
+
+    /// Cancel an order on behalf of a strategy
+    pub async fn cancel_strategy_order(&self, _strategy_name: &str, vt_orderid: &str) -> Result<(), String> {
+        let order = self.main_engine.get_order(vt_orderid)
+            .ok_or_else(|| format!("Order {} not found", vt_orderid))?;
+
+        let req = CancelRequest::new(
+            order.orderid.clone(),
+            order.symbol.clone(),
+            order.exchange,
+        );
+
+        let gw_name = self.main_engine.find_gateway_name_for_exchange(order.exchange)
+            .ok_or_else(|| format!("No gateway found for exchange {:?}", order.exchange))?;
+
+        self.main_engine.cancel_order(req, &gw_name).await
     }
 }
 
