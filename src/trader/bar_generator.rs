@@ -175,10 +175,32 @@ impl BarGenerator {
                     .with_nanosecond(0)
                     .unwrap_or(*dt)
             }
+            Interval::Minute5 => {
+                // Round down to the nearest 5-minute mark
+                let minute = dt.minute();
+                let rounded_minute = (minute / 5) * 5;
+                dt.with_minute(rounded_minute)
+                    .unwrap_or(*dt)
+                    .with_second(0)
+                    .unwrap_or(*dt)
+                    .with_nanosecond(0)
+                    .unwrap_or(*dt)
+            }
             Interval::Minute15 => {
                 // Round down to the nearest 15-minute mark
                 let minute = dt.minute();
                 let rounded_minute = (minute / 15) * 15;
+                dt.with_minute(rounded_minute)
+                    .unwrap_or(*dt)
+                    .with_second(0)
+                    .unwrap_or(*dt)
+                    .with_nanosecond(0)
+                    .unwrap_or(*dt)
+            }
+            Interval::Minute30 => {
+                // Round down to the nearest 30-minute mark
+                let minute = dt.minute();
+                let rounded_minute = (minute / 30) * 30;
                 dt.with_minute(rounded_minute)
                     .unwrap_or(*dt)
                     .with_second(0)
@@ -242,7 +264,9 @@ impl BarGenerator {
         match self.interval {
             Interval::Second => *start_time + Duration::seconds(1),
             Interval::Minute => *start_time + Duration::minutes(1),
+            Interval::Minute5 => *start_time + Duration::minutes(5),
             Interval::Minute15 => *start_time + Duration::minutes(15),
+            Interval::Minute30 => *start_time + Duration::minutes(30),
             Interval::Hour => *start_time + Duration::hours(1),
             Interval::Hour4 => *start_time + Duration::hours(4),
             Interval::Daily => *start_time + Duration::days(1),
