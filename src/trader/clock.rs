@@ -20,6 +20,14 @@ pub trait Clock: Send + Sync {
     fn timestamp_ms(&self) -> i64 {
         self.now().timestamp_millis()
     }
+
+    /// Set the current time (advances the clock).
+    ///
+    /// For `TestClock` this updates internal state; for `LiveClock`
+    /// this is a no-op since wall-clock time cannot be changed.
+    fn set_time(&self, _time: DateTime<Utc>) {
+        // Default: no-op. TestClock overrides this.
+    }
 }
 
 /// Live clock that returns real system time.
@@ -84,6 +92,11 @@ impl TestClock {
 impl Clock for TestClock {
     fn now(&self) -> DateTime<Utc> {
         *self.time.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn set_time(&self, time: DateTime<Utc>) {
+        let mut t = self.time.write().unwrap_or_else(|e| e.into_inner());
+        *t = time;
     }
 }
 

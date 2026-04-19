@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use super::constant::{Direction, Exchange};
+use super::constant::{Direction, Exchange, Offset};
 use super::engine::BaseEngine;
 use super::gateway::GatewayEvent;
 use super::object::{AccountData, PositionData, TickData, TradeData};
@@ -348,19 +348,118 @@ impl PortfolioManager {
     }
 
     /// Process a trade event from gateway
+    ///
+    /// Calculates realized PnL by matching the trade against existing positions.
+    /// - Closing trade (reduces position): realized PnL = (exit_price - avg_entry_price) * closed_volume for longs
+    /// - Opening trade (increases position): updates weighted average entry price
+    /// - Flip trade (reverses position): realizes PnL on the closing portion, opens new position
     fn process_trade_event(&self, trade: &TradeData) {
-        let pnl = if trade.direction == Some(Direction::Long) || trade.direction == Some(Direction::Net) {
-            // For buys, we can't determine PnL directly from a single trade
-            // PnL is realized when closing a position
-            0.0
-        } else if trade.direction == Some(Direction::Short) {
-            0.0
-        } else {
-            0.0
+        let trade_dir = trade.direction.unwrap_or(Direction::Net);
+        let vt_symbol = format!("{}.{}", trade.symbol, trade.exchange.value());
+
+        // Determine the opposite position direction this trade might close:
+        // - A Short trade closes a Long position
+        // - A Long trade closes a Short position
+        let opposite_dir = match trade_dir {
+            Direction::Short => Direction::Long,
+            Direction::Long => Direction::Short,
+            _ => Direction::Net,
         };
+        let opposite_key = format!(
+            "{}.{}.{}",
+            trade.gateway_name, vt_symbol, opposite_dir
+        );
+        // Same direction key for opening/adding
+        let same_dir = match trade_dir {
+            Direction::Long | Direction::Net => Direction::Long,
+            Direction::Short => Direction::Short,
+            _ => Direction::Net,
+        };
+        let same_key = format!(
+            "{}.{}.{}",
+            trade.gateway_name, vt_symbol, same_dir
+        );
+
+        let mut positions = self.positions.write().unwrap_or_else(|e| e.into_inner());
+        let mut pnl: f64 = 0.0;
+
+        // Step 1: Try to close the opposite-direction position
+        let mut remaining_trade_volume = trade.volume;
+        if let Some(pos) = positions.get_mut(&opposite_key) {
+            let is_closing = match trade_dir {
+                Direction::Short => pos.direction == Direction::Long && pos.volume > 0.0,
+                Direction::Long => pos.direction == Direction::Short && pos.volume > 0.0,
+                _ => false,
+            };
+
+            if is_closing {
+                let closed_volume = if remaining_trade_volume <= pos.volume {
+                    remaining_trade_volume
+                } else {
+                    pos.volume
+                };
+                remaining_trade_volume -= closed_volume;
+
+                // Calculate realized PnL for the closed portion
+                pnl = match pos.direction {
+                    Direction::Long | Direction::Net => {
+                        (trade.price - pos.avg_price) * closed_volume
+                    }
+                    Direction::Short => {
+                        (pos.avg_price - trade.price) * closed_volume
+                    }
+                };
+
+                // Update position volume
+                let pos_remaining = pos.volume - closed_volume;
+                if pos_remaining < 1e-10 {
+                    // Fully closed
+                    pos.volume = 0.0;
+                    pos.realized_pnl += pnl;
+                    pos.unrealized_pnl = 0.0;
+                } else {
+                    // Partially closed — avg_price stays the same, volume decreases
+                    pos.volume = pos_remaining;
+                    pos.realized_pnl += pnl;
+                    pos.unrealized_pnl = match pos.direction {
+                        Direction::Long | Direction::Net => {
+                            (trade.price - pos.avg_price) * pos_remaining
+                        }
+                        Direction::Short => {
+                            (pos.avg_price - trade.price) * pos_remaining
+                        }
+                    };
+                }
+            }
+        }
+
+        // Step 2: If trade has remaining volume (flip or new open), update same-direction position
+        if remaining_trade_volume > 1e-10 {
+            if let Some(pos) = positions.get_mut(&same_key) {
+                // Adding to existing same-direction position
+                let old_total = pos.avg_price * pos.volume;
+                let new_total = old_total + trade.price * remaining_trade_volume;
+                let new_volume = pos.volume + remaining_trade_volume;
+                if new_volume > 1e-10 {
+                    pos.avg_price = new_total / new_volume;
+                }
+                pos.volume = new_volume;
+                pos.direction = same_dir;
+                pos.unrealized_pnl = match pos.direction {
+                    Direction::Long | Direction::Net => {
+                        (trade.price - pos.avg_price) * pos.volume
+                    }
+                    Direction::Short => {
+                        (pos.avg_price - trade.price) * pos.volume
+                    }
+                };
+            }
+            // If no same-direction position exists yet, it will be created by the next
+            // process_position_event call from the gateway.
+        }
 
         // Update daily/total PnL tracking
-        if pnl != 0.0 {
+        if pnl.abs() > 1e-10 {
             let mut daily = self.daily_realized_pnl.write().unwrap_or_else(|e| e.into_inner());
             *daily += pnl;
             let mut total = self.total_realized_pnl.write().unwrap_or_else(|e| e.into_inner());
@@ -635,5 +734,113 @@ mod tests {
         let active = pm.get_active_positions();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].symbol, "BTCUSDT");
+    }
+
+    fn make_trade(symbol: &str, exchange: Exchange, direction: Direction, volume: f64, price: f64) -> TradeData {
+        TradeData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: symbol.to_string(),
+            exchange,
+            orderid: "TEST_ORDER".to_string(),
+            tradeid: "TEST_TRADE".to_string(),
+            direction: Some(direction),
+            offset: Offset::None,
+            price,
+            volume,
+            datetime: None,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn test_trade_realized_pnl_long_close() {
+        let pm = PortfolioManager::new();
+        // Open long position at 50000
+        let pos = make_position("BTCUSDT", Exchange::Binance, Direction::Long, 1.0, 50000.0, 0.0);
+        pm.process_position_event(&pos);
+
+        // Close long by selling at 52000
+        let trade = make_trade("BTCUSDT", Exchange::Binance, Direction::Short, 1.0, 52000.0);
+        pm.process_trade_event(&trade);
+
+        // Realized PnL = (52000 - 50000) * 1.0 = 2000
+        assert!((pm.get_daily_realized_pnl() - 2000.0).abs() < 0.001);
+        assert!((pm.get_total_realized_pnl() - 2000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_trade_realized_pnl_short_close() {
+        let pm = PortfolioManager::new();
+        // Open short position at 50000
+        let pos = make_position("BTCUSDT", Exchange::Binance, Direction::Short, 1.0, 50000.0, 0.0);
+        pm.process_position_event(&pos);
+
+        // Close short by buying at 48000
+        let trade = make_trade("BTCUSDT", Exchange::Binance, Direction::Long, 1.0, 48000.0);
+        pm.process_trade_event(&trade);
+
+        // Realized PnL = (50000 - 48000) * 1.0 = 2000
+        assert!((pm.get_daily_realized_pnl() - 2000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_trade_realized_pnl_loss() {
+        let pm = PortfolioManager::new();
+        // Open long at 50000
+        let pos = make_position("BTCUSDT", Exchange::Binance, Direction::Long, 1.0, 50000.0, 0.0);
+        pm.process_position_event(&pos);
+
+        // Close long at 48000 (loss)
+        let trade = make_trade("BTCUSDT", Exchange::Binance, Direction::Short, 1.0, 48000.0);
+        pm.process_trade_event(&trade);
+
+        // Realized PnL = (48000 - 50000) * 1.0 = -2000
+        assert!((pm.get_daily_realized_pnl() - (-2000.0)).abs() < 0.001);
+
+        let metrics = pm.get_metrics();
+        assert_eq!(metrics.losing_trades, 1);
+        assert_eq!(metrics.winning_trades, 0);
+    }
+
+    #[test]
+    fn test_trade_realized_pnl_partial_close() {
+        let pm = PortfolioManager::new();
+        // Open long position of 2.0 at 50000
+        let pos = make_position("BTCUSDT", Exchange::Binance, Direction::Long, 2.0, 50000.0, 0.0);
+        pm.process_position_event(&pos);
+
+        // Partially close: sell 1.0 at 52000
+        let trade = make_trade("BTCUSDT", Exchange::Binance, Direction::Short, 1.0, 52000.0);
+        pm.process_trade_event(&trade);
+
+        // Realized PnL = (52000 - 50000) * 1.0 = 2000
+        assert!((pm.get_daily_realized_pnl() - 2000.0).abs() < 0.001);
+
+        // Position should still exist with 1.0 remaining
+        let positions = pm.get_all_positions();
+        assert_eq!(positions.len(), 1);
+        assert!((positions[0].volume - 1.0).abs() < 0.001);
+        assert!((positions[0].avg_price - 50000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_trade_opening_updates_avg_price() {
+        let pm = PortfolioManager::new();
+        // Open long at 50000
+        let pos = make_position("BTCUSDT", Exchange::Binance, Direction::Long, 1.0, 50000.0, 0.0);
+        pm.process_position_event(&pos);
+
+        // Add to position: buy 1.0 at 52000
+        let trade = make_trade("BTCUSDT", Exchange::Binance, Direction::Long, 1.0, 52000.0);
+        pm.process_trade_event(&trade);
+
+        // No realized PnL from opening trade
+        assert!((pm.get_daily_realized_pnl()).abs() < 0.001);
+
+        // Avg price should be (50000*1 + 52000*1) / 2 = 51000
+        let positions = pm.get_all_positions();
+        assert_eq!(positions.len(), 1);
+        assert!((positions[0].avg_price - 51000.0).abs() < 0.001);
+        assert!((positions[0].volume - 2.0).abs() < 0.001);
     }
 }

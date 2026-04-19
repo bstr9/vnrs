@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc, NaiveDate, Duration};
 use crate::trader::{
     TickData, BarData, OrderData, TradeData,
     Direction, Offset, Status, Interval, Exchange,
-    OrderRequest,
+    OrderRequest, Clock, TestClock,
 };
 use crate::trader::database::BaseDatabase;
 use crate::strategy::{
@@ -31,6 +31,7 @@ use super::database::DatabaseLoader;
 use super::position::Position;
 use super::fill_model::{FillModel, BestPriceFillModel};
 use super::risk_engine::{RiskEngine, RiskConfig};
+use super::simulated_exchange::{SimulatedExchange, InstrumentConfig, FeeModel};
 use crate::trader::OrderType;
 
 /// Emulated order type for backtesting (order types not natively supported by exchanges)
@@ -131,7 +132,11 @@ pub struct BacktestingEngine {
     // Market data
     history_data: Vec<BarData>,
     tick_data: Vec<TickData>,
-    current_dt: DateTime<Utc>,
+    /// Deterministic clock abstraction — TestClock in backtest, LiveClock in live.
+    /// Replaces the old `current_dt: DateTime<Utc>` field so that all time queries
+    /// flow through the same `Clock` trait used by live trading, ensuring
+    /// research-to-live parity (nautilus_trader pattern).
+    clock: Arc<dyn Clock>,
     
     // Order management
     limit_order_count: u64,
@@ -176,6 +181,13 @@ pub struct BacktestingEngine {
     bracket_group_count: u64,
     bracket_groups: HashMap<u64, BacktestBracketGroup>,
     active_bracket_groups: HashMap<u64, BacktestBracketGroup>,
+
+    /// Optional simulated exchange for per-instrument matching with fee/latency models.
+    /// When set, order matching is delegated to SimulatedExchange instead of the
+    /// engine's built-in cross_limit_order/cross_stop_order methods.
+    /// This enables configurable fee models (maker/taker), latency simulation,
+    /// and per-instrument matching engines (nautilus_trader pattern).
+    simulated_exchange: Option<SimulatedExchange>,
 }
 
 impl BacktestingEngine {
@@ -198,7 +210,7 @@ impl BacktestingEngine {
             strategy_context: Arc::new(StrategyContext::new()),
             history_data: Vec::new(),
             tick_data: Vec::new(),
-            current_dt: Utc::now(),
+            clock: Arc::new(TestClock::new(Utc::now())),
             limit_order_count: 0,
             limit_orders: HashMap::new(),
             active_limit_orders: HashMap::new(),
@@ -225,6 +237,7 @@ impl BacktestingEngine {
             bracket_group_count: 0,
             bracket_groups: HashMap::new(),
             active_bracket_groups: HashMap::new(),
+            simulated_exchange: None,
         }
     }
 
@@ -254,6 +267,55 @@ impl BacktestingEngine {
         self.bracket_group_count = 0;
         self.bracket_groups.clear();
         self.active_bracket_groups.clear();
+        self.simulated_exchange = None;
+    }
+
+    /// Enable the SimulatedExchange for this backtest.
+    ///
+    /// When enabled, order matching is delegated to SimulatedExchange which provides:
+    /// - Per-instrument matching engines with independent fill models
+    /// - Configurable fee models (maker/taker rates, flat fees, percent)
+    /// - Latency simulation (fixed, random)
+    /// - Pre-trade risk checks per instrument
+    ///
+    /// The instrument is automatically registered with the engine's current
+    /// pricetick, size, and fill_model settings.
+    pub fn enable_simulated_exchange(&mut self) {
+        let mut exchange = SimulatedExchange::new(format!("SIM_{}", self.exchange.value()));
+        let config = InstrumentConfig::new(
+            self.vt_symbol.clone(),
+            self.pricetick,
+            self.size,
+            self.fill_model.clone(),
+        );
+        exchange.add_instrument(config);
+        self.simulated_exchange = Some(exchange);
+    }
+
+    /// Enable the SimulatedExchange with a custom fee model.
+    ///
+    /// This allows configuring maker/taker fee rates, flat fees, or other
+    /// fee structures that differ from the engine's default `rate` parameter.
+    pub fn enable_simulated_exchange_with_fee(&mut self, fee_model: Box<dyn FeeModel>) {
+        let mut exchange = SimulatedExchange::new(format!("SIM_{}", self.exchange.value()));
+        let config = InstrumentConfig::new(
+            self.vt_symbol.clone(),
+            self.pricetick,
+            self.size,
+            self.fill_model.clone(),
+        ).with_fee_model(fee_model);
+        exchange.add_instrument(config);
+        self.simulated_exchange = Some(exchange);
+    }
+
+    /// Check if SimulatedExchange is enabled.
+    pub fn has_simulated_exchange(&self) -> bool {
+        self.simulated_exchange.is_some()
+    }
+
+    /// Get a reference to the SimulatedExchange (if enabled).
+    pub fn simulated_exchange(&self) -> Option<&SimulatedExchange> {
+        self.simulated_exchange.as_ref()
     }
 
     /// Set backtesting parameters
@@ -312,6 +374,27 @@ impl BacktestingEngine {
     /// Set risk engine configuration
     pub fn set_risk_config(&mut self, config: RiskConfig) {
         self.risk_engine.set_config(config);
+    }
+
+    /// Set a custom clock for time control.
+    ///
+    /// Defaults to `TestClock` which is manually advanced on each bar/tick.
+    /// Replace with `LiveClock` for live-style time, or a custom `Clock`
+    /// implementation for advanced scenarios.
+    pub fn set_clock(&mut self, clock: Arc<dyn Clock>) {
+        self.clock = clock;
+    }
+
+    /// Get a reference to the engine's clock.
+    pub fn clock(&self) -> &Arc<dyn Clock> {
+        &self.clock
+    }
+
+    /// Get the current backtesting time (delegates to `clock.now()`).
+    ///
+    /// This is a convenience accessor that replaces the old `current_dt` field.
+    pub fn current_dt(&self) -> DateTime<Utc> {
+        self.clock.now()
     }
 
     /// Add strategy to backtesting engine
@@ -617,17 +700,42 @@ impl BacktestingEngine {
         let history_data = std::mem::take(&mut self.history_data);
         
         for bar in &history_data {
-            // 1. Update current time
-            self.current_dt = bar.datetime;
+            // 1. Update current time (advances the deterministic clock)
+            self.clock.set_time(bar.datetime);
             
             // 2. New day - create new daily result
             self.new_day(bar);
             
             // 3. Cross pending limit orders from previous bar
-            self.cross_limit_order(bar);
+            if let Some(ref mut sim_exchange) = self.simulated_exchange {
+                let trades = sim_exchange.process_bar(&self.vt_symbol, bar, self.exchange, self.clock.as_ref());
+                for trade in trades {
+                    self.trades.insert(trade.tradeid.clone(), trade.clone());
+                    self.trade_count += 1;
+                    if let Err(e) = self.position.apply_fill(&trade) {
+                        tracing::error!("仓位更新失败: {}", e);
+                    }
+                    // Update daily result tracking
+                    if let Some(ref mut daily) = self.daily_result {
+                        daily.trades.push(trade.clone());
+                        daily.trade_count += 1;
+                        daily.turnover += trade.price * trade.volume * self.size;
+                        daily.commission += trade.price * trade.volume * self.size * self.rate;
+                    }
+                    // Remove filled limit orders
+                    self.active_limit_orders.retain(|_, o| o.status != Status::AllTraded);
+                }
+            } else {
+                self.cross_limit_order(bar);
+            }
             
             // 4. Cross pending stop orders from previous bar
-            self.cross_stop_order(bar);
+            if let Some(ref mut sim_exchange) = self.simulated_exchange {
+                // Stop orders already handled by SimulatedExchange.process_bar above
+                // (SimulatedExchange processes both limit and stop orders together)
+            } else {
+                self.cross_stop_order(bar);
+            }
             
             // 5. Cross emulated orders (trailing stops, MIT, LIT)
             self.cross_emulated_order(bar);
@@ -668,7 +776,7 @@ impl BacktestingEngine {
         let tick_data = std::mem::take(&mut self.tick_data);
 
         for tick in &tick_data {
-            self.current_dt = tick.datetime;
+            self.clock.set_time(tick.datetime);
 
             let synthetic_bar = BarData {
                 gateway_name: "BACKTESTING".to_string(),
@@ -688,10 +796,30 @@ impl BacktestingEngine {
             self.new_day(&synthetic_bar);
 
             // Cross limit orders with tick data
-            self.cross_limit_order_tick(tick);
+            if let Some(ref mut sim_exchange) = self.simulated_exchange {
+                let trades = sim_exchange.process_tick(&self.vt_symbol, tick, self.exchange, self.clock.as_ref());
+                for trade in trades {
+                    self.trades.insert(trade.tradeid.clone(), trade.clone());
+                    self.trade_count += 1;
+                    if let Err(e) = self.position.apply_fill(&trade) {
+                        tracing::error!("仓位更新失败: {}", e);
+                    }
+                    if let Some(ref mut daily) = self.daily_result {
+                        daily.trades.push(trade.clone());
+                        daily.trade_count += 1;
+                        daily.turnover += trade.price * trade.volume * self.size;
+                        daily.commission += trade.price * trade.volume * self.size * self.rate;
+                    }
+                    self.active_limit_orders.retain(|_, o| o.status != Status::AllTraded);
+                }
+            } else {
+                self.cross_limit_order_tick(tick);
+            }
             
             // Cross stop orders with tick data
-            self.cross_stop_order_tick(tick);
+            if self.simulated_exchange.is_none() {
+                self.cross_stop_order_tick(tick);
+            }
             
             // Cross emulated orders (trailing stops, MIT, LIT)
             self.cross_emulated_order(&synthetic_bar);
@@ -1160,7 +1288,7 @@ impl BacktestingEngine {
 
         let order = OrderData {
             gateway_name: "BACKTESTING".to_string(),
-            symbol: req.symbol,
+            symbol: req.symbol.clone(),
             exchange: req.exchange,
             orderid: vt_orderid.clone(),
             order_type: req.order_type,
@@ -1170,8 +1298,8 @@ impl BacktestingEngine {
             volume: req.volume,
             traded: 0.0,
             status: Status::NotTraded,
-            datetime: Some(self.current_dt),
-            reference: req.reference,
+            datetime: Some(self.clock.now()),
+            reference: req.reference.clone(),
             extra: None,
         };
 
@@ -1188,8 +1316,30 @@ impl BacktestingEngine {
             return String::new();
         }
 
-        self.limit_orders.insert(vt_orderid.clone(), order.clone());
-        self.active_limit_orders.insert(vt_orderid.clone(), order);
+        // If SimulatedExchange is enabled, submit order there
+        if let Some(ref mut sim_exchange) = self.simulated_exchange {
+            let sim_req = OrderRequest {
+                symbol: req.symbol,
+                exchange: req.exchange,
+                direction: req.direction,
+                order_type: req.order_type,
+                volume: req.volume,
+                price: req.price,
+                offset: req.offset,
+                reference: req.reference,
+                post_only: false,
+                reduce_only: false,
+            };
+            if let Ok(sim_order) = sim_exchange.submit_order(
+                sim_req, self.exchange, req.direction, req.offset, self.clock.as_ref(),
+            ) {
+                self.limit_orders.insert(vt_orderid.clone(), sim_order.clone());
+                self.active_limit_orders.insert(vt_orderid.clone(), sim_order);
+            }
+        } else {
+            self.limit_orders.insert(vt_orderid.clone(), order.clone());
+            self.active_limit_orders.insert(vt_orderid.clone(), order);
+        }
 
         vt_orderid
     }
@@ -1211,13 +1361,13 @@ impl BacktestingEngine {
             lock: false,
             vt_orderid: None,
             status: StopOrderStatus::Waiting,
-            datetime: self.current_dt,
+            datetime: self.clock.now(),
         };
 
         // Pre-trade risk check - create a synthetic OrderData for the check
         let order_for_check = OrderData {
             gateway_name: "BACKTESTING".to_string(),
-            symbol: req.symbol,
+            symbol: req.symbol.clone(),
             exchange: req.exchange,
             orderid: stop_orderid.clone(),
             order_type: req.order_type,
@@ -1227,7 +1377,7 @@ impl BacktestingEngine {
             volume: req.volume,
             traded: 0.0,
             status: Status::NotTraded,
-            datetime: Some(self.current_dt),
+            datetime: Some(self.clock.now()),
             reference: String::new(),
             extra: None,
         };
@@ -1243,14 +1393,43 @@ impl BacktestingEngine {
             return String::new();
         }
 
-        self.stop_orders.insert(stop_orderid.clone(), stop_order.clone());
-        self.active_stop_orders.insert(stop_orderid.clone(), stop_order);
+        // If SimulatedExchange is enabled, submit stop order there
+        if let Some(ref mut sim_exchange) = self.simulated_exchange {
+            let sim_req = OrderRequest {
+                symbol: req.symbol.clone(),
+                exchange: req.exchange,
+                direction: req.direction,
+                order_type: req.order_type,
+                volume: req.volume,
+                price: req.price,
+                offset: req.offset,
+                reference: req.reference.clone(),
+                post_only: false,
+                reduce_only: false,
+            };
+            let dir = req.direction;
+            let off = req.offset;
+            if let Ok(sim_stop) = sim_exchange.submit_stop_order(
+                sim_req, self.exchange, dir, off, self.clock.as_ref(),
+            ) {
+                self.stop_orders.insert(stop_orderid.clone(), sim_stop.clone());
+                self.active_stop_orders.insert(stop_orderid.clone(), sim_stop);
+            }
+        } else {
+            self.stop_orders.insert(stop_orderid.clone(), stop_order.clone());
+            self.active_stop_orders.insert(stop_orderid.clone(), stop_order);
+        }
 
         stop_orderid
     }
 
     /// Cancel order (called by strategy)
     pub fn cancel_order(&mut self, vt_orderid: &str) {
+        // Cancel from SimulatedExchange if enabled
+        if let Some(ref mut sim_exchange) = self.simulated_exchange {
+            let _ = sim_exchange.cancel_order(vt_orderid);
+        }
+        
         if self.active_limit_orders.contains_key(vt_orderid) {
             self.active_limit_orders.remove(vt_orderid);
         } else if self.active_stop_orders.contains_key(vt_orderid) {
