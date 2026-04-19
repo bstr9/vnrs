@@ -547,9 +547,10 @@ fn parse_order_type(s: &str) -> PyResult<OrderType> {
     match s.to_uppercase().as_str() {
         "MARKET" => Ok(OrderType::Market),
         "LIMIT" => Ok(OrderType::Limit),
-        "STOP" | "STOP_LIMIT" => Ok(OrderType::Stop),
+        "STOP" => Ok(OrderType::Stop),
+        "STOP_LIMIT" => Ok(OrderType::StopLimit),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid order_type '{}'. Expected MARKET, LIMIT, or STOP.",
+            "Invalid order_type '{}'. Expected MARKET, LIMIT, STOP, or STOP_LIMIT.",
             s
         ))),
     }
@@ -563,6 +564,8 @@ fn parse_vt_symbol(vt_symbol: &str) -> (String, Exchange) {
                 "BINANCE" => Exchange::Binance,
                 "BINANCE_USDM" => Exchange::BinanceUsdm,
                 "BINANCE_COINM" => Exchange::BinanceCoinm,
+                "OKX" => Exchange::Okx,
+                "BYBIT" => Exchange::Bybit,
                 _ => Exchange::Local,
             };
             (sym.to_string(), exchange)

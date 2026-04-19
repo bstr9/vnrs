@@ -45,6 +45,7 @@ fn order_type_to_str(ot: OrderType) -> &'static str {
         OrderType::Limit => "LIMIT",
         OrderType::Market => "MARKET",
         OrderType::Stop => "STOP",
+        OrderType::StopLimit => "STOP_LIMIT",
         OrderType::Fak => "FAK",
         OrderType::Fok => "FOK",
         OrderType::Rfq => "RFQ",
@@ -349,6 +350,18 @@ impl PyOrder {
                     .unwrap_or_else(|| "N/A".to_string()),
                 self.quantity
             ),
+            OrderType::StopLimit => format!(
+                "PyOrder({} {} STOP_LIMIT@{} limit={} x{})",
+                self.side(),
+                self.instrument_id,
+                self.trigger_price
+                    .map(|p| format!("{}", p))
+                    .unwrap_or_else(|| "N/A".to_string()),
+                self.limit_price
+                    .map(|p| format!("{}", p))
+                    .unwrap_or_else(|| "N/A".to_string()),
+                self.quantity
+            ),
             _ => format!(
                 "PyOrder({} {} {:?} x{})",
                 self.side(),
@@ -516,7 +529,7 @@ impl OrderFactory {
             instrument_id: instrument_id.to_string(),
             quantity,
             side: direction,
-            order_type: OrderType::Stop,
+            order_type: OrderType::StopLimit,
             price: None,
             trigger_price: Some(trigger_price),
             limit_price: Some(limit_price),
@@ -614,8 +627,7 @@ impl OrderFactory {
     ///     side: "BUY"/"SELL" or "LONG"/"SHORT" (case-insensitive)
     ///
     /// Returns:
-    ///     PyOrder with order_type="STOP_LIMIT" (stored as Stop in OrderType,
-    ///     with limit_price populated to distinguish from plain stop)
+    ///     PyOrder with order_type="STOP_LIMIT"
     fn stop_limit(
         &self,
         py: Python,
@@ -749,7 +761,7 @@ mod tests {
             .build_stop_limit_order("BTCUSDT.BINANCE", 48000.0, 47900.0, 0.1, "SELL", None)
             .unwrap();
 
-        assert_eq!(order.order_type(), "STOP");
+        assert_eq!(order.order_type(), "STOP_LIMIT");
         assert_eq!(order.trigger_price(), Some(48000.0));
         assert_eq!(order.limit_price(), Some(47900.0));
     }

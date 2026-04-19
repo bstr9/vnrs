@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::trader::{
-    BarData, Clock, Direction, Exchange, Offset, OrderData, OrderRequest, Status,
+    BarData, Clock, Direction, Exchange, Offset, OrderData, OrderRequest, OrderType, Status,
     TickData, TradeData,
 };
 use crate::strategy::{StopOrder, StopOrderStatus};
@@ -463,6 +463,7 @@ impl InstrumentMatchingEngine {
             price: req.price,
             volume: req.volume,
             order_type: req.order_type,
+            limit_price: None,
             strategy_name: req.reference.clone(),
             lock: false,
             vt_orderid: None,
@@ -653,7 +654,7 @@ impl InstrumentMatchingEngine {
                 order_type: stop_order.order_type,
                 direction: Some(stop_order.direction),
                 offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: stop_order.price,
+                price: stop_order.limit_price.unwrap_or(stop_order.price),
                 volume: stop_order.volume,
                 traded: 0.0,
                 status: Status::NotTraded,
@@ -662,7 +663,17 @@ impl InstrumentMatchingEngine {
                 extra: None,
             };
 
-            let fill_result = self.config.fill_model.simulate_stop_fill(&order, bar, stop_order.price);
+            // Use appropriate fill simulation based on order type
+            let fill_result = match stop_order.order_type {
+                OrderType::StopLimit => {
+                    // StopLimit: after trigger, behaves like a limit order at limit_price
+                    self.config.fill_model.simulate_limit_fill(&order, bar)
+                }
+                _ => {
+                    // Stop (market): fill at market price after trigger
+                    self.config.fill_model.simulate_stop_fill(&order, bar, stop_order.price)
+                }
+            };
 
             if fill_result.filled {
                 self.trade_count += 1;
@@ -787,7 +798,7 @@ impl InstrumentMatchingEngine {
                 order_type: stop_order.order_type,
                 direction: Some(stop_order.direction),
                 offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: stop_order.price,
+                price: stop_order.limit_price.unwrap_or(stop_order.price),
                 volume: stop_order.volume,
                 traded: 0.0,
                 status: Status::NotTraded,

@@ -58,12 +58,14 @@ pub struct StopOrder {
     pub direction: Direction,
     /// Offset type (for futures)
     pub offset: Option<Offset>,
-    /// Price to trigger
+    /// Price to trigger (stop price)
     pub price: f64,
     /// Order volume
     pub volume: f64,
     /// Order type after trigger
     pub order_type: OrderType,
+    /// Limit price for StopLimit orders (None for Stop/Market)
+    pub limit_price: Option<f64>,
     /// Strategy name that created this order
     pub strategy_name: String,
     /// Lock flag (for position management)
@@ -96,6 +98,7 @@ impl StopOrder {
             price,
             volume,
             order_type,
+            limit_price: None,
             strategy_name,
             lock: false,
             vt_orderid: None,
@@ -211,6 +214,8 @@ pub struct StopOrderRequest {
     pub volume: f64,
     /// Order type after trigger
     pub order_type: OrderType,
+    /// Limit price for StopLimit orders (None for Stop/Market)
+    pub limit_price: Option<f64>,
     /// Lock flag (for position management)
     pub lock: bool,
 }
@@ -232,6 +237,7 @@ impl StopOrderRequest {
             price,
             volume,
             order_type,
+            limit_price: None,
             lock,
         }
     }

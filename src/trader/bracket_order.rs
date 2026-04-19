@@ -348,7 +348,7 @@ impl BracketOrderEngine {
             direction: close_dir,
             order_type: req.sl_type,
             volume: req.entry_volume,
-            price: if req.sl_type == OrderType::Stop { req.sl_price } else { 0.0 },
+            price: if req.sl_type == OrderType::Stop || req.sl_type == OrderType::StopLimit { req.sl_price } else { 0.0 },
             offset: req.offset,
             reference: format!("BRACKET_{}_SL", id),
             post_only: false,

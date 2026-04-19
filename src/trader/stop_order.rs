@@ -384,7 +384,7 @@ impl StopOrderEngine {
 
     fn create_order_request(order: &StopOrder) -> OrderRequest {
         let order_type = match order.stop_type {
-            StopOrderType::StopLimit => OrderType::Limit,
+            StopOrderType::StopLimit => OrderType::StopLimit,
             _ => OrderType::Market,
         };
         let price = match order.stop_type {

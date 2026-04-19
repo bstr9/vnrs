@@ -1163,6 +1163,12 @@ impl BaseGateway for BinanceSpotGateway {
                 // Market orders have no timeInForce or price
             }
             OrderType::Stop => {
+                // Stop market: STOP_LOSS requires stopPrice only
+                params.insert("stopPrice".to_string(), format_price(req.price));
+            }
+            OrderType::StopLimit => {
+                // Stop limit: STOP requires stopPrice + price (limit price)
+                params.insert("stopPrice".to_string(), format_price(req.price));
                 params.insert("price".to_string(), format_price(req.price));
             }
             _ => {

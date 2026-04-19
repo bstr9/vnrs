@@ -384,7 +384,8 @@ impl PythonEngineWrapper {
         let order_type = match order_type_str.to_uppercase().as_str() {
             "MARKET" => OrderType::Market,
             "LIMIT" => OrderType::Limit,
-            "STOP" | "STOP_LIMIT" => OrderType::Stop,
+            "STOP" => OrderType::Stop,
+            "STOP_LIMIT" => OrderType::StopLimit,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "Invalid order_type '{}'",
