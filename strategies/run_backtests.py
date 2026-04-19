@@ -34,40 +34,62 @@ def load_strategy_class(strategy_file: Path):
 
 
 def generate_synthetic_bars(num_bars: int = 500, start_price: float = 50000.0):
-    """Generate synthetic OHLCV bar data using PyBarData for backtesting."""
+    """Generate synthetic OHLCV bar data using PyBarData for backtesting.
+    
+    Generates bars spanning multiple days to ensure meaningful Sharpe ratio calculation.
+    The backtesting statistics calculate Sharpe from daily returns, so we need data
+    spanning at least several days (ideally 252+ trading days for proper annualization).
+    """
     from trade_engine import PyBarData
     
     bars = []
     price = start_price
     base_time = datetime(2024, 1, 1, 0, 0, 0)
     
-    for i in range(num_bars):
-        # Random walk with slight drift
-        change_pct = random.gauss(0.0001, 0.02)  # 0.01% drift, 2% volatility
-        open_price = price
-        close_price = price * (1 + change_pct)
-        high_price = max(open_price, close_price) * (1 + abs(random.gauss(0, 0.005)))
-        low_price = min(open_price, close_price) * (1 - abs(random.gauss(0, 0.005)))
-        volume = random.uniform(100, 1000)
+    # Calculate bars per day to span the data across ~365 days
+    # This ensures we have meaningful daily returns for Sharpe calculation
+    num_days = max(1, num_bars // 10)  # ~10 bars per day, spanning many days
+    bars_per_day = max(1, num_bars // num_days)
+    
+    bar_count = 0
+    for day in range(num_days):
+        for bar_in_day in range(bars_per_day):
+            if bar_count >= num_bars:
+                break
+            
+            # Random walk with slight drift
+            change_pct = random.gauss(0.0001, 0.02)  # 0.01% drift, 2% volatility
+            open_price = price
+            close_price = price * (1 + change_pct)
+            high_price = max(open_price, close_price) * (1 + abs(random.gauss(0, 0.005)))
+            low_price = min(open_price, close_price) * (1 - abs(random.gauss(0, 0.005)))
+            volume = random.uniform(100, 1000)
+            
+            # Spread bars throughout the day (24 hours for crypto)
+            # Each day gets bars_per_day bars spread across 24 hours
+            minutes_offset = int((bar_in_day / bars_per_day) * 24 * 60)
+            dt = base_time + timedelta(days=day, minutes=minutes_offset)
+            # PyBarData expects datetime as RFC3339 string
+            dt_str = dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+            
+            bar = PyBarData(
+                gateway_name="BACKTESTING",
+                symbol="BTCUSDT",
+                exchange="BINANCE",
+                datetime=dt_str,
+                interval="1m",
+                open_price=open_price,
+                high_price=high_price,
+                low_price=low_price,
+                close_price=close_price,
+                volume=volume,
+            )
+            bars.append(bar)
+            price = close_price
+            bar_count += 1
         
-        dt = base_time + timedelta(minutes=i)
-        # PyBarData expects datetime as RFC3339 string
-        dt_str = dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-        
-        bar = PyBarData(
-            gateway_name="BACKTESTING",
-            symbol="BTCUSDT",
-            exchange="BINANCE",
-            datetime=dt_str,
-            interval="1m",
-            open_price=open_price,
-            high_price=high_price,
-            low_price=low_price,
-            close_price=close_price,
-            volume=volume,
-        )
-        bars.append(bar)
-        price = close_price
+        if bar_count >= num_bars:
+            break
     
     return bars
 
@@ -83,7 +105,7 @@ def run_backtest_for_strategy(strategy_class, strategy_name: str, bars: list):
             vt_symbol="BTCUSDT.BINANCE",
             interval="1m",
             start="2024-01-01",
-            end="2024-01-02",
+            end="2025-01-01",  # Wide range to cover multi-day synthetic data
             rate=0.0003,  # 0.03% commission
             slippage=0.0001,  # 0.01% slippage
             size=1.0,
@@ -167,7 +189,7 @@ def main():
     # Generate synthetic data
     print("\nGenerating synthetic bar data...")
     random.seed(42)  # Deterministic for reproducibility
-    bars = generate_synthetic_bars(num_bars=500)
+    bars = generate_synthetic_bars(num_bars=5000)
     print(f"  Generated {len(bars)} bars")
     
     # Run backtests
@@ -246,7 +268,7 @@ def main():
     
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"\n## Python Strategies Backtest - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n")
-        f.write(f"**Data**: Synthetic (500 bars, 2% volatility, seed=42)\n\n")
+        f.write(f"**Data**: Synthetic ({len(bars)} bars, 2% volatility, seed=42, multi-day)\n\n")
         
         if successful:
             f.write("| Strategy | Sharpe Ratio | Max DD% | PnL ($) | Trades |\n")

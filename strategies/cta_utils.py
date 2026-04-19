@@ -13,6 +13,55 @@ from collections import deque
 from typing import Callable, Optional
 
 
+def _bar_to_dict(bar) -> dict:
+    """
+    Convert a bar object to a dict, handling both dict-style and attribute-style objects.
+    
+    Supports:
+    - Python dict: bar["close_price"]
+    - PyO3 PyBarData: bar.close_price or bar["close_price"] (if __getitem__ is defined)
+    - vnpy BarData: bar.close_price
+    """
+    if isinstance(bar, dict):
+        return bar
+    
+    # Try to convert to dict by extracting common fields
+    result = {}
+    
+    # List of fields to extract, with alternative names
+    fields = [
+        ("symbol", None),
+        ("exchange", None),
+        ("datetime", None),
+        ("interval", None),
+        ("open_price", "open"),
+        ("high_price", "high"),
+        ("low_price", "low"),
+        ("close_price", "close"),
+        ("volume", None),
+        ("turnover", None),
+        ("open_interest", None),
+        ("gateway_name", None),
+    ]
+    
+    for primary, alt in fields:
+        # Try dict-style access first
+        if hasattr(bar, "__getitem__"):
+            try:
+                result[primary] = bar[primary]
+                continue
+            except (KeyError, TypeError):
+                pass
+        
+        # Try attribute access
+        if hasattr(bar, primary):
+            result[primary] = getattr(bar, primary)
+        elif alt and hasattr(bar, alt):
+            result[primary] = getattr(bar, alt)
+    
+    return result
+
+
 class BarGenerator:
     """
     Bar generator that synthesizes X-minute bars from 1-minute bars or ticks.
@@ -40,9 +89,9 @@ class BarGenerator:
         # This is a no-op for backtesting; live trading may need implementation
         pass
 
-    def update_bar(self, bar: dict) -> None:
+    def update_bar(self, bar) -> None:
         """
-        Update with a new 1-minute bar.
+        Update with a new 1-minute bar. Supports both dict-style and attribute-style bar objects.
 
         If no window is set, passes bar directly to on_bar callback.
         If window is set, accumulates bars and calls on_window_bar when complete.
@@ -51,25 +100,28 @@ class BarGenerator:
             self.on_bar(bar)
             return
 
+        # Convert bar to dict for safe accumulation (handles both dict and attr-style objects)
+        bar_dict = _bar_to_dict(bar)
+
         # Accumulate window bars
         if self._window_bar is None:
-            self._window_bar = dict(bar)  # shallow copy
+            self._window_bar = dict(bar_dict)  # shallow copy
         else:
             # Merge OHLCV
             self._window_bar["high_price"] = max(
-                self._window_bar["high_price"], bar["high_price"]
+                self._window_bar["high_price"], bar_dict["high_price"]
             )
             self._window_bar["low_price"] = min(
-                self._window_bar["low_price"], bar["low_price"]
+                self._window_bar["low_price"], bar_dict["low_price"]
             )
-            self._window_bar["close_price"] = bar["close_price"]
-            self._window_bar["volume"] = self._window_bar.get("volume", 0) + bar.get(
+            self._window_bar["close_price"] = bar_dict["close_price"]
+            self._window_bar["volume"] = self._window_bar.get("volume", 0) + bar_dict.get(
                 "volume", 0
             )
             self._window_bar["turnover"] = self._window_bar.get(
                 "turnover", 0
-            ) + bar.get("turnover", 0)
-            self._window_bar["open_interest"] = bar.get("open_interest", 0)
+            ) + bar_dict.get("turnover", 0)
+            self._window_bar["open_interest"] = bar_dict.get("open_interest", 0)
 
         self._window_count += 1
 
@@ -115,19 +167,40 @@ class ArrayManager:
             self._turnover.append(0.0)
             self._open_interest.append(0.0)
 
-    def update_bar(self, bar: dict) -> None:
-        """Add new bar data."""
+    def update_bar(self, bar) -> None:
+        """Add new bar data. Supports both dict-style and attribute-style bar objects."""
         self.count += 1
         if self.count >= self.size:
             self.inited = True
 
-        self._open.append(bar.get("open_price", bar.get("open", 0.0)))
-        self._high.append(bar.get("high_price", bar.get("high", 0.0)))
-        self._low.append(bar.get("low_price", bar.get("low", 0.0)))
-        self._close.append(bar.get("close_price", bar.get("close", 0.0)))
-        self._volume.append(bar.get("volume", 0.0))
-        self._turnover.append(bar.get("turnover", 0.0))
-        self._open_interest.append(bar.get("open_interest", 0.0))
+        # Helper to get bar value, trying dict access first, then attribute access
+        def get_bar_value(bar, key, alt_key=None, default=0.0):
+            # Try dict-style access first (bar["close_price"])
+            if hasattr(bar, "__getitem__"):
+                try:
+                    return bar[key]
+                except (KeyError, TypeError):
+                    pass
+            # Try .get() method (dict-like)
+            if hasattr(bar, "get"):
+                try:
+                    return bar.get(key, bar.get(alt_key, default) if alt_key else default)
+                except (TypeError, AttributeError):
+                    pass
+            # Try attribute access (bar.close_price)
+            if alt_key and hasattr(bar, alt_key):
+                return getattr(bar, alt_key)
+            if hasattr(bar, key):
+                return getattr(bar, key)
+            return default
+
+        self._open.append(get_bar_value(bar, "open_price", "open"))
+        self._high.append(get_bar_value(bar, "high_price", "high"))
+        self._low.append(get_bar_value(bar, "low_price", "low"))
+        self._close.append(get_bar_value(bar, "close_price", "close"))
+        self._volume.append(get_bar_value(bar, "volume"))
+        self._turnover.append(get_bar_value(bar, "turnover"))
+        self._open_interest.append(get_bar_value(bar, "open_interest"))
 
     @property
     def open(self):

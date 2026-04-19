@@ -23,10 +23,11 @@ class TestStrategy(CtaStrategy):
     test_trigger: int = 10
 
     tick_count: int = 0
+    bar_count: int = 0
     test_all_done: bool = False
 
     parameters = ["test_trigger"]
-    variables = ["tick_count", "test_all_done"]
+    variables = ["tick_count", "bar_count", "test_all_done"]
 
     def on_init(self) -> None:
         """
@@ -85,7 +86,23 @@ class TestStrategy(CtaStrategy):
         """
         Callback of new bar data update.
         """
-        pass
+        self.bar_count += 1
+
+        # Bar-based trading logic for backtesting (on_tick is never called in bar mode)
+        price = bar["close_price"]
+
+        if self.pos == 0:
+            # Buy every 20 bars when flat
+            if self.bar_count % 20 == 0:
+                self.buy(self.vt_symbol, price, 1)
+                self.write_log(f"Bar {self.bar_count}: 买入 @ {price}")
+        elif self.pos > 0:
+            # Sell every 10 bars when long
+            if self.bar_count % 10 == 0:
+                self.sell(self.vt_symbol, price, 1)
+                self.write_log(f"Bar {self.bar_count}: 卖出 @ {price}")
+
+        self.put_event()
 
     def on_order(self, order) -> None:
         """

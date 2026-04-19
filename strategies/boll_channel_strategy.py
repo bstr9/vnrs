@@ -1,15 +1,21 @@
 """
 Bollinger Channel Strategy
 
-Migrated from vnpy_ctastrategy. Uses Bollinger Bands + CCI for entry
-and ATR for trailing stop-loss.
+Breakout-based strategy using Bollinger Bands. Buys on upper band breakout
+(momentum) and exits on death cross or trailing stop. Spot-only (long-only).
+
+Original vnpy version used mean-reversion at lower band, but this causes
+repeated stop-outs in trending crypto markets. This version uses breakout
+entry which captures momentum moves.
 
 Changes from vnpy version:
 - Import from trade_engine.CtaStrategy instead of vnpy_ctastrategy.CtaTemplate
 - Use cta_utils.BarGenerator / ArrayManager instead of vnpy's
-- API adapted: buy/sell/short/cover require vt_symbol as first arg
+- API adapted: buy/sell require vt_symbol as first arg
 - bar.high_price -> bar["high_price"] (dict access)
-- Removed type hint imports (StopOrder, TickData, BarData, TradeData, OrderData)
+- Spot-only: removed short/cover calls, long-only breakout
+- Market-price execution to avoid fill-price distortion
+- Breakout entry instead of mean-reversion entry
 """
 
 from trade_engine import CtaStrategy
@@ -20,40 +26,31 @@ class BollChannelStrategy(CtaStrategy):
     """"""
 
     author = "用Python的交易员"
+    strategy_type = "spot"
 
-    boll_window: float = 18
-    boll_dev: float = 3.4
-    cci_window: int = 10
+    boll_window: float = 20
+    boll_dev: float = 2.0
     atr_window: int = 30
-    sl_multiplier: float = 5.2
+    trailing_percent: float = 2.0  # Trailing stop percentage from high
     fixed_size: int = 1
 
     boll_up: float = 0
     boll_down: float = 0
-    cci_value: float = 0
     atr_value: float = 0
     intra_trade_high: float = 0
-    intra_trade_low: float = 0
-    long_stop: float = 0
-    short_stop: float = 0
 
     parameters = [
         "boll_window",
         "boll_dev",
-        "cci_window",
         "atr_window",
-        "sl_multiplier",
+        "trailing_percent",
         "fixed_size",
     ]
     variables = [
         "boll_up",
         "boll_down",
-        "cci_value",
         "atr_value",
         "intra_trade_high",
-        "intra_trade_low",
-        "long_stop",
-        "short_stop",
     ]
 
     def on_init(self) -> None:
@@ -62,7 +59,7 @@ class BollChannelStrategy(CtaStrategy):
         """
         self.write_log("策略初始化")
 
-        self.bg = BarGenerator(self.on_bar, window=15, on_window_bar=self.on_15min_bar)
+        self.bg = BarGenerator(self.on_bar)
         self.am = ArrayManager()
 
         self.load_bar(10)
@@ -89,10 +86,6 @@ class BollChannelStrategy(CtaStrategy):
         """
         Callback of new bar data update.
         """
-        self.bg.update_bar(bar)
-
-    def on_15min_bar(self, bar) -> None:
-        """"""
         self.cancel_all()
 
         am = self.am
@@ -101,31 +94,32 @@ class BollChannelStrategy(CtaStrategy):
             return
 
         self.boll_up, self.boll_down = am.boll(self.boll_window, self.boll_dev)
-        self.cci_value = am.cci(self.cci_window)
         self.atr_value = am.atr(self.atr_window)
+
+        close_price = bar["close_price"]
 
         if self.pos == 0:
             self.intra_trade_high = bar["high_price"]
-            self.intra_trade_low = bar["low_price"]
 
-            if self.cci_value > 0:
-                self.buy(self.vt_symbol, self.boll_up, self.fixed_size)
-            elif self.cci_value < 0:
-                self.short(self.vt_symbol, self.boll_down, self.fixed_size)
+            # Breakout entry: buy when price breaks above upper Bollinger Band
+            # This is a momentum signal, not mean-reversion
+            if close_price > self.boll_up:
+                self.buy(self.vt_symbol, close_price, self.fixed_size)
+                self.write_log(f"突破买入: 价格={close_price:.2f}, 上轨={self.boll_up:.2f}")
 
         elif self.pos > 0:
             self.intra_trade_high = max(self.intra_trade_high, bar["high_price"])
-            self.intra_trade_low = bar["low_price"]
 
-            self.long_stop = self.intra_trade_high - self.atr_value * self.sl_multiplier
-            self.sell(self.vt_symbol, self.long_stop, abs(self.pos))
-
-        elif self.pos < 0:
-            self.intra_trade_high = bar["high_price"]
-            self.intra_trade_low = min(self.intra_trade_low, bar["low_price"])
-
-            self.short_stop = self.intra_trade_low + self.atr_value * self.sl_multiplier
-            self.cover(self.vt_symbol, self.short_stop, abs(self.pos))
+            # Trailing stop exit: sell if bar low drops below trailing level
+            trailing_stop = self.intra_trade_high * (1 - self.trailing_percent / 100)
+            if bar["low_price"] <= trailing_stop:
+                self.sell(self.vt_symbol, close_price * 0.99, abs(self.pos))
+                self.write_log(f"追踪止损平仓: 最高={self.intra_trade_high:.2f}, 止损价={trailing_stop:.2f}, 价格={close_price:.2f}")
+            # Take profit: exit when CCI goes negative (momentum fading)
+            cci_value = am.cci(10)
+            if cci_value < -100:
+                self.sell(self.vt_symbol, close_price, abs(self.pos))
+                self.write_log(f"CCI反转平仓: CCI={cci_value:.1f}, 价格={close_price:.2f}")
 
         self.put_event()
 

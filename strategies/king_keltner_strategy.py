@@ -2,16 +2,19 @@
 King Keltner Strategy
 
 Migrated from vnpy_ctastrategy. Uses Keltner Channel for breakout entry
-with OCO (One-Cancels-Other) order pattern and trailing stop exits.
+with trailing stop exits. Spot-only (long-only) version.
 
 Changes from vnpy version:
 - Import from trade_engine.CtaStrategy instead of vnpy_ctastrategy.CtaTemplate
 - Use cta_utils.BarGenerator / ArrayManager instead of vnpy's
 - bar.high_price -> bar["high_price"], bar.low_price -> bar["low_price"], etc.
-- stop=True parameter removed from buy/sell/short/cover calls
-  (vnrs does not support stop orders via Python API in the same way)
-- BarGenerator uses keyword arguments: window=5, on_window_bar=self.on_5min_bar
-- Removed StopOrder, TickData, BarData, TradeData, OrderData type hints
+- Market-price execution instead of limit orders at band prices
+  (limit orders at kk_up caused unrealistic fill-price distortion in backtest)
+- Trailing stop uses bar-price-check pattern instead of limit sell orders
+- BarGenerator uses no window aggregation (1-min bars directly)
+  so ArrayManager inits within 500 bars
+- Spot-only: removed short/cover, buy on upper band breakout only
+- Explicit strategy_type = "spot"
 """
 
 from trade_engine import CtaStrategy
@@ -22,10 +25,11 @@ class KingKeltnerStrategy(CtaStrategy):
     """"""
 
     author = "用Python的交易员"
+    strategy_type = "spot"
 
     kk_length: int = 11
     kk_dev: float = 1.6
-    trailing_percent: float = 0.8
+    trailing_percent: float = 3.5
     fixed_size: int = 1
 
     kk_up: float = 0
@@ -42,14 +46,8 @@ class KingKeltnerStrategy(CtaStrategy):
         """
         self.write_log("策略初始化")
 
-        self.bg: BarGenerator = BarGenerator(
-            self.on_bar, window=5, on_window_bar=self.on_5min_bar
-        )
+        self.bg: BarGenerator = BarGenerator(self.on_bar)
         self.am: ArrayManager = ArrayManager()
-
-        self.long_vt_orderids: list[str] = []
-        self.short_vt_orderids: list[str] = []
-        self.vt_orderids: list[str] = []
 
         self.load_bar(10)
 
@@ -75,14 +73,6 @@ class KingKeltnerStrategy(CtaStrategy):
         """
         Callback of new bar data update.
         """
-        self.bg.update_bar(bar)
-
-    def on_5min_bar(self, bar) -> None:
-        """"""
-        for orderid in self.vt_orderids:
-            self.cancel_order(orderid)
-        self.vt_orderids.clear()
-
         am: ArrayManager = self.am
         am.update_bar(bar)
         if not am.inited:
@@ -90,32 +80,24 @@ class KingKeltnerStrategy(CtaStrategy):
 
         self.kk_up, self.kk_down = am.keltner(self.kk_length, self.kk_dev)
 
+        close_price: float = bar["close_price"]
+
         if self.pos == 0:
             self.intra_trade_high = bar["high_price"]
             self.intra_trade_low = bar["low_price"]
-            self.send_oco_order(self.kk_up, self.kk_down, self.fixed_size)
+            # Spot-only: buy on upper band breakout at market price
+            if close_price > self.kk_up:
+                self.buy(self.vt_symbol, close_price, self.fixed_size)
 
         elif self.pos > 0:
             self.intra_trade_high = max(self.intra_trade_high, bar["high_price"])
             self.intra_trade_low = bar["low_price"]
 
-            sell_orderids: list[str] = self.sell(
-                self.vt_symbol,
-                self.intra_trade_high * (1 - self.trailing_percent / 100),
-                abs(self.pos),
-            )
-            self.vt_orderids.extend(sell_orderids)
-
-        elif self.pos < 0:
-            self.intra_trade_high = bar["high_price"]
-            self.intra_trade_low = min(self.intra_trade_low, bar["low_price"])
-
-            cover_orderids: list[str] = self.cover(
-                self.vt_symbol,
-                self.intra_trade_low * (1 + self.trailing_percent / 100),
-                abs(self.pos),
-            )
-            self.vt_orderids.extend(cover_orderids)
+            # Trailing stop: check if bar's low crossed the trailing level
+            trailing_stop_price: float = self.intra_trade_high * (1 - self.trailing_percent / 100)
+            if bar["low_price"] <= trailing_stop_price:
+                self.sell(self.vt_symbol, close_price * 0.99, abs(self.pos))
+                self.write_log("追踪止损平仓")
 
         self.put_event()
 
@@ -129,27 +111,4 @@ class KingKeltnerStrategy(CtaStrategy):
         """
         Callback of new trade data update.
         """
-        if self.pos != 0:
-            if self.pos > 0:
-                for short_orderid in self.short_vt_orderids:
-                    self.cancel_order(short_orderid)
-
-            elif self.pos < 0:
-                for buy_orderid in self.long_vt_orderids:
-                    self.cancel_order(buy_orderid)
-
-            for orderid in self.long_vt_orderids + self.short_vt_orderids:
-                if orderid in self.vt_orderids:
-                    self.vt_orderids.remove(orderid)
-
         self.put_event()
-
-    def send_oco_order(
-        self, buy_price: float, short_price: float, volume: float
-    ) -> None:
-        """"""
-        self.long_vt_orderids = self.buy(self.vt_symbol, buy_price, volume)
-        self.short_vt_orderids = self.short(self.vt_symbol, short_price, volume)
-
-        self.vt_orderids.extend(self.long_vt_orderids)
-        self.vt_orderids.extend(self.short_vt_orderids)

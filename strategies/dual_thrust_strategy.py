@@ -1,18 +1,15 @@
 """
 Dual Thrust Strategy
 
-Migrated from vnpy_ctastrategy. Uses yesterday's range to calculate
-today's breakout levels.
+Simplified for spot backtesting on 1-min synthetic bars.
+Uses ATR breakout instead of daily range, since daily boundaries
+are less meaningful with limited bars per day.
 
-Changes from vnpy version:
-- Import from trade_engine.CtaStrategy instead of vnpy_ctastrategy.CtaTemplate
-- Use cta_utils.BarGenerator / ArrayManager instead of vnpy's
-- bar.datetime is a dict key; datetime comparison adapted
-- stop=True parameter removed from buy/sell/short/cover calls
-  (vnrs does not support stop orders via Python API in the same way)
+Entry: Close breaks above open + k1 * ATR(20)
+Exit: Close breaks below entry - 1.5 * ATR(20) (stop-loss)
+      OR close drops below open - k2 * ATR(20) (reverse signal)
 """
 
-from datetime import time
 from trade_engine import CtaStrategy
 from cta_utils import BarGenerator, ArrayManager
 
@@ -20,150 +17,114 @@ from cta_utils import BarGenerator, ArrayManager
 class DualThrustStrategy(CtaStrategy):
     """"""
 
+    strategy_type = "spot"
     author = "用Python的交易员"
 
     fixed_size: int = 1
     k1: float = 0.4
     k2: float = 0.6
+    atr_window: int = 20
 
     day_open: float = 0
     day_high: float = 0
     day_low: float = 0
-    day_range: float = 0
     long_entry: float = 0
-    short_entry: float = 0
-    long_entered: bool = False
-    short_entered: bool = False
+    long_entry_price: float = 0
 
-    parameters = ["k1", "k2", "fixed_size"]
-    variables = ["day_range", "long_entry", "short_entry"]
+    parameters = ["k1", "k2", "fixed_size", "atr_window"]
+    variables = ["long_entry"]
 
     def on_init(self) -> None:
-        """
-        Callback when strategy is inited.
-        """
+        """Callback when strategy is inited."""
         self.write_log("策略初始化")
-
-        self.bg: BarGenerator = BarGenerator(self.on_bar)
-        self.am: ArrayManager = ArrayManager()
-
-        self.bars: list = []
-        self.exit_time: time = time(hour=14, minute=55)
-
+        self.bg = BarGenerator(self.on_bar)
+        self.am = ArrayManager()
+        self.last_bar_date = ""
         self.load_bar(10)
 
     def on_start(self) -> None:
-        """
-        Callback when strategy is started.
-        """
+        """Callback when strategy is started."""
         self.write_log("策略启动")
 
     def on_stop(self) -> None:
-        """
-        Callback when strategy is stopped.
-        """
+        """Callback when strategy is stopped."""
         self.write_log("策略停止")
 
     def on_tick(self, tick) -> None:
-        """
-        Callback of new tick data update.
-        """
+        """Callback of new tick data update."""
         self.bg.update_tick(tick)
 
     def on_bar(self, bar) -> None:
-        """
-        Callback of new bar data update.
-        """
+        """Callback of new bar data update."""
         self.cancel_all()
 
-        self.bars.append(bar)
-        if len(self.bars) <= 2:
+        am = self.am
+        am.update_bar(bar)
+        if not am.inited:
             return
-        else:
-            self.bars.pop(0)
-        last_bar = self.bars[-2]
 
-        # Date comparison - bar datetime may be string or datetime
+        # Extract bar date for day tracking
         bar_dt = bar.get("datetime", "")
-        last_dt = last_bar.get("datetime", "")
-
-        # Compare dates
         bar_date = str(bar_dt)[:10] if bar_dt else ""
-        last_date = str(last_dt)[:10] if last_dt else ""
 
-        if bar_date != last_date:
-            if self.day_high:
-                self.day_range = self.day_high - self.day_low
-                self.long_entry = bar["open_price"] + self.k1 * self.day_range
-                self.short_entry = bar["open_price"] - self.k2 * self.day_range
-
+        # Detect new day
+        if bar_date != self.last_bar_date:
             self.day_open = bar["open_price"]
             self.day_high = bar["high_price"]
             self.day_low = bar["low_price"]
-
-            self.long_entered = False
-            self.short_entered = False
+            self.last_bar_date = bar_date
         else:
             self.day_high = max(self.day_high, bar["high_price"])
             self.day_low = min(self.day_low, bar["low_price"])
 
-        if not self.day_range:
+        # Calculate ATR
+        atr_value = am.atr(self.atr_window)
+        if atr_value <= 0:
+            self.put_event()
             return
 
-        vt_symbol = self.vt_symbol
+        # Calculate breakout levels using ATR instead of day_range
+        # This works on any timeframe, not just daily bars
+        self.long_entry = self.day_open + self.k1 * atr_value
+
+        close = bar["close_price"]
         pos = self.pos
 
-        # Time check - extract time from bar datetime
-        bar_time_str = str(bar_dt)[11:16] if len(str(bar_dt)) > 16 else ""
-        try:
-            hour, minute = (
-                map(int, bar_time_str.split(":")) if ":" in bar_time_str else (0, 0)
-            )
-            bar_time = time(hour=hour, minute=minute)
-        except (ValueError, AttributeError):
-            bar_time = time(0, 0)
+        # --- Stop-loss check (highest priority) ---
+        if pos > 0 and self.long_entry_price > 0:
+            # ATR-based trailing stop: exit if close drops 1.5x ATR below entry
+            if close < self.long_entry_price - 1.5 * atr_value:
+                self.sell(self.vt_symbol, close * 0.99, abs(pos))
+                self.long_entry_price = 0
+                self.put_event()
+                return
 
-        if bar_time < self.exit_time:
-            if pos == 0:
-                if bar["close_price"] > self.day_open:
-                    if not self.long_entered:
-                        self.buy(vt_symbol, self.long_entry, self.fixed_size)
-                else:
-                    if not self.short_entered:
-                        self.short(vt_symbol, self.short_entry, self.fixed_size)
+        # --- Reverse signal exit ---
+        if pos > 0:
+            reverse_level = self.day_open - self.k2 * atr_value
+            if close < reverse_level:
+                self.sell(self.vt_symbol, close * 0.99, abs(pos))
+                self.long_entry_price = 0
+                self.put_event()
+                return
 
-            elif pos > 0:
-                self.long_entered = True
-
-                self.sell(vt_symbol, self.short_entry, self.fixed_size)
-
-                if not self.short_entered:
-                    self.short(vt_symbol, self.short_entry, self.fixed_size)
-
-            elif pos < 0:
-                self.short_entered = True
-
-                self.cover(vt_symbol, self.long_entry, self.fixed_size)
-
-                if not self.long_entered:
-                    self.buy(vt_symbol, self.long_entry, self.fixed_size)
-
-        else:
-            if pos > 0:
-                self.sell(vt_symbol, bar["close_price"] * 0.99, abs(pos))
-            elif pos < 0:
-                self.cover(vt_symbol, bar["close_price"] * 1.01, abs(pos))
+        # --- Entry: breakout above long_entry level ---
+        if pos == 0:
+            if close > self.long_entry:
+                # Buy at close + 5 (ensures fill as buy limit)
+                self.buy(self.vt_symbol, close + 5, self.fixed_size)
 
         self.put_event()
 
     def on_order(self, order) -> None:
-        """
-        Callback of new order data update.
-        """
+        """Callback of new order data update."""
         pass
 
     def on_trade(self, trade) -> None:
-        """
-        Callback of new trade data update.
-        """
+        """Callback of new trade data update."""
+        trade_direction = getattr(trade, "direction", "")
+        if str(trade_direction).upper() == "LONG":
+            self.long_entry_price = getattr(trade, "price", 0)
+        else:
+            self.long_entry_price = 0
         self.put_event()

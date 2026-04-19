@@ -6289,6 +6289,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "ta",
+ "tempfile",
  "tokio",
  "tokio-socks",
  "tokio-test",
