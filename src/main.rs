@@ -66,15 +66,16 @@ impl TradeEngineApp {
         let binance_spot = Arc::new(BinanceSpotGateway::new("BINANCE_SPOT"));
         let binance_usdt = Arc::new(BinanceUsdtGateway::new("BINANCE_USDT"));
         
-        // Set event senders for gateways (run async task)
+        // Set event senders for gateways synchronously BEFORE adding to engine
+        // This ensures event_sender is ready when connect() is called
         {
             let spot_sender = GatewayEventSender::new("BINANCE_SPOT".to_string(), event_sender.clone());
             let usdt_sender = GatewayEventSender::new("BINANCE_USDT".to_string(), event_sender.clone());
-            let spot = binance_spot.clone();
-            let usdt = binance_usdt.clone();
-            runtime.spawn(async move {
-                spot.set_event_sender(spot_sender).await;
-                usdt.set_event_sender(usdt_sender).await;
+            // Use block_on to ensure this completes before proceeding
+            let rt = runtime.clone();
+            rt.block_on(async {
+                binance_spot.set_event_sender(spot_sender).await;
+                binance_usdt.set_event_sender(usdt_sender).await;
             });
         }
         
@@ -116,7 +117,7 @@ impl TradeEngineApp {
             {
                 let se = strategy_engine.clone();
                 runtime.spawn(async move {
-                    se.init().await;
+                    se.init();
                 });
             }
             main_window.set_strategy_engine(strategy_engine);
