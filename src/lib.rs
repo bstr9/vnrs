@@ -89,6 +89,8 @@ pub use trader::{
     OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId,
     // Contract manager
     ContractManager,
+    // Trading session manager
+    TradingSessionManager, TradingSession,
 };
 
 // Re-export Binance gateways

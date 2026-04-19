@@ -834,6 +834,9 @@ impl StrategyEngine {
             close_info.retain(|_, info| info.strategy_name != strategy_name);
         }
 
+        // Unregister bar synthesizers for this strategy
+        self.unregister_bar_synthesizers(strategy_name).await;
+
         tracing::info!("Strategy {} removed", strategy_name);
         Ok(())
     }

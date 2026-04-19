@@ -45,6 +45,7 @@ pub mod stop_order;
 pub mod sync_bar_generator;
 pub mod utility;
 pub mod order_emulator;
+pub mod session;
 
 #[cfg(feature = "sqlite")]
 pub mod sqlite_database;
@@ -83,6 +84,7 @@ pub use risk::{DailyStats, RiskCheckResult, RiskConfig, RiskManager};
 pub use setting::{Settings, SettingValue, SETTINGS};
 pub use stop_order::{StopOrderEngine, StopOrder, StopOrderRequest, StopOrderType, StopOrderStatus, StopOrderId};
 pub use order_emulator::{OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId, EmulatorSendOrderCallback, EmulatorCancelOrderCallback};
+pub use session::{TradingSessionManager, TradingSession};
 pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use bar_synthesizer::BarSynthesizer;
 pub use utility::{
