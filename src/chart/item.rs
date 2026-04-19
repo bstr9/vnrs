@@ -2,6 +2,7 @@
 
 use super::base::{BAR_WIDTH, BLACK_COLOR, DOWN_COLOR, STAY_COLOR, UP_COLOR};
 use super::manager::BarManager;
+use crate::trader::{Direction, Offset, TradeData};
 use egui::{Pos2, Rect, Stroke, Ui};
 
 /// Trait for chart items that can be drawn
@@ -309,6 +310,88 @@ impl TradeOverlay {
     pub fn clear(&mut self) {
         self.markers.clear();
         self.pairs.clear();
+    }
+
+    /// Populate from a list of trades, converting TradeData to TradeMarker
+    /// and building trade pairs for visual profit/loss lines
+    pub fn from_trades(trades: &[TradeData]) -> Self {
+        let mut overlay = Self::new();
+
+        // First pass: add markers
+        for trade in trades {
+            let direction = match (trade.direction, trade.offset) {
+                (Some(Direction::Long), Offset::Open) => TradeDirection::Buy,
+                (Some(Direction::Short), Offset::Close) => TradeDirection::Sell,
+                (Some(Direction::Short), Offset::Open) => TradeDirection::Short,
+                (Some(Direction::Long), Offset::Close | Offset::CloseToday | Offset::CloseYesterday) => TradeDirection::Cover,
+                _ => continue,
+            };
+
+            overlay.add_marker(TradeMarker {
+                datetime: trade.datetime.unwrap_or_else(chrono::Utc::now),
+                price: trade.price,
+                direction,
+                volume: trade.volume,
+            });
+        }
+
+        // Build trade pairs
+        overlay.build_pairs_from_trades(trades);
+
+        overlay
+    }
+
+    /// Populate trade pairs by matching open/close trades
+    /// This creates visual profit/loss lines between entry and exit
+    pub fn build_pairs_from_trades(&mut self, trades: &[TradeData]) {
+        // Simple matching: each close trade pairs with the most recent open of the same symbol
+        let mut pending_opens: Vec<(TradeData, TradeDirection)> = Vec::new();
+
+        for trade in trades {
+            let direction = match (trade.direction, trade.offset) {
+                (Some(Direction::Long), Offset::Open) => TradeDirection::Buy,
+                (Some(Direction::Short), Offset::Close) => TradeDirection::Sell,
+                (Some(Direction::Short), Offset::Open) => TradeDirection::Short,
+                (Some(Direction::Long), Offset::Close | Offset::CloseToday | Offset::CloseYesterday) => TradeDirection::Cover,
+                _ => continue,
+            };
+
+            match direction {
+                TradeDirection::Buy | TradeDirection::Short => {
+                    // Open position
+                    pending_opens.push((trade.clone(), direction));
+                }
+                TradeDirection::Sell | TradeDirection::Cover => {
+                    // Close position - find matching open
+                    let open_dir = if direction == TradeDirection::Sell {
+                        TradeDirection::Buy
+                    } else {
+                        TradeDirection::Short
+                    };
+
+                    // Find the most recent matching open
+                    if let Some(idx) = pending_opens.iter().rposition(|(_, d)| *d == open_dir) {
+                        let (open_trade, open_dir) = pending_opens.remove(idx);
+
+                        let is_profit = match open_dir {
+                            TradeDirection::Buy => trade.price > open_trade.price,
+                            TradeDirection::Short => trade.price < open_trade.price,
+                            _ => false,
+                        };
+
+                        self.add_pair(TradePair {
+                            open_datetime: open_trade.datetime.unwrap_or_else(chrono::Utc::now),
+                            open_price: open_trade.price,
+                            close_datetime: trade.datetime.unwrap_or_else(chrono::Utc::now),
+                            close_price: trade.price,
+                            direction: open_dir,
+                            volume: trade.volume.min(open_trade.volume),
+                            is_profit,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     /// Draw trade overlay on the candle chart

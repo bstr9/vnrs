@@ -24,7 +24,7 @@ mod widget;
 
 pub use base::*;
 pub use indicator::*;
-pub use item::{CandleItem, ChartItem, VolumeItem};
+pub use item::{CandleItem, ChartItem, TradeDirection, TradeMarker, TradeOverlay, TradePair, VolumeItem};
 pub use manager::BarManager;
 // Re-export from trader module (SynchronizedBarGenerator is not a GUI component)
 pub use crate::trader::{SynchronizedBarGenerator, SynchronizedBars};
