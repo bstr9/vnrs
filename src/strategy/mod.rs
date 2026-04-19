@@ -12,5 +12,5 @@ pub use template::{StrategyTemplate, StrategyContext};
 #[cfg(feature = "gui")]
 pub use template::IndicatorRef;
 pub use engine::StrategyEngine;
-pub use base::{StrategyType, StrategyState, StopOrder, StopOrderStatus};
+pub use base::{StrategyType, StrategyState, StopOrder, StopOrderStatus, StopOrderRequest, CancelRequestType};
 pub use volatility::VolatilityStrategy;

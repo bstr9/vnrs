@@ -15,4 +15,5 @@ pub use config::{BinanceConfigs, BinanceGatewayConfig};
 pub use spot_gateway::BinanceSpotGateway;
 pub use usdt_gateway::BinanceUsdtGateway;
 pub use rest_client::BinanceRestClient;
+pub use websocket_client::{BinanceWebSocketClient, ConnectionManager};
 pub use constants::*;

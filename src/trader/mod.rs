@@ -25,6 +25,7 @@ pub mod app;
 pub mod bar_synthesizer;
 pub mod bracket_order;
 pub mod constant;
+pub mod contract_manager;
 pub mod converter;
 pub mod database;
 pub mod data_download;
@@ -45,6 +46,9 @@ pub mod sync_bar_generator;
 pub mod utility;
 pub mod order_emulator;
 
+#[cfg(feature = "sqlite")]
+pub mod sqlite_database;
+
 #[cfg(feature = "gui")]
 pub mod ui;
 
@@ -56,8 +60,11 @@ pub use bracket_order::{BracketOrderEngine, ContingencyType, OrderGroupState, Or
 pub use constant::{
     Currency, Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status,
 };
+pub use contract_manager::ContractManager;
 pub use converter::{OffsetConverter, PositionHolding};
 pub use database::{BarOverview, BaseDatabase, EventRecord, FileDatabase, MemoryDatabase, TickOverview};
+#[cfg(feature = "sqlite")]
+pub use sqlite_database::SqliteDatabase;
 pub use data_download::{DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult};
 pub use datafeed::{BaseDatafeed, EmptyDatafeed};
 pub use engine::{BaseEngine, LogEngine, MainEngine, OmsEngine};

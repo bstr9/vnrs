@@ -15,7 +15,7 @@ use crate::event::EventEngine;
 use super::template::{StrategyTemplate, StrategyContext};
 use super::base::{
     StrategyState, StopOrder, StopOrderStatus, 
-    StrategySetting
+    StrategySetting, StopOrderRequest, CancelRequestType
 };
 
 // Event type constants for strategy
@@ -1130,6 +1130,116 @@ impl StrategyEngine {
             results.push(result);
         }
         results
+    }
+
+    /// Process pending stop orders from a strategy (called after on_bar/on_tick callbacks)
+    ///
+    /// Registers stop orders with the engine. When the trigger price is reached,
+    /// the stop order will be converted to a market/limit order.
+    pub async fn process_pending_stop_orders(&self, strategy_name: &str) -> Vec<String> {
+        let pending: Vec<StopOrderRequest> = {
+            let mut strategies = self.strategies.write().await;
+            if let Some(strategy) = strategies.get_mut(strategy_name) {
+                strategy.drain_pending_stop_orders()
+            } else {
+                return Vec::new()
+            }
+        };
+
+        let mut results = Vec::new();
+        for req in pending {
+            let stop_orderid = self.register_stop_order(strategy_name, req).await;
+            results.push(stop_orderid);
+        }
+        results
+    }
+
+    /// Process pending cancellations from a strategy (called after on_bar/on_tick callbacks)
+    ///
+    /// Handles both regular order and stop order cancellation requests.
+    pub async fn process_pending_cancellations(&self, strategy_name: &str) -> Vec<Result<(), String>> {
+        let pending: Vec<CancelRequestType> = {
+            let mut strategies = self.strategies.write().await;
+            if let Some(strategy) = strategies.get_mut(strategy_name) {
+                strategy.drain_pending_cancellations()
+            } else {
+                return Vec::new()
+            }
+        };
+
+        let mut results = Vec::new();
+        for cancel_req in pending {
+            let result = match cancel_req {
+                CancelRequestType::Order(vt_orderid) => {
+                    self.cancel_strategy_order(strategy_name, &vt_orderid).await
+                }
+                CancelRequestType::StopOrder(stop_orderid) => {
+                    self.cancel_strategy_stop_order(&stop_orderid).await
+                }
+            };
+            results.push(result);
+        }
+        results
+    }
+
+    /// Register a stop order for a strategy
+    ///
+    /// Creates a StopOrder tracked by the engine. When the trigger price is reached
+    /// (checked in process_tick_event), the stop order will be submitted as a
+    /// market/limit order through the gateway.
+    async fn register_stop_order(&self, strategy_name: &str, req: StopOrderRequest) -> String {
+        let stop_orderid = {
+            let mut count = self.stop_order_count.lock()
+                .unwrap_or_else(|e| e.into_inner());
+            *count += 1;
+            format!("{}.{}{}", strategy_name, super::base::STOPORDER_PREFIX, count)
+        };
+
+        let mut stop_order = StopOrder::new(
+            stop_orderid.clone(),
+            req.vt_symbol,
+            req.direction,
+            req.offset,
+            req.price,
+            req.volume,
+            req.order_type,
+            strategy_name.to_string(),
+        );
+        stop_order.lock = req.lock;
+
+        self.stop_orders.write().await.insert(stop_orderid.clone(), stop_order);
+
+        tracing::info!(
+            "策略{}注册止损单: {} 价格={} 方向={:?}",
+            strategy_name, stop_orderid, req.price, req.direction
+        );
+
+        stop_orderid
+    }
+
+    /// Cancel a stop order on behalf of a strategy
+    async fn cancel_strategy_stop_order(&self, stop_orderid: &str) -> Result<(), String> {
+        let mut stop_orders = self.stop_orders.write().await;
+        let stop_order = stop_orders.get_mut(stop_orderid)
+            .ok_or_else(|| format!("止损单{}不存在", stop_orderid))?;
+
+        if stop_order.status != StopOrderStatus::Waiting {
+            return Err(format!("止损单{}状态不是Waiting，无法取消", stop_orderid));
+        }
+
+        stop_order.status = StopOrderStatus::Cancelled;
+        tracing::info!("止损单{}已取消", stop_orderid);
+        Ok(())
+    }
+
+    /// Process all pending actions from a strategy (orders, stop orders, cancellations)
+    ///
+    /// Convenience method that calls process_pending_orders, process_pending_stop_orders,
+    /// and process_pending_cancellations in sequence.
+    pub async fn process_all_pending(&self, strategy_name: &str) {
+        self.process_pending_orders(strategy_name).await;
+        self.process_pending_stop_orders(strategy_name).await;
+        self.process_pending_cancellations(strategy_name).await;
     }
 
     /// Cancel an order on behalf of a strategy

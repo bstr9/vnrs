@@ -576,7 +576,7 @@ impl BinanceWebSocketClient {
 
     /// Calculate exponential backoff delay with jitter for reconnect attempts.
     /// Base: 1s, doubles each attempt, capped at 60s, ±25% jitter.
-    fn calculate_backoff_delay(attempt: u32) -> std::time::Duration {
+    pub fn calculate_backoff_delay(attempt: u32) -> std::time::Duration {
         let base_secs: u64 = 1u64.checked_shl(attempt).unwrap_or(60).min(60);
         // Simple jitter using SystemTime as entropy source (no external rand crate)
         let jitter_nanos = std::time::SystemTime::now()
@@ -706,5 +706,233 @@ impl BinanceWebSocketClient {
 impl Default for BinanceWebSocketClient {
     fn default() -> Self {
         Self::new("BINANCE")
+    }
+}
+
+/// Connection manager that provides automatic reconnection with exponential backoff.
+///
+/// Wraps a `BinanceWebSocketClient` and sets up the `on_disconnect` callback
+/// to trigger automatic reconnect and re-subscription when the connection drops.
+///
+/// # Usage
+/// ```ignore
+/// let ws = Arc::new(BinanceWebSocketClient::new("BINANCE_SPOT"));
+/// let manager = ConnectionManager::new(ws.clone(), "BINANCE_SPOT");
+/// manager.enable_auto_reconnect().await;
+/// // Now if the WebSocket disconnects unexpectedly, it will auto-reconnect
+/// ```
+pub struct ConnectionManager {
+    /// The WebSocket client being managed
+    ws: Arc<BinanceWebSocketClient>,
+    /// Gateway name for logging
+    gateway_name: String,
+    /// Whether auto-reconnect is enabled
+    auto_reconnect_enabled: Arc<AtomicBool>,
+    /// Maximum number of reconnect attempts before giving up (0 = unlimited)
+    max_reconnect_attempts: u32,
+    /// Custom reconnect callback (called after successful reconnect, before re-subscription)
+    on_reconnected: Arc<RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>,
+}
+
+impl ConnectionManager {
+    /// Create a new connection manager for the given WebSocket client
+    pub fn new(ws: Arc<BinanceWebSocketClient>, gateway_name: &str) -> Self {
+        Self {
+            ws,
+            gateway_name: gateway_name.to_string(),
+            auto_reconnect_enabled: Arc::new(AtomicBool::new(false)),
+            max_reconnect_attempts: 0, // unlimited by default
+            on_reconnected: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Set maximum reconnect attempts (0 = unlimited)
+    pub fn with_max_reconnect_attempts(mut self, max: u32) -> Self {
+        self.max_reconnect_attempts = max;
+        self
+    }
+
+    /// Set a custom callback invoked after successful reconnection (before re-subscription).
+    /// This is useful for gateways that need to re-establish state (e.g., user data stream listen key).
+    pub async fn set_on_reconnected(&self, callback: Arc<dyn Fn() + Send + Sync>) {
+        *self.on_reconnected.write().await = Some(callback);
+    }
+
+    /// Enable automatic reconnection.
+    ///
+    /// Sets the `on_disconnect` callback on the WebSocket client. When the connection
+    /// drops unexpectedly (not via `disconnect()`), the manager will:
+    /// 1. Wait with exponential backoff
+    /// 2. Attempt to reconnect
+    /// 3. Re-subscribe to all tracked channels
+    /// 4. Invoke the `on_reconnected` callback if set
+    pub async fn enable_auto_reconnect(&self) {
+        self.auto_reconnect_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let ws = self.ws.clone();
+        let gateway_name = self.gateway_name.clone();
+        let max_attempts = self.max_reconnect_attempts;
+        let on_reconnected = self.on_reconnected.clone();
+        let auto_enabled = self.auto_reconnect_enabled.clone();
+
+        let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            let ws = ws.clone();
+            let gateway_name = gateway_name.clone();
+            let on_reconnected = on_reconnected.clone();
+            let auto_enabled = auto_enabled.clone();
+
+            tokio::spawn(async move {
+                if !auto_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+                    info!("{}: Auto-reconnect disabled, skipping", gateway_name);
+                    return;
+                }
+
+                warn!("{}: 连接断开，开始自动重连...", gateway_name);
+
+                let mut attempt = 0u32;
+                loop {
+                    if !auto_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+                        info!("{}: Auto-reconnect disabled during retry, aborting", gateway_name);
+                        return;
+                    }
+
+                    // Check max attempts
+                    if max_attempts > 0 && attempt >= max_attempts {
+                        error!(
+                            "{}: 达到最大重连次数 {}，放弃重连",
+                            gateway_name, max_attempts
+                        );
+                        return;
+                    }
+
+                    attempt += 1;
+                    let delay = BinanceWebSocketClient::calculate_backoff_delay(attempt - 1);
+                    info!(
+                        "{}: 重连尝试 {}/{}, 等待 {:?}",
+                        gateway_name,
+                        attempt,
+                        if max_attempts > 0 { max_attempts.to_string() } else { "∞".to_string() },
+                        delay
+                    );
+                    tokio::time::sleep(delay).await;
+
+                    match ws.reconnect().await {
+                        Ok(()) => {
+                            info!("{}: 重连成功", gateway_name);
+
+                            // Invoke on_reconnected callback (e.g., re-establish user data stream)
+                            if let Some(cb) = on_reconnected.read().await.as_ref() {
+                                cb();
+                            }
+
+                            // Re-subscribe to tracked channels
+                            match ws.resubscribe().await {
+                                Ok(()) => {
+                                    info!("{}: 重新订阅成功", gateway_name);
+                                }
+                                Err(e) => {
+                                    warn!("{}: 重新订阅失败: {}", gateway_name, e);
+                                }
+                            }
+
+                            return; // Successfully reconnected
+                        }
+                        Err(e) => {
+                            warn!("{}: 重连失败 (尝试 {}): {}", gateway_name, attempt, e);
+                            // Continue loop to try again
+                        }
+                    }
+                }
+            });
+        });
+
+        self.ws.set_on_disconnect(callback).await;
+        info!("{}: 自动重连已启用", self.gateway_name);
+    }
+
+    /// Disable automatic reconnection
+    pub fn disable_auto_reconnect(&self) {
+        self.auto_reconnect_enabled.store(false, std::sync::atomic::Ordering::SeqCst);
+        info!("{}: 自动重连已禁用", self.gateway_name);
+    }
+
+    /// Check if auto-reconnect is enabled
+    pub fn is_auto_reconnect_enabled(&self) -> bool {
+        self.auto_reconnect_enabled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_backoff_delay_first_attempt() {
+        let delay = BinanceWebSocketClient::calculate_backoff_delay(0);
+        // First attempt: base = 1s, with jitter ±25%, so [0.75s, 1.25s]
+        assert!(delay.as_secs() >= 1);
+        assert!(delay.as_secs() <= 2);
+    }
+
+    #[test]
+    fn test_calculate_backoff_delay_capped() {
+        // Very high attempt number should cap at 60s
+        let delay = BinanceWebSocketClient::calculate_backoff_delay(100);
+        assert!(delay.as_secs() <= 75); // 60s + 25% jitter
+    }
+
+    #[test]
+    fn test_calculate_backoff_delay_increasing() {
+        let d1 = BinanceWebSocketClient::calculate_backoff_delay(1);
+        let d2 = BinanceWebSocketClient::calculate_backoff_delay(3);
+        // d2 should generally be longer than d1 (ignoring jitter edge cases)
+        // Just check d2 is at least 2 seconds (2^3=8s base, minus max jitter)
+        assert!(d2.as_secs() >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_connection_manager_new() {
+        let ws = Arc::new(BinanceWebSocketClient::new("TEST_GW"));
+        let manager = ConnectionManager::new(ws, "TEST_GW");
+        assert!(!manager.is_auto_reconnect_enabled());
+    }
+
+    #[tokio::test]
+    async fn test_connection_manager_enable_disable() {
+        let ws = Arc::new(BinanceWebSocketClient::new("TEST_GW"));
+        let manager = ConnectionManager::new(ws, "TEST_GW");
+
+        assert!(!manager.is_auto_reconnect_enabled());
+        manager.enable_auto_reconnect().await;
+        assert!(manager.is_auto_reconnect_enabled());
+
+        manager.disable_auto_reconnect();
+        assert!(!manager.is_auto_reconnect_enabled());
+    }
+
+    #[tokio::test]
+    async fn test_connection_manager_with_max_attempts() {
+        let ws = Arc::new(BinanceWebSocketClient::new("TEST_GW"));
+        let manager = ConnectionManager::new(ws, "TEST_GW").with_max_reconnect_attempts(5);
+        assert!(!manager.is_auto_reconnect_enabled());
+        // Just verify construction works - max_attempts is used internally
+        manager.enable_auto_reconnect().await;
+        assert!(manager.is_auto_reconnect_enabled());
+    }
+
+    #[tokio::test]
+    async fn test_connection_manager_on_reconnected_callback() {
+        let ws = Arc::new(BinanceWebSocketClient::new("TEST_GW"));
+        let manager = ConnectionManager::new(ws, "TEST_GW");
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = called.clone();
+        manager.set_on_reconnected(Arc::new(move || {
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        })).await;
+
+        // Verify callback was set (the callback itself is invoked by the reconnect loop,
+        // which we can't easily test without a real server)
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

@@ -6,11 +6,11 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::base::{StrategySetting, StrategyState, StrategyType};
+use super::base::{StrategySetting, StrategyState, StrategyType, StopOrderRequest, CancelRequestType};
 #[cfg(feature = "gui")]
 use crate::chart::Indicator;
 use crate::trader::{
-    BarData, Direction, Exchange, Interval, Offset, OrderData, OrderRequest, TickData, TradeData,
+    BarData, Direction, Exchange, Interval, Offset, OrderData, OrderRequest, OrderType, TickData, TradeData,
 };
 use crate::trader::database::BaseDatabase;
 
@@ -295,6 +295,16 @@ pub trait StrategyTemplate: Send + Sync {
         Vec::new() // Default: no pending orders
     }
 
+    /// Drain pending stop orders placed during on_bar/on_tick callback
+    fn drain_pending_stop_orders(&mut self) -> Vec<StopOrderRequest> {
+        Vec::new() // Default: no pending stop orders
+    }
+
+    /// Drain pending cancellations placed during on_bar/on_tick callback
+    fn drain_pending_cancellations(&mut self) -> Vec<CancelRequestType> {
+        Vec::new() // Default: no pending cancellations
+    }
+
     /// Update position
     fn update_position(&mut self, vt_symbol: &str, position: f64);
 
@@ -341,8 +351,17 @@ pub struct BaseStrategy {
     // Active order tracking
     pub active_orderids: Arc<Mutex<Vec<String>>>,
 
+    // Active stop order tracking
+    pub active_stop_orderids: Arc<Mutex<Vec<String>>>,
+
     // Pending orders queue (for order routing)
     pub pending_orders: Arc<Mutex<Vec<OrderRequest>>>,
+
+    // Pending stop orders queue (for stop order routing)
+    pub pending_stop_orders: Arc<Mutex<Vec<StopOrderRequest>>>,
+
+    // Pending cancellations queue (for cancel routing)
+    pub pending_cancellations: Arc<Mutex<Vec<CancelRequestType>>>,
 
     // Trading parameters
     pub parameters: HashMap<String, String>,
@@ -369,7 +388,10 @@ impl BaseStrategy {
             positions: Arc::new(Mutex::new(HashMap::new())),
             targets: Arc::new(Mutex::new(HashMap::new())),
             active_orderids: Arc::new(Mutex::new(Vec::new())),
+            active_stop_orderids: Arc::new(Mutex::new(Vec::new())),
             pending_orders: Arc::new(Mutex::new(Vec::new())),
+            pending_stop_orders: Arc::new(Mutex::new(Vec::new())),
+            pending_cancellations: Arc::new(Mutex::new(Vec::new())),
             parameters,
             variables: HashMap::new(),
         }
@@ -459,13 +481,18 @@ impl BaseStrategy {
 
     /// Cancel order
     pub fn cancel_order(&self, vt_orderid: &str) {
-        tracing::info!("Cancelling order: {}", vt_orderid);
+        tracing::info!("请求取消委托: {}", vt_orderid);
         // Remove from active orderids
         let mut orderids = self
             .active_orderids
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         orderids.retain(|id| id != vt_orderid);
+        // Queue cancellation request for engine processing
+        self.pending_cancellations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(CancelRequestType::Order(vt_orderid.to_string()));
     }
 
     /// Cancel all orders
@@ -489,6 +516,24 @@ impl BaseStrategy {
         std::mem::take(&mut *orders)
     }
 
+    /// Drain pending stop orders (called by engine after on_bar/on_tick callback)
+    pub fn drain_pending_stop_orders(&self) -> Vec<StopOrderRequest> {
+        let mut orders = self
+            .pending_stop_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *orders)
+    }
+
+    /// Drain pending cancellations (called by engine after on_bar/on_tick callback)
+    pub fn drain_pending_cancellations(&self) -> Vec<CancelRequestType> {
+        let mut cancellations = self
+            .pending_cancellations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *cancellations)
+    }
+
     /// Load historical bar data (placeholder — use StrategyContext.load_bar instead)
     pub fn load_bar(&self, _vt_symbol: &str, _days: i64, _interval: Interval) -> Vec<BarData> {
         // This cannot access the database directly. Use context.load_bar() in on_init instead.
@@ -496,20 +541,66 @@ impl BaseStrategy {
     }
 
     /// Send stop order
+    ///
+    /// Creates a stop order request and queues it for engine processing.
+    /// The engine will register the stop order and monitor for trigger conditions.
+    /// Returns a generated stop order ID.
     pub fn send_stop_order(
         &self,
         vt_symbol: &str,
-        _price: f64,
-        _volume: f64,
-        _direction: Direction,
-        _offset: Option<Offset>,
+        price: f64,
+        volume: f64,
+        direction: Direction,
+        offset: Option<Offset>,
     ) -> String {
-        format!("STOP_{}_{}", vt_symbol, Utc::now().timestamp_millis())
+        let stop_orderid = format!("STOP_{}_{}", vt_symbol, Utc::now().timestamp_millis());
+
+        let req = StopOrderRequest::new(
+            vt_symbol.to_string(),
+            direction,
+            offset,
+            price,
+            volume,
+            OrderType::Stop,
+            false,
+        );
+
+        // Track the stop order ID locally
+        self.active_stop_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(stop_orderid.clone());
+
+        // Queue stop order request for engine processing
+        self.pending_stop_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(req);
+
+        tracing::info!("策略{}发送止损单: {} 价格={} 方向={:?}",
+            self.strategy_name, stop_orderid, price, direction);
+
+        stop_orderid
     }
 
     /// Cancel stop order
+    ///
+    /// Queues a stop order cancellation request for engine processing.
     pub fn cancel_stop_order(&self, stop_orderid: &str) {
-        tracing::info!("Cancelling stop order: {}", stop_orderid);
+        tracing::info!("策略{}请求取消止损单: {}", self.strategy_name, stop_orderid);
+
+        // Remove from active stop orderids
+        let mut orderids = self
+            .active_stop_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        orderids.retain(|id| id != stop_orderid);
+
+        // Queue cancellation request for engine processing
+        self.pending_cancellations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(CancelRequestType::StopOrder(stop_orderid.to_string()));
     }
 
     /// Write log

@@ -116,3 +116,53 @@ pub const APP_NAME: &str = "StrategyTrading";
 
 /// Stop order prefix
 pub const STOPORDER_PREFIX: &str = "STOP";
+
+/// Request to create a stop order (used for routing from strategy to engine)
+#[derive(Debug, Clone)]
+pub struct StopOrderRequest {
+    /// Symbol in vt_symbol format (e.g., "BTCUSDT.BINANCE")
+    pub vt_symbol: String,
+    /// Order direction
+    pub direction: Direction,
+    /// Offset type (for futures)
+    pub offset: Option<Offset>,
+    /// Price to trigger the stop order
+    pub price: f64,
+    /// Order volume
+    pub volume: f64,
+    /// Order type after trigger
+    pub order_type: OrderType,
+    /// Lock flag (for position management)
+    pub lock: bool,
+}
+
+impl StopOrderRequest {
+    pub fn new(
+        vt_symbol: String,
+        direction: Direction,
+        offset: Option<Offset>,
+        price: f64,
+        volume: f64,
+        order_type: OrderType,
+        lock: bool,
+    ) -> Self {
+        Self {
+            vt_symbol,
+            direction,
+            offset,
+            price,
+            volume,
+            order_type,
+            lock,
+        }
+    }
+}
+
+/// Cancellation request (used for routing from strategy to engine)
+#[derive(Debug, Clone)]
+pub enum CancelRequestType {
+    /// Cancel a regular order by vt_orderid
+    Order(String),
+    /// Cancel a stop order by stop_orderid
+    StopOrder(String),
+}

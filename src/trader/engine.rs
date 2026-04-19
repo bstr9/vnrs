@@ -7,6 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use super::app::BaseApp;
 use super::constant::Exchange;
+use super::contract_manager::ContractManager;
 use super::converter::OffsetConverter;
 use super::data_download::DataDownloadManager;
 use super::database::{BaseDatabase, EventRecord};
@@ -475,6 +476,7 @@ pub struct MainEngine {
     stop_order_engine: Arc<StopOrderEngine>,
     bracket_order_engine: Arc<BracketOrderEngine>,
     order_emulator: Arc<OrderEmulator>,
+    contract_manager: Arc<ContractManager>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -520,6 +522,7 @@ impl MainEngine {
         let stop_order_engine = Arc::new(StopOrderEngine::new());
         let bracket_order_engine = Arc::new(BracketOrderEngine::new());
         let order_emulator = Arc::new(OrderEmulator::new());
+        let contract_manager = Arc::new(ContractManager::new());
 
         // Create OffsetConverter with contract lookup from OmsEngine
         let oms_for_converter = oms_engine.clone();
@@ -542,6 +545,7 @@ impl MainEngine {
             stop_order_engine,
             bracket_order_engine,
             order_emulator,
+            contract_manager,
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -567,6 +571,7 @@ impl MainEngine {
             engines.insert("StopOrderEngine".to_string(), engine.stop_order_engine.clone());
             engines.insert("BracketOrderEngine".to_string(), engine.bracket_order_engine.clone());
             engines.insert("OrderEmulator".to_string(), engine.order_emulator.clone());
+            engines.insert("ContractManager".to_string(), engine.contract_manager.clone());
         }
         
         engine
@@ -991,6 +996,11 @@ impl MainEngine {
     /// Get order emulator engine
     pub fn order_emulator(&self) -> &Arc<OrderEmulator> {
         &self.order_emulator
+    }
+
+    /// Get contract manager
+    pub fn contract_manager(&self) -> &Arc<ContractManager> {
+        &self.contract_manager
     }
 
     /// Get tick data

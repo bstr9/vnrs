@@ -87,6 +87,8 @@ pub use trader::{
     BracketOrderRequest, OcoOrderRequest, OtoOrderRequest, GroupId, ChildOrder,
     // Order emulator engine
     OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId,
+    // Contract manager
+    ContractManager,
 };
 
 // Re-export Binance gateways

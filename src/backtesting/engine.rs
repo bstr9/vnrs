@@ -20,6 +20,7 @@ use crate::trader::{
     Direction, Offset, Status, Interval, Exchange,
     OrderRequest,
 };
+use crate::trader::database::BaseDatabase;
 use crate::strategy::{
     StrategyTemplate, StrategyContext,
     StopOrder, StopOrderStatus,
@@ -496,6 +497,60 @@ impl BacktestingEngine {
         self.write_log(&format!("加载{}条Tick数据", self.tick_data.len()));
     }
 
+    /// Load bar data from a database implementing BaseDatabase trait
+    ///
+    /// This method loads historical bar data from any database backend
+    /// (MemoryDatabase, FileDatabase, or future SQLite/PostgreSQL backends)
+    /// into the backtesting engine.
+    ///
+    /// # Arguments
+    /// * `database` - Arc reference to a database implementing BaseDatabase
+    ///
+    /// # Returns
+    /// Number of bars loaded, or error message
+    pub async fn load_data_from_database(
+        &mut self,
+        database: &Arc<dyn BaseDatabase>,
+    ) -> Result<usize, String> {
+        let bars = database.load_bar_data(
+            &self.symbol,
+            self.exchange,
+            self.interval,
+            self.start,
+            self.end,
+        ).await?;
+
+        let count = bars.len();
+        self.history_data = bars;
+        self.write_log(&format!("从数据库加载{}条Bar数据", count));
+
+        Ok(count)
+    }
+
+    /// Load tick data from a database implementing BaseDatabase trait
+    ///
+    /// # Arguments
+    /// * `database` - Arc reference to a database implementing BaseDatabase
+    ///
+    /// # Returns
+    /// Number of ticks loaded, or error message
+    pub async fn load_tick_data_from_database(
+        &mut self,
+        database: &Arc<dyn BaseDatabase>,
+    ) -> Result<usize, String> {
+        let ticks = database.load_tick_data(
+            &self.symbol,
+            self.exchange,
+            self.start,
+            self.end,
+        ).await?;
+
+        let count = ticks.len();
+        self.tick_data = ticks;
+        self.write_log(&format!("从数据库加载{}条Tick数据", count));
+
+        Ok(count)
+    }
 
     /// Run backtesting
     pub async fn run_backtesting(&mut self) -> Result<(), String> {
@@ -3785,5 +3840,104 @@ mod tests {
         assert_eq!(engine.bracket_group_count, 0);
         assert!(engine.bracket_groups.is_empty());
         assert!(engine.active_bracket_groups.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_data_from_database() {
+        use crate::trader::database::MemoryDatabase;
+
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+
+        // Save some bars to the database
+        let now = Utc::now();
+        let bar1 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: now,
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 50100.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        let bar2 = BarData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: now + Duration::minutes(1),
+            interval: Some(Interval::Minute),
+            open_price: 50050.0,
+            high_price: 50200.0,
+            low_price: 50000.0,
+            close_price: 50150.0,
+            volume: 150.0,
+            turnover: 7500000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+
+        db.save_bar_data(vec![bar1, bar2], false).await.expect("save should succeed");
+
+        // Set up backtesting engine with matching time range
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.interval = Interval::Minute;
+        engine.start = now - Duration::hours(1);
+        engine.end = now + Duration::hours(1);
+
+        // Load from database
+        let count = engine.load_data_from_database(&db).await.expect("load should succeed");
+        assert_eq!(count, 2);
+        assert_eq!(engine.history_data.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_load_data_from_database_empty() {
+        use crate::trader::database::MemoryDatabase;
+
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.interval = Interval::Minute;
+        engine.start = Utc::now() - Duration::hours(1);
+        engine.end = Utc::now() + Duration::hours(1);
+
+        // Load from empty database
+        let count = engine.load_data_from_database(&db).await.expect("load should succeed");
+        assert_eq!(count, 0);
+        assert!(engine.history_data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_tick_data_from_database() {
+        use crate::trader::database::MemoryDatabase;
+
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+
+        let now = Utc::now();
+        let tick = TickData::new("TEST".to_string(), "BTCUSDT".to_string(), Exchange::Binance, now);
+
+        db.save_tick_data(vec![tick], false).await.expect("save should succeed");
+
+        let mut engine = BacktestingEngine::new();
+        engine.vt_symbol = "BTCUSDT.BINANCE".to_string();
+        engine.symbol = "BTCUSDT".to_string();
+        engine.exchange = Exchange::Binance;
+        engine.start = now - Duration::hours(1);
+        engine.end = now + Duration::hours(1);
+
+        let count = engine.load_tick_data_from_database(&db).await.expect("load should succeed");
+        assert_eq!(count, 1);
+        assert_eq!(engine.tick_data.len(), 1);
     }
 }
