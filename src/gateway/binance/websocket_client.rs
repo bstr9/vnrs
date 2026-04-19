@@ -633,7 +633,12 @@ impl BinanceWebSocketClient {
         Ok(())
     }
 
-    /// Subscribe to channels
+    /// Subscribe to channels.
+    ///
+    /// If the WebSocket is temporarily disconnected (e.g. during reconnect),
+    /// this method will retry for up to 5 seconds before giving up.
+    /// The subscription is always tracked so `resubscribe()` can restore it
+    /// after a successful reconnect even if this call times out.
     pub async fn subscribe(&self, channels: Vec<String>) -> Result<(), String> {
         // Track subscriptions for re-subscription after reconnect
         {
@@ -654,7 +659,27 @@ impl BinanceWebSocketClient {
             "id": *req_id
         });
 
-        self.send(message).await
+        // Retry send when WebSocket is temporarily disconnected (reconnect in progress).
+        // The subscription is already tracked above, so resubscribe() will also restore it,
+        // but we try to send immediately to avoid missing data during the gap.
+        let max_retries = 50u32; // 50 × 100ms = 5 seconds
+        for attempt in 0..=max_retries {
+            match self.send(message.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(e) if e == "WebSocket not connected" && attempt < max_retries => {
+                    if attempt == 0 {
+                        info!(
+                            "{}: WebSocket not connected when subscribing, waiting for reconnect...",
+                            self.gateway_name
+                        );
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err("WebSocket not connected after 5s retry".to_string())
     }
 
     /// Unsubscribe from channels
