@@ -7,6 +7,36 @@ use polars::prelude::*;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+/// Parse an exchange string into the Exchange enum.
+fn parse_exchange_str(s: &str) -> crate::trader::Exchange {
+    match s.to_uppercase().as_str() {
+        "BINANCE" => crate::trader::Exchange::Binance,
+        "BINANCE_USDM" | "BINANCEUSDM" => crate::trader::Exchange::BinanceUsdm,
+        "BINANCE_COINM" | "BINANCECOINM" => crate::trader::Exchange::BinanceCoinm,
+        "OKX" => crate::trader::Exchange::Okx,
+        "BYBIT" => crate::trader::Exchange::Bybit,
+        "LOCAL" => crate::trader::Exchange::Local,
+        _ => crate::trader::Exchange::Global,
+    }
+}
+
+/// Parse an interval string into the Interval enum.
+fn parse_interval_str(s: &str) -> Option<crate::trader::Interval> {
+    match s.to_lowercase().as_str() {
+        "1s" => Some(crate::trader::Interval::Second),
+        "1m" | "minute" => Some(crate::trader::Interval::Minute),
+        "5m" => Some(crate::trader::Interval::Minute5),
+        "15m" => Some(crate::trader::Interval::Minute15),
+        "30m" => Some(crate::trader::Interval::Minute30),
+        "1h" | "hour" => Some(crate::trader::Interval::Hour),
+        "4h" => Some(crate::trader::Interval::Hour4),
+        "d" | "1d" | "daily" => Some(crate::trader::Interval::Daily),
+        "w" | "weekly" => Some(crate::trader::Interval::Weekly),
+        "tick" => Some(crate::trader::Interval::Tick),
+        _ => None,
+    }
+}
+
 macro_rules! get_required {
     ($dict:expr, $key:expr, $type:ty) => {
         $dict
@@ -50,25 +80,18 @@ pub fn py_to_bar(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<BarData> 
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {}", e)))?
         .into();
 
-    // Parse exchange - simplified
+    // Parse exchange
     let exchange = if let Some(exchange_py) = py_dict.get_item("exchange")? {
-        let _exchange_str: String = exchange_py.extract()?;
-        crate::trader::Exchange::Binance
+        let exchange_str: String = exchange_py.extract()?;
+        parse_exchange_str(&exchange_str)
     } else {
-        crate::trader::Exchange::Binance
+        crate::trader::Exchange::Global
     };
 
     // Parse interval
     let interval = if let Some(interval_py) = py_dict.get_item("interval")? {
         let interval_str: String = interval_py.extract()?;
-        match interval_str.to_lowercase().as_str() {
-            "minute" | "1m" => Some(crate::trader::Interval::Minute),
-            "hour" | "1h" => Some(crate::trader::Interval::Hour),
-            "daily" | "d" => Some(crate::trader::Interval::Daily),
-            "weekly" | "w" => Some(crate::trader::Interval::Weekly),
-            "tick" => Some(crate::trader::Interval::Tick),
-            _ => None,
-        }
+        parse_interval_str(&interval_str)
     } else {
         None
     };
@@ -166,16 +189,27 @@ pub fn arrow_to_bars(df: &DataFrame) -> Result<Vec<BarData>, Box<dyn std::error:
         }
     };
 
+    // Try to get interval column (optional)
+    let intervals = df.column("interval").ok().and_then(|col| col.str().ok());
+
     for i in 0..df.height() {
         let dt_millis = datetimes.get(i).unwrap_or(0);
         let datetime =
             chrono::DateTime::from_timestamp_millis(dt_millis).unwrap_or_else(chrono::Utc::now);
-        let _exchange_str = exchanges.get(i).unwrap_or("BINANCE");
+        let exchange_str = exchanges.get(i).unwrap_or("BINANCE");
+        let exchange = parse_exchange_str(exchange_str);
+
+        // Parse interval from column if available
+        let interval = intervals
+            .as_ref()
+            .and_then(|ints| ints.get(i))
+            .and_then(|s| if s.is_empty() { None } else { parse_interval_str(s) });
+
         let bar = BarData {
             symbol: symbols.get(i).unwrap_or("").to_string(),
-            exchange: crate::trader::Exchange::Binance,
+            exchange,
             datetime,
-            interval: None, // Would need to extract from DataFrame
+            interval,
             volume: volumes.get(i).unwrap_or(0.0),
             turnover: turnovers.get(i).unwrap_or(0.0),
             open_interest: open_interests.get(i).unwrap_or(0.0),
