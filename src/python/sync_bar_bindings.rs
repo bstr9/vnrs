@@ -252,9 +252,11 @@ impl PySyncBarGenerator {
 fn dict_to_bar(vt_symbol: &str, dict: &Bound<'_, PyDict>) -> PyResult<BarData> {
     let parts: Vec<&str> = vt_symbol.split('.').collect();
     let symbol = parts.first().unwrap_or(&"").to_string();
-    let exchange = match parts.get(1).copied() {
-        Some("BINANCE") => crate::trader::constant::Exchange::Binance,
-        Some("BINANCE_USDM") => crate::trader::constant::Exchange::BinanceUsdm,
+    let exchange_str = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+    let exchange = match exchange_str.as_str() {
+        "BINANCE" => crate::trader::constant::Exchange::Binance,
+        "BINANCE_USDM" => crate::trader::constant::Exchange::BinanceUsdm,
+        "BINANCE_COINM" => crate::trader::constant::Exchange::BinanceCoinm,
         _ => crate::trader::constant::Exchange::Local,
     };
 

@@ -3,10 +3,13 @@
 
 use crate::python::data_converter;
 use crate::python::strategy::Strategy;
+use crate::python::strategy_adapter::PythonStrategyAdapter;
 use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PortfolioState};
+use crate::strategy::{StrategyEngine, StrategySetting};
 use crate::trader::{
-    BarData, CancelRequest, Direction, Exchange, MainEngine, Offset, OrderData, OrderType,
-    OrderRequest, SubscribeRequest, TickData, TradeData,
+    BarData, BaseEngine, CancelRequest, Direction, Exchange, GatewayEvent, MainEngine, Offset,
+    OrderData, OrderType, OrderRequest, SubscribeRequest, TickData, TradeData, EVENT_BAR,
+    EVENT_TICK, EVENT_ORDER, EVENT_TRADE,
 };
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -16,6 +19,8 @@ use crate::trader::utility::extract_vt_symbol;
 #[pyclass]
 pub struct PythonEngine {
     main_engine: Arc<MainEngine>,
+    /// Optional reference to the live StrategyEngine for routing Python strategies
+    strategy_engine: Option<Arc<StrategyEngine>>,
     strategies: HashMap<String, Py<Strategy>>,
     symbol_strategy_map: HashMap<String, String>,
     portfolio_state: Arc<Mutex<PortfolioState>>,
@@ -25,10 +30,17 @@ impl PythonEngine {
     pub fn new(main_engine: MainEngine) -> Self {
         PythonEngine {
             main_engine: Arc::new(main_engine),
+            strategy_engine: None,
             strategies: HashMap::new(),
             symbol_strategy_map: HashMap::new(),
             portfolio_state: Arc::new(Mutex::new(PortfolioState::default())),
         }
+    }
+
+    /// Set the live StrategyEngine reference so that Python strategies
+    /// added via `add_strategy` are also registered for live market data
+    pub fn set_strategy_engine(&mut self, engine: Arc<StrategyEngine>) {
+        self.strategy_engine = Some(engine);
     }
 
     pub fn add_strategy(
@@ -68,23 +80,56 @@ impl PythonEngine {
                 .insert(symbol.clone(), strategy_name.clone());
         }
 
-        for vt_symbol in vt_symbols.iter() {
-            let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
-                .map(|(_, e)| e)
-                .unwrap_or(Exchange::Binance);
-            let symbol = vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string();
-            let req = SubscribeRequest { symbol, exchange };
-            if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
-                let engine = self.main_engine.clone();
-                let gw = gw_name.clone();
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Handle::current();
-                    rt.block_on(async {
-                        if let Err(e) = engine.subscribe(req, &gw).await {
-                            tracing::warn!("Python strategy subscribe failed: {}", e);
+        // If a live StrategyEngine is set, also register the PythonStrategyAdapter
+        // so the strategy receives live market data events through the StrategyEngine
+        if let Some(ref strat_engine) = self.strategy_engine {
+            let py_obj: Py<PyAny> = strategy.clone().unbind().into_any();
+            let adapter = PythonStrategyAdapter::from_py_object(
+                py_obj,
+                strategy_name.clone(),
+                vt_symbols.clone(),
+            );
+            let strat_engine = strat_engine.clone();
+            let sn = strategy_name.clone();
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    handle.spawn(async move {
+                        let setting = StrategySetting::new();
+                        if let Err(e) = strat_engine.add_python_strategy(adapter, setting).await {
+                            tracing::error!(
+                                "Failed to add Python strategy '{}' to live StrategyEngine: {}",
+                                sn, e
+                            );
                         }
                     });
-                });
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "No tokio runtime available to register Python strategy '{}' with StrategyEngine",
+                        strategy_name
+                    );
+                }
+            }
+        } else {
+            // No live StrategyEngine — subscribe directly through MainEngine
+            for vt_symbol in vt_symbols.iter() {
+                let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
+                    .map(|(_, e)| e)
+                    .unwrap_or(Exchange::Binance);
+                let symbol = vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string();
+                let req = SubscribeRequest { symbol, exchange };
+                if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+                    let engine = self.main_engine.clone();
+                    let gw = gw_name.clone();
+                    std::thread::spawn(move || {
+                        let rt = tokio::runtime::Handle::current();
+                        rt.block_on(async {
+                            if let Err(e) = engine.subscribe(req, &gw).await {
+                                tracing::warn!("Python strategy subscribe failed: {}", e);
+                            }
+                        });
+                    });
+                }
             }
         }
 
@@ -363,6 +408,7 @@ impl PythonEngine {
     fn new_py(_main_engine: Py<PyAny>) -> Self {
         PythonEngine {
             main_engine: Arc::new(MainEngine::new()),
+            strategy_engine: None,
             strategies: HashMap::new(),
             symbol_strategy_map: HashMap::new(),
             portfolio_state: Arc::new(Mutex::new(PortfolioState::default())),
@@ -388,5 +434,65 @@ impl PythonEngine {
 
     pub fn stop_strategy_py(&self, py: Python, strategy_name: &str) -> PyResult<()> {
         self.stop_strategy(py, strategy_name)
+    }
+}
+
+/// Thin wrapper around `Arc<PythonEngine>` that implements `BaseEngine`.
+///
+/// This allows `PythonEngine` to be registered with `MainEngine` as a sub-engine
+/// for standalone usage (when no `StrategyEngine` is set). When a `StrategyEngine`
+/// IS set, Python strategies receive events through the StrategyEngine's event
+/// routing instead, and this wrapper's `process_event` becomes a no-op.
+pub struct PythonEngineBridge {
+    inner: Arc<std::sync::Mutex<PythonEngine>>,
+}
+
+impl PythonEngineBridge {
+    pub fn new(engine: PythonEngine) -> Self {
+        PythonEngineBridge {
+            inner: Arc::new(std::sync::Mutex::new(engine)),
+        }
+    }
+}
+
+impl BaseEngine for PythonEngineBridge {
+    fn engine_name(&self) -> &str {
+        "python"
+    }
+
+    fn process_event(&self, event_type: &str, event: &GatewayEvent) {
+        let engine = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Only process if we don't have a StrategyEngine (standalone mode)
+        // Otherwise, events flow through StrategyEngine → PythonStrategyAdapter
+        if engine.strategy_engine.is_some() {
+            return;
+        }
+
+        Python::attach(|py| {
+            match event_type {
+                t if t == EVENT_TICK || t.starts_with("eTick.") => {
+                    if let GatewayEvent::Tick(tick) = event {
+                        let _ = engine.on_tick(py, tick);
+                    }
+                }
+                t if t == EVENT_BAR || t.starts_with("eBar.") => {
+                    if let GatewayEvent::Bar(bar) = event {
+                        let _ = engine.on_bar(py, bar);
+                    }
+                }
+                t if t == EVENT_ORDER => {
+                    if let GatewayEvent::Order(order) = event {
+                        let _ = engine.on_order(py, order);
+                    }
+                }
+                t if t == EVENT_TRADE => {
+                    if let GatewayEvent::Trade(trade) = event {
+                        let _ = engine.on_trade(py, trade);
+                    }
+                }
+                _ => {}
+            }
+        });
     }
 }

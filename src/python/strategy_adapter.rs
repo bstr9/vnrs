@@ -299,99 +299,27 @@ impl StrategyTemplate for PythonStrategyAdapter {
 
     fn on_bar(&mut self, bar: &BarData, _context: &StrategyContext) {
         Python::attach(|py| {
-            // Build a simple dict representation of the bar first (works without vnpy)
-            let bar_dict = PyDict::new(py);
-            let _ = bar_dict.set_item("gateway_name", &bar.gateway_name);
-            let _ = bar_dict.set_item("symbol", &bar.symbol);
-            let _ = bar_dict.set_item("exchange", bar.exchange.value());
-            let _ = bar_dict.set_item("datetime", bar.datetime.to_rfc3339());
-            let _ = bar_dict.set_item(
-                "interval",
-                bar.interval
-                    .unwrap_or(crate::trader::constant::Interval::Minute)
-                    .value(),
-            );
-            let _ = bar_dict.set_item("open_price", bar.open_price);
-            let _ = bar_dict.set_item("high_price", bar.high_price);
-            let _ = bar_dict.set_item("low_price", bar.low_price);
-            let _ = bar_dict.set_item("close_price", bar.close_price);
-            let _ = bar_dict.set_item("volume", bar.volume);
-            let _ = bar_dict.set_item("turnover", bar.turnover);
-            let _ = bar_dict.set_item("open_interest", bar.open_interest);
-
-            // Try vnpy BarData first (for vnpy-compatible strategies)
-            let vnpy_available = PyModule::import(py, "vnpy.trader.object").is_ok()
-                && PyModule::import(py, "vnpy.trader.constant").is_ok();
-
-            if vnpy_available {
-                // Try to create a vnpy BarData object
-                if let (Ok(object_module), Ok(constant_module), Ok(datetime_module)) = (
-                    PyModule::import(py, "vnpy.trader.object"),
-                    PyModule::import(py, "vnpy.trader.constant"),
-                    PyModule::import(py, "datetime"),
-                ) {
-                    if let (Ok(bar_data_class), Ok(exchange_enum), Ok(interval_enum)) = (
-                        object_module.getattr("BarData"),
-                        constant_module.getattr("Exchange"),
-                        constant_module.getattr("Interval"),
-                    ) {
-                        // Convert Exchange
-                        let exchange_val = bar.exchange.value();
-                        let py_exchange =
-                            exchange_enum.call1((exchange_val,)).unwrap_or_else(|_| {
-                                exchange_enum
-                                    .getattr("LOCAL")
-                                    .unwrap_or_else(|_| py.None().bind(py).clone())
-                            });
-
-                        // Convert Interval
-                        let interval_val = bar
-                            .interval
-                            .unwrap_or(crate::trader::constant::Interval::Minute)
-                            .value();
-                        let py_interval =
-                            interval_enum.call1((interval_val,)).unwrap_or_else(|_| {
-                                interval_enum
-                                    .getattr("MINUTE")
-                                    .unwrap_or_else(|_| py.None().bind(py).clone())
-                            });
-
-                        // Convert DateTime
-                        let dt_str = bar.datetime.to_rfc3339();
-                        let py_datetime = datetime_module.getattr("datetime").and_then(|dt_cls| {
-                            dt_cls.call_method1("fromisoformat", (dt_str.as_str(),))
-                        });
-
-                        if let Ok(py_dt) = py_datetime {
-                            // Create vnpy BarData kwargs
-                            let kwargs = PyDict::new(py);
-                            let _ = kwargs.set_item("gateway_name", &bar.gateway_name);
-                            let _ = kwargs.set_item("symbol", &bar.symbol);
-                            let _ = kwargs.set_item("exchange", py_exchange);
-                            let _ = kwargs.set_item("datetime", py_dt);
-                            let _ = kwargs.set_item("interval", py_interval);
-                            let _ = kwargs.set_item("volume", bar.volume);
-                            let _ = kwargs.set_item("turnover", bar.turnover);
-                            let _ = kwargs.set_item("open_interest", bar.open_interest);
-                            let _ = kwargs.set_item("open_price", bar.open_price);
-                            let _ = kwargs.set_item("high_price", bar.high_price);
-                            let _ = kwargs.set_item("low_price", bar.low_price);
-                            let _ = kwargs.set_item("close_price", bar.close_price);
-
-                            if let Ok(py_bar) = bar_data_class.call((), Some(&kwargs)) {
-                                if let Err(e) = self.call_py_method1("on_bar", py, py_bar.into()) {
-                                    eprintln!("on_bar error: {}", e);
-                                }
-                                return; // Success with vnpy BarData
-                            }
-                        }
+            // Use PyBarData which supports both attribute and dict-style access
+            // (vnpy BarData doesn't support bar["key"] syntax)
+            let py_bar = crate::python::backtesting_bindings::PyBarData {
+                gateway_name: bar.gateway_name.clone(),
+                symbol: bar.symbol.clone(),
+                exchange: bar.exchange.value().to_string(),
+                datetime: bar.datetime.to_rfc3339(),
+                interval: bar.interval.unwrap_or(crate::trader::constant::Interval::Minute).value().to_string(),
+                open_price: bar.open_price,
+                high_price: bar.high_price,
+                low_price: bar.low_price,
+                close_price: bar.close_price,
+                volume: bar.volume,
+            };
+            match Py::new(py, py_bar) {
+                Ok(py_bar_obj) => {
+                    if let Err(e) = self.call_py_method1("on_bar", py, py_bar_obj.into_any()) {
+                        eprintln!("on_bar error: {}", e);
                     }
                 }
-            }
-
-            // Fallback: send plain dict (works with our Strategy/CtaStrategy base classes)
-            if let Err(e) = self.call_py_method_with_dict("on_bar", py, &bar_dict) {
-                eprintln!("on_bar error: {}", e);
+                Err(e) => eprintln!("Failed to create PyBarData: {}", e),
             }
         });
     }
@@ -470,12 +398,9 @@ impl StrategyTemplate for PythonStrategyAdapter {
         pending
             .into_iter()
             .map(|po| {
-                let symbol = po
-                    .vt_symbol
-                    .split('.')
-                    .next()
-                    .unwrap_or(&po.vt_symbol)
-                    .to_string();
+                let (symbol, exchange) = crate::trader::utility::extract_vt_symbol(&po.vt_symbol)
+                    .unwrap_or((po.vt_symbol.clone(), Exchange::Binance));
+
                 let (direction, offset) = match po.direction.as_str() {
                     "buy" => (Direction::Long, Offset::Open),
                     "sell" => (Direction::Short, Offset::Close),
@@ -485,7 +410,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
                 };
                 OrderRequest {
                     symbol,
-                    exchange: Exchange::Binance,
+                    exchange,
                     direction,
                     order_type: OrderType::Limit,
                     volume: po.volume,

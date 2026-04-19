@@ -296,9 +296,7 @@ impl PyStrategyEngine {
     }
 
     fn start_strategy(&self, strategy_name: &str) -> PyResult<()> {
-        self.rt.block_on(async {
-            self.engine.start_strategy(strategy_name).await
-        }).map_err(|e| {
+        self.engine.start_strategy(strategy_name).map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!("Start failed: {}", e))
         })
     }
@@ -312,15 +310,11 @@ impl PyStrategyEngine {
     }
 
     fn get_all_strategies(&self) -> PyResult<Vec<String>> {
-        Ok(self.rt.block_on(async {
-            self.engine.get_all_strategy_names().await
-        }))
+        Ok(self.engine.get_all_strategy_names())
     }
 
     fn get_strategy_info(&self, strategy_name: &str) -> PyResult<HashMap<String, String>> {
-        self.rt.block_on(async {
-            self.engine.get_strategy_info(strategy_name).await
-        }).ok_or_else(|| {
+        self.engine.get_strategy_info(strategy_name).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!("Strategy {} not found", strategy_name))
         })
     }

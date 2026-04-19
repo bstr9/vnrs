@@ -608,6 +608,39 @@ impl PyBarData {
         }
         Ok(())
     }
+
+    /// Support dict-style access: bar["close_price"] → bar.close_price
+    /// Many vnpy-style strategies use bar["key"] syntax.
+    fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
+        match key {
+            "open_price" | "open" => Ok(self.open_price.into_pyobject(py)?.into_any().unbind()),
+            "high_price" | "high" => Ok(self.high_price.into_pyobject(py)?.into_any().unbind()),
+            "low_price" | "low" => Ok(self.low_price.into_pyobject(py)?.into_any().unbind()),
+            "close_price" | "close" => Ok(self.close_price.into_pyobject(py)?.into_any().unbind()),
+            "volume" => Ok(self.volume.into_pyobject(py)?.into_any().unbind()),
+            "turnover" | "open_interest" => Ok(0.0_f64.into_pyobject(py)?.into_any().unbind()),
+            "symbol" => Ok(self.symbol.clone().into_pyobject(py)?.into_any().unbind()),
+            "exchange" => Ok(self.exchange.clone().into_pyobject(py)?.into_any().unbind()),
+            "gateway_name" => Ok(self.gateway_name.clone().into_pyobject(py)?.into_any().unbind()),
+            "interval" => Ok(self.interval.clone().into_pyobject(py)?.into_any().unbind()),
+            "datetime" => {
+                let dt_cls = py.import("datetime")?.getattr("datetime")?;
+                let dt = dt_cls.call_method1("fromisoformat", (&self.datetime,))?;
+                Ok(dt.into_any().unbind())
+            }
+            _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
+                "BarData has no key '{}'", key
+            ))),
+        }
+    }
+
+    /// Support dict-style .get() method: bar.get("close_price", 0.0)
+    fn get(&self, py: Python<'_>, key: &str, default_value: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        match self.__getitem__(py, key) {
+            Ok(val) => Ok(val),
+            Err(_) => Ok(default_value.unwrap_or_else(|| py.None().into_pyobject(py).unwrap().into_any().unbind())),
+        }
+    }
 }
 
 impl PyBarData {

@@ -1,19 +1,124 @@
 use crate::python::{OrderFactory, PyOrder, PythonEngine, Strategy};
+use crate::strategy::StrategyEngine;
 use crate::trader::constant::{Direction, Offset, OrderType};
 use crate::trader::MainEngine;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::sync::Arc;
 use tokio::runtime::Runtime;
+
+/// Handle to a live StrategyEngine, allowing Python code to reference
+/// the Rust-side strategy engine created by the GUI application.
+#[pyclass]
+pub struct StrategyEngineHandle {
+    pub(crate) inner: Arc<StrategyEngine>,
+}
+
+impl StrategyEngineHandle {
+    pub fn new(engine: Arc<StrategyEngine>) -> Self {
+        StrategyEngineHandle { inner: engine }
+    }
+}
+
+#[pymethods]
+impl StrategyEngineHandle {
+    /// Get all strategy names currently registered
+    fn get_all_strategy_names(&self) -> PyResult<Vec<String>> {
+        Ok(self.inner.get_all_strategy_names())
+    }
+}
+
+/// Create main engine from Python
+#[pyfunction]
+fn create_main_engine(py: Python) -> PyResult<Py<PyAny>> {
+    let wrapper = PythonEngineWrapper::new()?;
+    Ok(Py::new(py, wrapper)?.into_any())
+}
+
+/// Run the event loop
+#[pyfunction]
+fn run_event_loop() -> PyResult<()> {
+    // In a real implementation, we would run the main trading event loop
+    println!("Event loop running...");
+    Ok(())
+}
+
+/// Add a Python strategy to the live StrategyEngine for real-time trading.
+///
+/// This function creates a `PythonStrategyAdapter` wrapping the Python strategy
+/// and registers it with the live StrategyEngine so it receives market data events
+/// (tick/bar/order/trade) through the normal StrategyEngine event routing path.
+///
+/// Args:
+///     strategy: Python Strategy instance
+///     strategy_engine: StrategyEngineHandle obtained from the application
+///     setting: Optional dict of strategy settings
+///
+/// Returns:
+///     List of strategy names that were added
+#[pyfunction]
+#[pyo3(signature = (strategy, strategy_engine, _setting=None))]
+fn add_strategy_live(
+    _py: Python,
+    strategy: Bound<'_, Strategy>,
+    strategy_engine: &StrategyEngineHandle,
+    _setting: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Vec<String>> {
+    use crate::python::strategy_adapter::PythonStrategyAdapter;
+    use crate::strategy::base::StrategySetting;
+
+    let strategy_ref = strategy.borrow();
+    let strategy_name = strategy_ref.strategy_name.clone();
+    let vt_symbols = strategy_ref.vt_symbols.clone();
+    drop(strategy_ref);
+
+    // Create the adapter from the Python strategy object
+    let py_obj: Py<PyAny> = strategy.clone().unbind().into_any();
+    let adapter = PythonStrategyAdapter::from_py_object(
+        py_obj,
+        strategy_name.clone(),
+        vt_symbols.clone(),
+    );
+
+    // Parse settings dict
+    let strat_setting = StrategySetting::new();
+
+    // Add to the live StrategyEngine
+    let engine = strategy_engine.inner.clone();
+    let name = strategy_name.clone();
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.block_on(async {
+                engine.add_python_strategy(adapter, strat_setting).await
+            }).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to add strategy '{}' to live engine: {}",
+                    name, e
+                ))
+            })?;
+        }
+        Err(_) => {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "No tokio runtime available — must be called from within an async context",
+            ));
+        }
+    }
+
+    tracing::info!("Python strategy '{}' added to live StrategyEngine", strategy_name);
+    Ok(vec![strategy_name])
+}
 
 /// Python module for the trading engine
 #[pymodule]
 fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Strategy>()?;
     m.add_class::<PythonEngineWrapper>()?;
+    m.add_class::<StrategyEngineHandle>()?;
     m.add_class::<PyOrder>()?;
     m.add_class::<OrderFactory>()?;
     m.add_function(wrap_pyfunction!(create_main_engine, m)?)?;
     m.add_function(wrap_pyfunction!(run_event_loop, m)?)?;
+    m.add_function(wrap_pyfunction!(add_strategy_live, m)?)?;
 
     // Direction class with LONG/SHORT/NET string attributes (vnpy compatible).
     // Uses a simple Python class so Direction.LONG == "LONG" works for
@@ -97,6 +202,19 @@ impl PythonEngineWrapper {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .add_strategy_py(py, strategy, engine_ref)
+    }
+
+    /// Set the live StrategyEngine for this PythonEngine.
+    ///
+    /// When set, Python strategies added via `add_strategy` will also be
+    /// registered with the live StrategyEngine, enabling them to receive
+    /// real-time market data events through the StrategyEngine's event routing.
+    fn set_strategy_engine(&self, handle: &StrategyEngineHandle) -> PyResult<()> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_strategy_engine(handle.inner.clone());
+        Ok(())
     }
 
     fn init_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
@@ -288,19 +406,4 @@ impl PythonEngineWrapper {
         let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
         Ok(OrderFactory::from_engine(engine_ref, ""))
     }
-}
-
-/// Create main engine from Python
-#[pyfunction]
-fn create_main_engine(py: Python) -> PyResult<Py<PyAny>> {
-    let wrapper = PythonEngineWrapper::new()?;
-    Ok(Py::new(py, wrapper)?.into_any())
-}
-
-/// Run the event loop
-#[pyfunction]
-fn run_event_loop() -> PyResult<()> {
-    // In a real implementation, we would run the main trading event loop
-    println!("Event loop running...");
-    Ok(())
 }
