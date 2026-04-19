@@ -55,6 +55,9 @@ pub mod session;
 #[cfg(feature = "sqlite")]
 pub mod sqlite_database;
 
+#[cfg(feature = "alpha")]
+pub mod parquet_database;
+
 #[cfg(feature = "gui")]
 pub mod ui;
 
@@ -72,6 +75,8 @@ pub use converter::{OffsetConverter, PositionHolding};
 pub use database::{BarOverview, BaseDatabase, EventRecord, FileDatabase, MemoryDatabase, TickOverview};
 #[cfg(feature = "sqlite")]
 pub use sqlite_database::SqliteDatabase;
+#[cfg(feature = "alpha")]
+pub use parquet_database::ParquetDatabase;
 pub use data_download::{DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult};
 pub use data_engine::{DataEngine, TickBarAggregator, DefaultBarAggregator};
 pub use datafeed::{BaseDatafeed, EmptyDatafeed};

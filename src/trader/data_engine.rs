@@ -26,15 +26,15 @@
 //! ```
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
-use chrono::{DateTime, Timelike, Utc};
+use chrono::Timelike;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use super::bar_synthesizer::BarSynthesizer;
 use super::constant::Interval;
-use super::engine::{BaseEngine, MainEngine};
+use super::engine::BaseEngine;
 use super::event::{EVENT_BAR, EVENT_TICK};
 use super::gateway::GatewayEvent;
 use super::object::{BarData, TickData};
@@ -188,8 +188,6 @@ impl TickBarAggregator for DefaultBarAggregator {
 /// - Cache latest tick/bar for query interface
 /// - Emit bar events into MainEngine's event stream for StrategyEngine consumption
 pub struct DataEngine {
-    /// Reference to MainEngine (for gateway subscription)
-    main_engine: Arc<MainEngine>,
     /// Subscription registry: key = "vt_symbol.Interval" → list of subscriber names
     subscriptions: RwLock<HashMap<String, Vec<String>>>,
     /// Per-symbol 1m bar aggregator: key = vt_symbol
@@ -209,11 +207,9 @@ pub struct DataEngine {
 impl DataEngine {
     /// Create a new DataEngine.
     pub fn new(
-        main_engine: Arc<MainEngine>,
         event_tx: mpsc::UnboundedSender<(String, GatewayEvent)>,
     ) -> Self {
         Self {
-            main_engine,
             subscriptions: RwLock::new(HashMap::new()),
             bar_generators: RwLock::new(HashMap::new()),
             bar_synthesizers: RwLock::new(HashMap::new()),
@@ -241,12 +237,6 @@ impl DataEngine {
         gateway_name: &str,
     ) -> Result<(), String> {
         let key = subscription_key(vt_symbol, interval);
-
-        // Check if this is a new subscription for this (symbol, interval)
-        let is_new_subscription = {
-            let subscriptions = self.subscriptions.read().unwrap_or_else(|e| e.into_inner());
-            !subscriptions.contains_key(&key)
-        };
 
         // Add subscriber to registry
         {
@@ -356,15 +346,9 @@ impl DataEngine {
                 {
                     let mut gateway_subs = self.gateway_subscriptions.write().unwrap_or_else(|e| e.into_inner());
                     if let Some(gateway_name) = gateway_subs.remove(vt_symbol) {
-                        let contract = self.main_engine.get_contract(vt_symbol);
-                        if let Some(contract) = contract {
-                            let req = super::object::SubscribeRequest {
-                                symbol: contract.symbol.clone(),
-                                exchange: contract.exchange,
-                            };
-                            // Note: MainEngine doesn't have unsubscribe method, so we just log
-                            info!("网关取消订阅: {} (gateway: {})", vt_symbol, gateway_name);
-                        }
+                        // Note: MainEngine doesn't have an async unsubscribe method callable from sync context.
+                        // We just track the removal for de-duplication purposes and log it.
+                        info!("网关取消订阅: {} (gateway: {})", vt_symbol, gateway_name);
                     }
                 }
 
@@ -512,7 +496,7 @@ impl DataEngine {
         let mut results = Vec::new();
         let mut generators = self.bar_generators.write().unwrap_or_else(|e| e.into_inner());
 
-        for (vt_symbol, generator) in generators.iter_mut() {
+        for (_vt_symbol, generator) in generators.iter_mut() {
             if let Some(bar) = generator.generate() {
                 results.push(bar);
             }
@@ -566,6 +550,7 @@ fn subscription_key(vt_symbol: &str, interval: Interval) -> String {
 mod tests {
     use super::*;
     use crate::trader::constant::Exchange;
+    use chrono::DateTime;
 
     fn make_tick(price: f64, volume: f64, minute_offset: i64) -> TickData {
         let dt = DateTime::UNIX_EPOCH + chrono::Duration::minutes(minute_offset);
@@ -652,8 +637,7 @@ mod tests {
     #[test]
     fn test_data_engine_subscribe_unsubscribe() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let main_engine = Arc::new(MainEngine::new());
-        let data_engine = DataEngine::new(main_engine, tx);
+        let data_engine = DataEngine::new(tx);
 
         // Subscribe
         let result = data_engine.subscribe("BTCUSDT.BINANCE", Interval::Minute, "strategy1", "BINANCE");
@@ -680,8 +664,7 @@ mod tests {
     #[test]
     fn test_data_engine_higher_timeframe_subscription() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let main_engine = Arc::new(MainEngine::new());
-        let data_engine = DataEngine::new(main_engine, tx);
+        let data_engine = DataEngine::new(tx);
 
         // Subscribe to 5m bars
         let result = data_engine.subscribe("BTCUSDT.BINANCE", Interval::Minute5, "strategy1", "BINANCE");
@@ -701,8 +684,7 @@ mod tests {
     #[test]
     fn test_data_engine_tick_caching() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let main_engine = Arc::new(MainEngine::new());
-        let data_engine = DataEngine::new(main_engine, tx);
+        let data_engine = DataEngine::new(tx);
 
         // Subscribe first
         let _ = data_engine.subscribe("BTCUSDT.BINANCE", Interval::Minute, "strategy1", "BINANCE");
@@ -721,8 +703,7 @@ mod tests {
     #[test]
     fn test_data_engine_bar_caching() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let main_engine = Arc::new(MainEngine::new());
-        let data_engine = DataEngine::new(main_engine, tx);
+        let data_engine = DataEngine::new(tx);
 
         // Subscribe to 1m bars
         let _ = data_engine.subscribe("BTCUSDT.BINANCE", Interval::Minute, "strategy1", "BINANCE");
@@ -746,8 +727,7 @@ mod tests {
     #[test]
     fn test_data_engine_get_subscriptions() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let main_engine = Arc::new(MainEngine::new());
-        let data_engine = DataEngine::new(main_engine, tx);
+        let data_engine = DataEngine::new(tx);
 
         let _ = data_engine.subscribe("BTCUSDT.BINANCE", Interval::Minute, "s1", "BINANCE");
         let _ = data_engine.subscribe("ETHUSDT.BINANCE", Interval::Minute5, "s2", "BINANCE");
@@ -761,8 +741,7 @@ mod tests {
     #[test]
     fn test_data_engine_generate_all() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let main_engine = Arc::new(MainEngine::new());
-        let data_engine = DataEngine::new(main_engine, tx);
+        let data_engine = DataEngine::new(tx);
 
         let _ = data_engine.subscribe("BTCUSDT.BINANCE", Interval::Minute, "s1", "BINANCE");
 
@@ -779,8 +758,7 @@ mod tests {
     #[test]
     fn test_data_engine_unsubscribe_nonexistent() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let main_engine = Arc::new(MainEngine::new());
-        let data_engine = DataEngine::new(main_engine, tx);
+        let data_engine = DataEngine::new(tx);
 
         let result = data_engine.unsubscribe("NONEXISTENT.BINANCE", Interval::Minute, "s1");
         assert!(result.is_err());

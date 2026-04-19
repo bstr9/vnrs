@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use super::constant::{Direction, Exchange, Offset};
+use super::constant::{Direction, Exchange};
 use super::engine::BaseEngine;
 use super::gateway::GatewayEvent;
 use super::object::{AccountData, PositionData, TickData, TradeData};
@@ -373,7 +373,6 @@ impl PortfolioManager {
         let same_dir = match trade_dir {
             Direction::Long | Direction::Net => Direction::Long,
             Direction::Short => Direction::Short,
-            _ => Direction::Net,
         };
         let same_key = format!(
             "{}.{}.{}",
@@ -544,6 +543,7 @@ impl BaseEngine for PortfolioManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::constant::Offset;
 
     fn make_position(symbol: &str, exchange: Exchange, direction: Direction, volume: f64, price: f64, pnl: f64) -> PositionData {
         PositionData {

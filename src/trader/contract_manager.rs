@@ -289,7 +289,7 @@ mod tests {
     fn make_test_contract(vt_symbol: &str, pricetick: f64, size: f64, min_volume: f64) -> ContractData {
         let parts: Vec<&str> = vt_symbol.split('.').collect();
         let symbol = parts.first().map(|s| s.to_string()).unwrap_or_default();
-        let exchange = if parts.len() > 1 && parts[1] == "BINANCE" {
+        let exchange = if parts.len() > 1 && parts[1].eq_ignore_ascii_case("BINANCE") {
             Exchange::Binance
         } else {
             Exchange::Local
