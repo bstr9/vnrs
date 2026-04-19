@@ -675,11 +675,13 @@ impl BaseGateway for BinanceSpotGateway {
         let market_url = if server == "REAL" { SPOT_WS_DATA_HOST } else { SPOT_TESTNET_WS_DATA_HOST };
         let ticks = self.ticks.clone();
         let event_sender = self.event_sender.clone();
+        let gateway_name = self.gateway_name.clone();
         let market_lock = Arc::new(Mutex::new(()));
         
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let ticks = ticks.clone();
             let event_sender = event_sender.clone();
+            let gateway_name = gateway_name.clone();
             let lock = market_lock.clone();
             
             tokio::spawn(async move {
@@ -694,10 +696,10 @@ impl BaseGateway for BinanceSpotGateway {
                 };
 
                 let parts: Vec<&str> = stream.split('@').collect();
-                if parts.len() != 2 { return; }
+                if parts.len() < 2 { return; }
 
                 let symbol = parts[0];
-                let channel = parts[1];
+                let channel = parts[1]; // "ticker" or "depth5" (may have @100ms suffix)
 
                 let mut ticks_guard = ticks.write().await;
                 let tick = match ticks_guard.get_mut(symbol) {
@@ -715,7 +717,7 @@ impl BaseGateway for BinanceSpotGateway {
                         tick.last_price = data["c"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
                         tick.datetime = timestamp_to_datetime(data["E"].as_i64().unwrap_or(0));
                     }
-                    "depth5" => {
+                    s if s.starts_with("depth5") => {
                         if let Some(bids) = data["b"].as_array() {
                             for (i, bid) in bids.iter().take(5).enumerate() {
                                 if let Some(arr) = bid.as_array() {
@@ -752,10 +754,12 @@ impl BaseGateway for BinanceSpotGateway {
                     _ => {}
                 }
 
-                if tick.last_price > 0.0 {
+                if tick.last_price > 0.0 || tick.bid_price_1 > 0.0 || tick.ask_price_1 > 0.0 {
                     tick.localtime = Some(Utc::now());
                     if let Some(sender) = event_sender.read().await.as_ref() {
                         sender.on_tick(tick.clone());
+                    } else {
+                        tracing::warn!("{}: event_sender为空，跳过tick数据发送", gateway_name);
                     }
                     // Emit depth event from tick's 5-level book
                     let depth = DepthData::from_tick(&tick);
@@ -1110,7 +1114,7 @@ impl BaseGateway for BinanceSpotGateway {
         self.ticks.write().await.insert(symbol.clone(), tick);
 
         // 订阅 ticker 和 depth5 数据流
-        let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5", symbol)];
+        let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
         self.market_ws.subscribe(channels).await?;
         self.write_log(&format!("订阅行情: {}", symbol)).await;
         Ok(())

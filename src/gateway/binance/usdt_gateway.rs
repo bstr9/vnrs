@@ -699,11 +699,13 @@ impl BaseGateway for BinanceUsdtGateway {
         let ticks = self.ticks.clone();
         let event_sender = self.event_sender.clone();
         let market_lock = Arc::new(Mutex::new(()));
+        let gateway_name = self.gateway_name.clone();
 
         let handler: WsMessageHandler = Arc::new(move |packet| {
             let ticks = ticks.clone();
             let event_sender = event_sender.clone();
             let lock = market_lock.clone();
+            let gateway_name = gateway_name.clone();
 
             tokio::spawn(async move {
                 let _guard = lock.lock().await;
@@ -711,7 +713,7 @@ impl BaseGateway for BinanceUsdtGateway {
                 let data = match packet.get("data") { Some(d) => d, None => return };
 
                 let parts: Vec<&str> = stream.split('@').collect();
-                if parts.len() != 2 { return; }
+                if parts.len() < 2 { return; }
 
                 let symbol = parts[0];
                 let channel = parts[1];
@@ -766,10 +768,12 @@ impl BaseGateway for BinanceUsdtGateway {
                     _ => {}
                 }
 
-                if tick.last_price > 0.0 {
+                if tick.last_price > 0.0 || tick.bid_price_1 > 0.0 || tick.ask_price_1 > 0.0 {
                     tick.localtime = Some(Utc::now());
                     if let Some(sender) = event_sender.read().await.as_ref() {
                         sender.on_tick(tick.clone());
+                    } else {
+                        warn!("{}: event_sender为空，跳过tick数据发送", gateway_name);
                     }
                     // Emit depth event from tick's 5-level book
                     let depth = DepthData::from_tick(&tick);
