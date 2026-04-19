@@ -944,6 +944,8 @@ impl OrderEmulator {
             price,
             offset: order.offset,
             reference: format!("iceberg_{}", order.id),
+            post_only: false,
+            reduce_only: false,
         };
 
         let cb = self.send_callback.read().unwrap_or_else(|e| e.into_inner());
@@ -983,6 +985,8 @@ impl OrderEmulator {
             price,
             offset: order.offset,
             reference: format!("emulator_{}", order.id),
+            post_only: false,
+            reduce_only: false,
         })
     }
 }

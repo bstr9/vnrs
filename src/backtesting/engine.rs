@@ -1872,6 +1872,8 @@ impl BacktestingEngine {
                     price: trigger_price,
                     offset: trigger_offset,
                     reference: format!("EMULATED_{}", id),
+                    post_only: false,
+                    reduce_only: false,
                 };
 
                 self.send_limit_order(req);
@@ -2652,6 +2654,8 @@ mod tests {
             price: 50000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let orderid = engine.send_limit_order(req);
 
@@ -2709,6 +2713,8 @@ mod tests {
             price: 50000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let orderid = engine.send_limit_order(req);
 
@@ -2752,6 +2758,8 @@ mod tests {
             price: 49000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let orderid = engine.send_limit_order(req);
 
@@ -2803,6 +2811,8 @@ mod tests {
             price: 50500.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let stop_orderid = engine.send_stop_order(req);
 
@@ -2859,6 +2869,8 @@ mod tests {
             price: 49500.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let stop_orderid = engine.send_stop_order(req);
 
@@ -3383,6 +3395,8 @@ mod tests {
             price: 50000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let tp_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3393,6 +3407,8 @@ mod tests {
             price: 51000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let sl_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3403,6 +3419,8 @@ mod tests {
             price: 49000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
@@ -3448,6 +3466,8 @@ mod tests {
             price: 50000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let tp_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3458,6 +3478,8 @@ mod tests {
             price: 51000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let sl_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3468,6 +3490,8 @@ mod tests {
             price: 49000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
@@ -3530,6 +3554,8 @@ mod tests {
             price: 50000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let tp_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3540,6 +3566,8 @@ mod tests {
             price: 51000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let sl_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3550,6 +3578,8 @@ mod tests {
             price: 49000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
@@ -3620,6 +3650,8 @@ mod tests {
             price: 51000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let order_b_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3630,6 +3662,8 @@ mod tests {
             price: 49000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let group_id = engine.send_oco_order(order_a_req, order_b_req);
@@ -3669,6 +3703,8 @@ mod tests {
             price: 51000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let order_b_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3679,6 +3715,8 @@ mod tests {
             price: 49000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let group_id = engine.send_oco_order(order_a_req, order_b_req);
@@ -3728,6 +3766,8 @@ mod tests {
             price: 50000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let secondary_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3738,6 +3778,8 @@ mod tests {
             price: 51000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let group_id = engine.send_oto_order(primary_req, secondary_req);
@@ -3776,6 +3818,8 @@ mod tests {
             price: 50000.0,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let secondary_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3786,6 +3830,8 @@ mod tests {
             price: 51000.0,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let group_id = engine.send_oto_order(primary_req, secondary_req);

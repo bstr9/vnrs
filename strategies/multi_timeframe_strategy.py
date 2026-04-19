@@ -40,9 +40,13 @@ class MultiTimeframeStrategy(CtaStrategy):
         "slow_ma",
     ]
 
-    def __init__(self, vt_symbol, engine):
+    def __init__(self, strategy_name="MultiTimeframe", vt_symbols=None):
         """Initialize the strategy."""
-        super().__init__(vt_symbol, engine)
+        # PyO3 #[new] handles construction; just set attributes directly
+        # Do NOT call super().__init__() with args - it fails with PyO3 classes
+        self.strategy_name = strategy_name
+        self.vt_symbols = vt_symbols or ["BTCUSDT.BINANCE"]
+        self.strategy_type = "spot"
 
         # 5-minute timeframe components
         self.bg5 = BarGenerator(self.on_bar, window=5, on_window_bar=self.on_5min_bar)

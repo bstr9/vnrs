@@ -309,10 +309,16 @@ impl BracketOrderEngine {
         let close_dir = Self::close_direction(req.direction);
 
         let entry_request = OrderRequest {
-            symbol: req.symbol.clone(), exchange: req.exchange, direction: req.direction,
-            order_type: req.entry_type, volume: req.entry_volume, price: req.entry_price,
+            symbol: req.symbol.clone(),
+            exchange: req.exchange,
+            direction: req.direction,
+            order_type: req.entry_type,
+            volume: req.entry_volume,
+            price: req.entry_price,
             offset: req.offset,
             reference: if req.reference.is_empty() { format!("BRACKET_{}_ENTRY", id) } else { req.reference.clone() },
+            post_only: false,
+            reduce_only: false,
         };
         let entry_child = ChildOrder {
             role: OrderRole::Entry, request: entry_request.clone(),
@@ -320,9 +326,16 @@ impl BracketOrderEngine {
         };
 
         let tp_request = OrderRequest {
-            symbol: req.symbol.clone(), exchange: req.exchange, direction: close_dir,
-            order_type: OrderType::Limit, volume: req.entry_volume, price: req.tp_price,
-            offset: req.offset, reference: format!("BRACKET_{}_TP", id),
+            symbol: req.symbol.clone(),
+            exchange: req.exchange,
+            direction: close_dir,
+            order_type: OrderType::Limit,
+            volume: req.entry_volume,
+            price: req.tp_price,
+            offset: req.offset,
+            reference: format!("BRACKET_{}_TP", id),
+            post_only: false,
+            reduce_only: false,
         };
         let tp_child = ChildOrder {
             role: OrderRole::TakeProfit, request: tp_request,
@@ -330,10 +343,16 @@ impl BracketOrderEngine {
         };
 
         let sl_request = OrderRequest {
-            symbol: req.symbol.clone(), exchange: req.exchange, direction: close_dir,
-            order_type: req.sl_type, volume: req.entry_volume,
+            symbol: req.symbol.clone(),
+            exchange: req.exchange,
+            direction: close_dir,
+            order_type: req.sl_type,
+            volume: req.entry_volume,
             price: if req.sl_type == OrderType::Stop { req.sl_price } else { 0.0 },
-            offset: req.offset, reference: format!("BRACKET_{}_SL", id),
+            offset: req.offset,
+            reference: format!("BRACKET_{}_SL", id),
+            post_only: false,
+            reduce_only: false,
         };
         let sl_child = ChildOrder {
             role: OrderRole::StopLoss, request: sl_request,
@@ -365,15 +384,28 @@ impl BracketOrderEngine {
         let vt_symbol = format!("{}.{}", req.symbol, req.exchange.value());
 
         let a_req = OrderRequest {
-            symbol: req.symbol.clone(), exchange: req.exchange, direction: req.direction,
-            order_type: req.order_a_type, volume: req.volume, price: req.order_a_price,
+            symbol: req.symbol.clone(),
+            exchange: req.exchange,
+            direction: req.direction,
+            order_type: req.order_a_type,
+            volume: req.volume,
+            price: req.order_a_price,
             offset: req.offset,
             reference: if req.reference.is_empty() { format!("OCO_{}_A", id) } else { req.reference.clone() },
+            post_only: false,
+            reduce_only: false,
         };
         let b_req = OrderRequest {
-            symbol: req.symbol.clone(), exchange: req.exchange, direction: req.direction,
-            order_type: req.order_b_type, volume: req.volume, price: req.order_b_price,
-            offset: req.offset, reference: format!("OCO_{}_B", id),
+            symbol: req.symbol.clone(),
+            exchange: req.exchange,
+            direction: req.direction,
+            order_type: req.order_b_type,
+            volume: req.volume,
+            price: req.order_b_price,
+            offset: req.offset,
+            reference: format!("OCO_{}_B", id),
+            post_only: false,
+            reduce_only: false,
         };
 
         let child_a = ChildOrder {
@@ -415,15 +447,28 @@ impl BracketOrderEngine {
         let vt_symbol = format!("{}.{}", req.symbol, req.exchange.value());
 
         let p_req = OrderRequest {
-            symbol: req.symbol.clone(), exchange: req.exchange, direction: req.primary_direction,
-            order_type: req.primary_type, volume: req.primary_volume, price: req.primary_price,
+            symbol: req.symbol.clone(),
+            exchange: req.exchange,
+            direction: req.primary_direction,
+            order_type: req.primary_type,
+            volume: req.primary_volume,
+            price: req.primary_price,
             offset: req.offset,
             reference: if req.reference.is_empty() { format!("OTO_{}_PRIMARY", id) } else { req.reference.clone() },
+            post_only: false,
+            reduce_only: false,
         };
         let s_req = OrderRequest {
-            symbol: req.symbol.clone(), exchange: req.exchange, direction: req.secondary_direction,
-            order_type: req.secondary_type, volume: req.secondary_volume, price: req.secondary_price,
-            offset: req.offset, reference: format!("OTO_{}_SECONDARY", id),
+            symbol: req.symbol.clone(),
+            exchange: req.exchange,
+            direction: req.secondary_direction,
+            order_type: req.secondary_type,
+            volume: req.secondary_volume,
+            price: req.secondary_price,
+            offset: req.offset,
+            reference: format!("OTO_{}_SECONDARY", id),
+            post_only: false,
+            reduce_only: false,
         };
 
         let p_child = ChildOrder {

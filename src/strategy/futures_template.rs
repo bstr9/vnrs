@@ -110,6 +110,8 @@ impl FuturesStrategy {
                 price,
                 offset: Offset::Close,
                 reference: self.base.strategy_name.clone(),
+                post_only: false,
+                reduce_only: false,
             };
             self.base.pending_orders
                 .lock()
@@ -138,6 +140,8 @@ impl FuturesStrategy {
                 price,
                 offset: Offset::Close,
                 reference: self.base.strategy_name.clone(),
+                post_only: false,
+                reduce_only: false,
             };
             self.base.pending_orders
                 .lock()
@@ -171,15 +175,17 @@ impl FuturesStrategy {
         if td_available > 0.0 && remaining > 0.0 {
             let close_vol = td_available.min(remaining);
             let req = OrderRequest {
-                symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
-                exchange,
-                direction: Direction::Short,
-                order_type: crate::trader::constant::OrderType::Limit,
-                volume: close_vol,
-                price,
-                offset: Offset::CloseToday,
-                reference: self.base.strategy_name.clone(),
-            };
+                            symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
+                            exchange,
+                            direction: Direction::Short,
+                            order_type: crate::trader::constant::OrderType::Limit,
+                            volume: close_vol,
+                            price,
+                            offset: Offset::CloseToday,
+                            reference: self.base.strategy_name.clone(),
+                            post_only: false,
+                            reduce_only: false,
+                        };
             self.base.pending_orders
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -193,15 +199,17 @@ impl FuturesStrategy {
         if yd_available > 0.0 && remaining > 0.0 {
             let close_vol = yd_available.min(remaining);
             let req = OrderRequest {
-                symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
-                exchange,
-                direction: Direction::Short,
-                order_type: crate::trader::constant::OrderType::Limit,
-                volume: close_vol,
-                price,
-                offset: Offset::CloseYesterday,
-                reference: self.base.strategy_name.clone(),
-            };
+                            symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
+                            exchange,
+                            direction: Direction::Short,
+                            order_type: crate::trader::constant::OrderType::Limit,
+                            volume: close_vol,
+                            price,
+                            offset: Offset::CloseYesterday,
+                            reference: self.base.strategy_name.clone(),
+                            post_only: false,
+                            reduce_only: false,
+                        };
             self.base.pending_orders
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -226,15 +234,17 @@ impl FuturesStrategy {
         if td_available > 0.0 && remaining > 0.0 {
             let close_vol = td_available.min(remaining);
             let req = OrderRequest {
-                symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
-                exchange,
-                direction: Direction::Long,
-                order_type: crate::trader::constant::OrderType::Limit,
-                volume: close_vol,
-                price,
-                offset: Offset::CloseToday,
-                reference: self.base.strategy_name.clone(),
-            };
+                            symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
+                            exchange,
+                            direction: Direction::Long,
+                            order_type: crate::trader::constant::OrderType::Limit,
+                            volume: close_vol,
+                            price,
+                            offset: Offset::CloseToday,
+                            reference: self.base.strategy_name.clone(),
+                            post_only: false,
+                            reduce_only: false,
+                        };
             self.base.pending_orders
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -248,15 +258,17 @@ impl FuturesStrategy {
         if yd_available > 0.0 && remaining > 0.0 {
             let close_vol = yd_available.min(remaining);
             let req = OrderRequest {
-                symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
-                exchange,
-                direction: Direction::Long,
-                order_type: crate::trader::constant::OrderType::Limit,
-                volume: close_vol,
-                price,
-                offset: Offset::CloseYesterday,
-                reference: self.base.strategy_name.clone(),
-            };
+                            symbol: vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string(),
+                            exchange,
+                            direction: Direction::Long,
+                            order_type: crate::trader::constant::OrderType::Limit,
+                            volume: close_vol,
+                            price,
+                            offset: Offset::CloseYesterday,
+                            reference: self.base.strategy_name.clone(),
+                            post_only: false,
+                            reduce_only: false,
+                        };
             self.base.pending_orders
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())

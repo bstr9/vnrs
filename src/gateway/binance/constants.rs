@@ -101,6 +101,7 @@ pub static STATUS_BINANCE2VT: Lazy<HashMap<&'static str, Status>> = Lazy::new(||
 // ============================================================================
 
 /// Map VT order type to Binance order type (Spot)
+/// Fak (Fill-and-Kill) and Fok (Fill-or-Kill) map to LIMIT with timeInForce set in gateway
 pub static ORDERTYPE_VT2BINANCE: Lazy<HashMap<OrderType, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::new();
     m.insert(OrderType::Limit, "LIMIT");
@@ -118,6 +119,7 @@ pub static ORDERTYPE_BINANCE2VT: Lazy<HashMap<&'static str, OrderType>> = Lazy::
     m.insert("MARKET", OrderType::Market);
     m.insert("STOP_LOSS", OrderType::Stop);
     m.insert("STOP", OrderType::Stop);
+    m.insert("TAKE_PROFIT", OrderType::Stop);
     m
 });
 
@@ -138,6 +140,7 @@ pub static ORDERTYPE_BINANCE2VT_FUTURES: Lazy<HashMap<(&'static str, &'static st
     Lazy::new(|| {
         let mut m = HashMap::new();
         m.insert(("LIMIT", "GTC"), OrderType::Limit);
+        m.insert(("LIMIT", "GTX"), OrderType::Limit); // Post-Only limit
         m.insert(("MARKET", "GTC"), OrderType::Market);
         m.insert(("STOP", "GTC"), OrderType::Stop);
         m.insert(("LIMIT", "IOC"), OrderType::Fak);

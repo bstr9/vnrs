@@ -30,6 +30,7 @@ Task focus:
 3. Strategy exploration (only after framework is stable):
    - Based on $targetSymbol historical data, implement a strategy with at least 'volatility filter' and 'dynamic take-profit'.
    - Run backtests automatically, and append Sharpe Ratio and Max Drawdown results to backtest_log.md.
+4. all the strategies write in C:\Users\baoji\code\vnrs\strategies and follow the backtest rules, fix old strategies if they can not work. 
 
 Requirements: Do not delete existing features. Each iteration must ensure the code compiles/runs, and verify connectivity based on $configPath.
 "@

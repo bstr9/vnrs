@@ -417,8 +417,12 @@ class TargetPosTemplate(CtaStrategy):
                     self.set_target_pos(0)
     """
 
-    def __init__(self, engine, strategy_name: str, vt_symbol: str, setting: dict):
-        super().__init__(engine, strategy_name, vt_symbol, setting)
+    def __init__(self, strategy_name: str, vt_symbols=None, setting: dict = None):
+        # PyO3 #[new] handles construction; just set attributes directly
+        # Do NOT call super().__init__() with args - it fails with PyO3 classes
+        self.strategy_name = strategy_name
+        self.vt_symbols = vt_symbols or ["BTCUSDT.BINANCE"]
+        self.strategy_type = "spot"
         self._target_pos = 0.0
         self._last_price = 0.0
 

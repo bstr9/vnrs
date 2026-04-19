@@ -396,6 +396,7 @@ impl StopOrderEngine {
             direction: order.direction, order_type, volume: order.volume,
             price, offset: order.offset,
             reference: if order.reference.is_empty() { format!("STOP_{}", order.id) } else { order.reference.clone() },
+            post_only: false, reduce_only: false,
         }
     }
 

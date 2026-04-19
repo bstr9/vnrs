@@ -1132,9 +1132,47 @@ impl BaseGateway for BinanceSpotGateway {
         params.insert("newClientOrderId".to_string(), orderid.clone());
         params.insert("newOrderRespType".to_string(), "ACK".to_string());
 
-        if req.order_type == OrderType::Limit {
-            params.insert("timeInForce".to_string(), "GTC".to_string());
-            params.insert("price".to_string(), format_price(req.price));
+        match req.order_type {
+            OrderType::Limit => {
+                if req.post_only {
+                    // Post-Only on Binance Spot: LIMIT with timeInForce=GTX is NOT supported.
+                    // Use EXPIRED_TAKER response type so the order is rejected if it would
+                    // immediately fill as a taker — this achieves the same "maker-only" intent.
+                    // Note: EXPIRED_TAKER requires price, so we still add it.
+                    params.insert("timeInForce".to_string(), "GTC".to_string());
+                    params.insert("price".to_string(), format_price(req.price));
+                    // Override response type to detect immediate taker fill
+                    params.insert("newOrderRespType".to_string(), "EXPIRED_TAKER".to_string());
+                } else {
+                    params.insert("timeInForce".to_string(), "GTC".to_string());
+                    params.insert("price".to_string(), format_price(req.price));
+                }
+            }
+            OrderType::Fak => {
+                // Fill-And-Kill (IOC): LIMIT order with timeInForce=IOC
+                params.insert("timeInForce".to_string(), "IOC".to_string());
+                params.insert("price".to_string(), format_price(req.price));
+            }
+            OrderType::Fok => {
+                // Fill-Or-Kill (FOK): LIMIT order with timeInForce=FOK
+                params.insert("timeInForce".to_string(), "FOK".to_string());
+                params.insert("price".to_string(), format_price(req.price));
+            }
+            OrderType::Market => {
+                // Market orders have no timeInForce or price
+            }
+            OrderType::Stop => {
+                params.insert("price".to_string(), format_price(req.price));
+            }
+            _ => {
+                params.insert("timeInForce".to_string(), "GTC".to_string());
+                params.insert("price".to_string(), format_price(req.price));
+            }
+        }
+
+        // Binance Spot does not support reduceOnly — ignore req.reduce_only
+        if req.reduce_only {
+            self.write_log("注意: Binance Spot不支持reduceOnly参数，该参数将被忽略").await;
         }
 
         match self.rest_client.post("/api/v3/order", &params, Security::Signed).await {

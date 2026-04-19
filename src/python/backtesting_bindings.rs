@@ -334,6 +334,8 @@ impl PyBacktestingEngine {
             price,
             offset: offset_enum,
             reference: "VNPY_STRATEGY".to_string(),
+            post_only: false,
+            reduce_only: false,
         };
 
         // Risk manager check
@@ -391,6 +393,8 @@ impl PyBacktestingEngine {
             price,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -413,6 +417,8 @@ impl PyBacktestingEngine {
             price,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -435,6 +441,8 @@ impl PyBacktestingEngine {
             price,
             offset: Offset::Open,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -457,6 +465,8 @@ impl PyBacktestingEngine {
             price,
             offset: Offset::Close,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {

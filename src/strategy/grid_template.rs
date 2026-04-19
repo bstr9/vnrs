@@ -156,6 +156,8 @@ impl GridStrategy {
                 price: level.price,
                 offset: Offset::None,
                 reference: self.base.strategy_name.clone(),
+                post_only: false,
+                reduce_only: false,
             };
             self.base.pending_orders
                 .lock()

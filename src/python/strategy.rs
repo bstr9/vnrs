@@ -3,6 +3,14 @@
 //! Provides the unified `Strategy` base class that Python users subclass
 //! to implement trading strategies. Method stubs are no-ops by default;
 //! Python subclasses override them as needed.
+//!
+//! ## vnpy Compatibility
+//! This class provides vnpy CtaTemplate-compatible properties and methods:
+//! - `self.vt_symbol` — primary trading symbol (first in vt_symbols)
+//! - `self.pos` — current position for the primary symbol
+//! - `self.cancel_all()` — cancel all active orders
+//! - `self.put_event()` — notify UI of strategy state change
+//! - `self.load_bar(days)` — request historical bar data
 
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -96,12 +104,12 @@ pub struct Strategy {
 #[pymethods]
 impl Strategy {
     #[new]
-    #[pyo3(signature = (strategy_name, vt_symbols, strategy_type="spot"))]
-    fn new(strategy_name: String, vt_symbols: Vec<String>, strategy_type: Option<&str>) -> Self {
+    #[pyo3(signature = (strategy_name="UnnamedStrategy".to_string(), vt_symbols=vec!["BTCUSDT.BINANCE".to_string()], strategy_type="spot".to_string()))]
+    fn new(strategy_name: String, vt_symbols: Vec<String>, strategy_type: String) -> Self {
         Strategy {
             strategy_name,
             vt_symbols,
-            strategy_type: strategy_type.unwrap_or("spot").to_string(),
+            strategy_type,
             inited: false,
             trading: false,
             stopped: false,
@@ -120,6 +128,24 @@ impl Strategy {
     #[getter]
     fn state(&self) -> String {
         state_to_string(self.inited, self.trading, self.stopped)
+    }
+
+    // ---- vnpy CtaTemplate compatible properties ----
+
+    /// Primary trading symbol (first element of vt_symbols).
+    /// This is the vnpy-compatible `self.vt_symbol` property.
+    /// Returns the first vt_symbol, or empty string if none set.
+    #[getter]
+    fn vt_symbol(&self) -> String {
+        self.vt_symbols.first().cloned().unwrap_or_default()
+    }
+
+    /// Current position for the primary symbol (vnpy-compatible `self.pos`).
+    /// Reads from `pos_data` using the primary vt_symbol.
+    #[getter]
+    fn pos(&self) -> f64 {
+        let symbol = self.vt_symbols.first().cloned().unwrap_or_default();
+        self.pos_data.get(&symbol).copied().unwrap_or(0.0)
     }
 
     // ---- Lifecycle callbacks (no-op stubs, override in Python subclass) ----
@@ -285,12 +311,83 @@ impl Strategy {
         Ok(())
     }
 
-    /// Get position for a symbol.
+    /// Cancel all active orders (vnpy CtaTemplate compatible).
+    /// Clears the pending orders queue and requests engine to cancel all.
+    fn cancel_all(&self) -> PyResult<()> {
+        // Clear pending orders queue
+        self.pending_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+
+        // Request engine to cancel all orders for this strategy
+        if let Some(ref engine) = self.engine {
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "cancel_all", ());
+            });
+        }
+        Ok(())
+    }
+
+    /// Put strategy event (vnpy CtaTemplate compatible).
+    /// Notifies the engine/UI that strategy state has changed.
+    /// In backtesting mode, this is a no-op.
+    fn put_event(&self) -> PyResult<()> {
+        // In live trading, this would trigger a UI update event.
+        // In backtesting, it's a no-op since there's no event loop.
+        Ok(())
+    }
+
+    /// Load historical bar data for strategy initialization
+    /// (vnpy CtaTemplate compatible).
+    ///
+    /// In live mode, this requests the engine to load `days` days of
+    /// historical bars and replay them through on_bar().
+    /// In backtesting mode, this is a no-op (data is already loaded).
+    ///
+    /// Args:
+    ///     days: Number of days of historical data to load
+    #[pyo3(signature = (days, interval="1m"))]
+    fn load_bar(&self, days: i32, interval: Option<&str>) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let interval_str = interval.unwrap_or("1m").to_string();
+            let vt_symbol = self.vt_symbols.first().cloned().unwrap_or_default();
+            Python::attach(|py| {
+                let _ = engine.call_method1(
+                    py,
+                    "load_bar",
+                    (vt_symbol, days, interval_str),
+                );
+            });
+        }
+        Ok(())
+    }
+
+    /// Load historical tick data for strategy initialization
+    /// (vnpy CtaTemplate compatible).
+    ///
+    /// In live mode, this requests the engine to load `days` days of
+    /// historical ticks and replay them through on_tick().
+    /// In backtesting mode, this is a no-op.
+    #[pyo3(signature = (days))]
+    fn load_tick(&self, days: i32) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let vt_symbol = self.vt_symbols.first().cloned().unwrap_or_default();
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "load_tick", (vt_symbol, days));
+            });
+        }
+        Ok(())
+    }
+
+    /// Get position for a specific symbol.
     ///
     /// Reads from the local `pos_data` cache which is updated by `on_trade()`.
     /// This avoids calling engine.get_pos() which would deadlock during
     /// backtesting (the engine mutex is held while calling strategy callbacks).
-    fn get_pos(&self, vt_symbol: &str) -> PyResult<f64> {
+    ///
+    /// Note: For the primary symbol, use `self.pos` (property) instead.
+    fn get_pos_by_symbol(&self, vt_symbol: &str) -> PyResult<f64> {
         Ok(self.pos_data.get(vt_symbol).copied().unwrap_or(0.0))
     }
 

@@ -1121,7 +1121,12 @@ impl BaseGateway for BinanceUsdtGateway {
 
         if let Some((order_type_str, time_in_force)) = ORDERTYPE_VT2BINANCE_FUTURES.get(&req.order_type) {
             params.insert("type".to_string(), order_type_str.to_string());
-            params.insert("timeInForce".to_string(), time_in_force.to_string());
+            // Post-Only on Binance Futures: Override timeInForce to GTX (Good-Till-Crossing)
+            if req.post_only && *order_type_str == "LIMIT" {
+                params.insert("timeInForce".to_string(), "GTX".to_string());
+            } else {
+                params.insert("timeInForce".to_string(), time_in_force.to_string());
+            }
             if *order_type_str == "LIMIT" || *order_type_str == "STOP" {
                 params.insert("price".to_string(), format_price(req.price));
             }
@@ -1129,6 +1134,11 @@ impl BaseGateway for BinanceUsdtGateway {
             params.insert("type".to_string(), "LIMIT".to_string());
             params.insert("timeInForce".to_string(), "GTC".to_string());
             params.insert("price".to_string(), format_price(req.price));
+        }
+
+        // Reduce-Only on Binance Futures: `reduceOnly=true`
+        if req.reduce_only {
+            params.insert("reduceOnly".to_string(), "true".to_string());
         }
 
         match self.rest_client.post("/fapi/v1/order", &params, Security::Signed).await {

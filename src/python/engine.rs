@@ -239,6 +239,8 @@ impl PythonEngine {
             price,
             offset,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
 
         let gateway_name = match exchange {

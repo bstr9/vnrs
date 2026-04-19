@@ -515,6 +515,29 @@ impl MainEngine {
         Self::new_internal(Some(database))
     }
 
+    /// Create a new MainEngine with SQLite database auto-loaded from the default path.
+    ///
+    /// The database file is stored at `{TRADER_DIR}/trade_engine.db`.
+    /// If the file doesn't exist, it will be created automatically.
+    /// Requires the `sqlite` feature flag.
+    #[cfg(feature = "sqlite")]
+    pub fn new_with_sqlite() -> Result<Self, String> {
+        let db_path = super::utility::TRADER_DIR.join("trade_engine.db");
+        let db = super::sqlite_database::SqliteDatabase::new(
+            db_path.to_str().ok_or("Invalid database path")?
+        )?;
+        Ok(Self::new_with_database(Arc::new(db)))
+    }
+
+    /// Create a new MainEngine with SQLite database at a custom path.
+    ///
+    /// Requires the `sqlite` feature flag.
+    #[cfg(feature = "sqlite")]
+    pub fn new_with_sqlite_at(path: &str) -> Result<Self, String> {
+        let db = super::sqlite_database::SqliteDatabase::new(path)?;
+        Ok(Self::new_with_database(Arc::new(db)))
+    }
+
     /// Internal constructor
     fn new_internal(database: Option<Arc<dyn BaseDatabase>>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();

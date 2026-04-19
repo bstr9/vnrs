@@ -492,6 +492,8 @@ impl StrategyTemplate for PythonStrategyAdapter {
                     price: po.price,
                     offset,
                     reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
                 }
             })
             .collect()

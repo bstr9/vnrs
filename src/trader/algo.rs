@@ -422,6 +422,8 @@ impl AlgoEngine {
                     price: config.limit_price.unwrap_or(0.0),
                     volume: slice_volume,
                     reference: format!("TWAP_{}_{}", algo_id, slice_idx),
+                    post_only: false,
+                    reduce_only: false,
                 };
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound
@@ -521,6 +523,8 @@ impl AlgoEngine {
                     price: config.limit_price.unwrap_or(0.0),
                     volume: slice_volume,
                     reference: format!("VWAP_{}_{}", algo_id, slice_idx),
+                    post_only: false,
+                    reduce_only: false,
                 };
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound

@@ -125,3 +125,20 @@ This file records backtest results for the Volatility Strategy on BTCUSDT.
 
 ---
 
+## Python Strategies Backtest - 2026-04-19 14:05
+
+**Data**: Synthetic (500 bars, 2% volatility, seed=42)
+
+| Strategy | Sharpe Ratio | Max DD% | PnL ($) | Trades |
+|----------|-------------|---------|---------|--------|
+| atr_rsi_strategy | 0.0000 | 0.00% | $168414.91 | 5 |
+| bitcoin_spot_strategy | 0.0000 | 4.58% | $-4582.78 | 18 |
+| boll_channel_strategy | 0.0000 | 0.00% | $0.00 | 0 |
+| double_ma_strategy | 0.0000 | 19.91% | $-19910.88 | 22 |
+| dual_thrust_strategy | 0.0000 | 0.00% | $0.00 | 0 |
+| king_keltner_strategy | 0.0000 | 0.00% | $0.00 | 0 |
+| multi_signal_strategy | 0.0000 | 26.43% | $-26431.34 | 25 |
+| multi_timeframe_strategy | 0.0000 | 0.00% | $0.00 | 0 |
+| test_strategy | 0.0000 | 0.00% | $0.00 | 0 |
+| turtle_15min_ema_strategy | 0.0000 | 53.86% | $-53856.48 | 9 |
+| turtle_signal_strategy | 0.0000 | 4837.21% | $-4837213.84 | 1000 |

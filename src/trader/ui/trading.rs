@@ -713,6 +713,8 @@ impl TradingWidget {
             price,
             offset,
             reference: "ManualTrading".to_string(),
+            post_only: false,
+            reduce_only: false,
         });
     }
 

@@ -857,6 +857,18 @@ pub struct OrderRequest {
     pub price: f64,
     pub offset: Offset,
     pub reference: String,
+    /// Post-Only: Order will only be added to the order book if it can be placed
+    /// as a maker order (no immediate taker fill). Rejected if it would immediately match.
+    /// Binance Spot: `newOrderRespType=EXPIRED_TAKER` + `type=LIMIT` + `timeInForce=GTC`
+    /// Binance Futures: `timeInForce=GTX`
+    #[serde(default)]
+    pub post_only: bool,
+    /// Reduce-Only: Order can only reduce an existing position, not open a new one.
+    /// If the order would increase position size, the excess quantity is cancelled.
+    /// Binance Spot: Not supported (field ignored).
+    /// Binance Futures: `reduceOnly=true`
+    #[serde(default)]
+    pub reduce_only: bool,
 }
 
 impl OrderRequest {
@@ -877,6 +889,8 @@ impl OrderRequest {
             price: 0.0,
             offset: Offset::None,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         }
     }
 

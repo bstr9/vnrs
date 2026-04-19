@@ -15,6 +15,32 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(create_main_engine, m)?)?;
     m.add_function(wrap_pyfunction!(run_event_loop, m)?)?;
 
+    // Direction class with LONG/SHORT/NET string attributes (vnpy compatible).
+    // Uses a simple Python class so Direction.LONG == "LONG" works for
+    // string comparisons (the backtesting engine passes directions as strings).
+    let py = m.py();
+    // Create Direction class via Python exec in the module's dict
+    // We use a temporary dict, exec into it, then copy the result
+    let ns = pyo3::types::PyDict::new(py);
+    ns.set_item("Direction", py.None())?;  // placeholder
+    let direction_code = "class Direction:\n    LONG = 'LONG'\n    SHORT = 'SHORT'\n    NET = 'NET'\n";
+    let exec_fn = py.import("builtins")?.getattr("exec")?;
+    let code_obj = py.import("builtins")?.getattr("compile")?.call1((direction_code, "<string>", "exec"))?;
+    exec_fn.call1((code_obj, &ns))?;
+    let direction_cls = ns.get_item("Direction")?
+        .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyException, _>("Failed to create Direction class"))?;
+    m.add("Direction", direction_cls)?;
+
+    // Module-level LONG/SHORT/NET string constants for direct import
+    m.add("LONG", "LONG")?;
+    m.add("SHORT", "SHORT")?;
+    m.add("NET", "NET")?;
+
+    // CtaStrategy alias for backward compatibility (vnpy CtaTemplate compat)
+    // Strategies do `from trade_engine import CtaStrategy` — this maps to Strategy
+    let strategy_cls: Py<PyAny> = m.getattr("Strategy")?.into();
+    m.add("CtaStrategy", strategy_cls.clone_ref(py))?;
+
     // Register backtesting module
     crate::python::backtesting_bindings::register_backtesting_module(m)?;
 

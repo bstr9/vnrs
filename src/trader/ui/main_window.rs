@@ -1698,6 +1698,8 @@ impl MainWindow {
                     price: price.unwrap_or(0.0),
                     offset: offset_enum,
                     reference: "MCP".to_string(),
+                    post_only: false,
+                    reduce_only: false,
                 };
                 self.trading.set_order_request(req, &gateway_name);
                 tracing::info!("MCP: 下单请求");

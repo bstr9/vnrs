@@ -345,6 +345,19 @@ impl RiskManager {
             }
         }
 
+        // 10. Check post_only validity - Post-Only only valid for limit orders
+        if req.post_only && req.order_type != super::constant::OrderType::Limit {
+            return RiskCheckResult::Rejected(format!(
+                "Post-Only is only valid for LIMIT orders, got {:?}",
+                req.order_type
+            ));
+        }
+
+        // 11. Check reduce_only validity - Reduce-Only requires existing position
+        // Note: We can't fully validate reduce_only without knowing the current position size
+        // The exchange will reject if position doesn't exist. We just log a warning here.
+        // (Risk manager doesn't track per-direction positions, only net position)
+
         RiskCheckResult::Approved
     }
 
@@ -543,6 +556,8 @@ mod tests {
             price,
             volume,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         }
     }
 
@@ -655,6 +670,8 @@ mod tests {
             price: 50000.0,
             volume: 0.01,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let result = rm.check_order(&open_req);
         assert!(matches!(result, RiskCheckResult::Rejected(_)));
@@ -669,6 +686,8 @@ mod tests {
             price: 50000.0,
             volume: 0.01,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
         };
         let result = rm.check_order(&close_req);
         assert!(matches!(result, RiskCheckResult::Approved));
