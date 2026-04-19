@@ -49,10 +49,10 @@ pub use event::{Event, EventEngine, EVENT_TIMER};
 pub use rpc::{client::RpcClient as RpcClient, server::RpcServer as RpcServer};
 #[cfg(feature = "alpha")]
 pub use alpha::{AlphaLab, AlphaDataset, AlphaModel, AlphaStrategy, Segment, logger as alpha_logger, AlphaBarData};
-pub use strategy::{StrategyEngine, StrategyTemplate, StrategyContext, StrategyType, StrategyState, VolatilityStrategy};
+pub use strategy::{StrategyEngine, StrategyTemplate, StrategyContext, StrategyType, StrategyState, StrategySetting, StrategyRiskConfig, VolatilityStrategy};
 pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode, DailyResult, BacktestingResult};
 #[cfg(feature = "python")]
-pub use python::{Strategy, PythonEngine};
+pub use python::{Strategy, PythonEngine, PythonEngineBridge, StrategyEngineHandle};
 pub use trader::{
     // Constants
     Direction, Exchange, Interval, Offset, OrderType, Product, Status,

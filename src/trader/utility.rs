@@ -29,11 +29,11 @@ pub fn extract_vt_symbol(vt_symbol: &str) -> Option<(String, Exchange)> {
         return None;
     }
 
-    let exchange_str = parts[0];
+    let exchange_str = parts[0].to_uppercase();
     let symbol = parts[1].to_string();
 
-    // Parse exchange from string
-    let exchange = match exchange_str {
+    // Parse exchange from string (case-insensitive)
+    let exchange = match exchange_str.as_str() {
         "CFFEX" => Exchange::Cffex,
         "SHFE" => Exchange::Shfe,
         "CZCE" => Exchange::Czce,
@@ -1462,11 +1462,41 @@ mod tests {
 
     #[test]
     fn test_extract_vt_symbol() {
+        // Standard case (uppercase)
         let result = extract_vt_symbol("BTCUSDT.BINANCE");
         assert!(result.is_some());
         let (symbol, exchange) = result.unwrap();
         assert_eq!(symbol, "BTCUSDT");
         assert_eq!(exchange, Exchange::Binance);
+
+        // Lowercase exchange (case-insensitive)
+        let result = extract_vt_symbol("btcusdt.binance");
+        assert!(result.is_some());
+        let (symbol, exchange) = result.unwrap();
+        assert_eq!(symbol, "btcusdt");
+        assert_eq!(exchange, Exchange::Binance);
+
+        // Mixed case
+        let result = extract_vt_symbol("ETHUSDT.Binance");
+        assert!(result.is_some());
+        let (symbol, exchange) = result.unwrap();
+        assert_eq!(symbol, "ETHUSDT");
+        assert_eq!(exchange, Exchange::Binance);
+
+        // BINANCE_USDM
+        let result = extract_vt_symbol("BTCUSDT.BINANCE_USDM");
+        assert!(result.is_some());
+        let (symbol, exchange) = result.unwrap();
+        assert_eq!(symbol, "BTCUSDT");
+        assert_eq!(exchange, Exchange::BinanceUsdm);
+
+        // Invalid exchange
+        let result = extract_vt_symbol("BTCUSDT.UNKNOWN");
+        assert!(result.is_none());
+
+        // No exchange
+        let result = extract_vt_symbol("BTCUSDT");
+        assert!(result.is_none());
     }
 
     #[test]
