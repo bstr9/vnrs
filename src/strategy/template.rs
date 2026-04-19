@@ -11,6 +11,7 @@ use super::base::{StrategySetting, StrategyState, StrategyType, StopOrderRequest
 use crate::chart::Indicator;
 use crate::trader::{
     BarData, Direction, Exchange, Interval, Offset, OrderData, OrderRequest, OrderType, TickData, TradeData,
+    DepthData,
 };
 use crate::trader::database::BaseDatabase;
 
@@ -270,6 +271,12 @@ pub trait StrategyTemplate: Send + Sync {
 
     /// Bar data callback
     fn on_bar(&mut self, bar: &BarData, context: &StrategyContext);
+
+    /// Depth/Order book data callback
+    fn on_depth(&mut self, depth: &DepthData, context: &StrategyContext) {
+        // Default implementation: no-op
+        let _ = (depth, context);
+    }
 
     /// Multiple bars callback (for strategies trading multiple symbols)
     fn on_bars(&mut self, bars: &HashMap<String, BarData>, context: &StrategyContext) {

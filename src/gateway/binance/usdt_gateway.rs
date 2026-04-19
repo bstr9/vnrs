@@ -16,7 +16,7 @@ use super::rest_client::BinanceRestClient;
 use super::websocket_client::{BinanceWebSocketClient, WsMessageHandler};
 
 use crate::trader::{
-    AccountData, BarData, CancelRequest, ContractData, Direction, Exchange,
+    AccountData, BarData, CancelRequest, ContractData, DepthData, Direction, Exchange,
     GatewayEventSender, GatewaySettings, GatewaySettingValue,
     HistoryRequest, Offset, OrderData, OrderRequest,
     PositionData, Product, Status, SubscribeRequest, TickData, TradeData,
@@ -770,6 +770,13 @@ impl BaseGateway for BinanceUsdtGateway {
                     tick.localtime = Some(Utc::now());
                     if let Some(sender) = event_sender.read().await.as_ref() {
                         sender.on_tick(tick.clone());
+                    }
+                    // Emit depth event from tick's 5-level book
+                    let depth = DepthData::from_tick(&tick);
+                    if !depth.bids.is_empty() || !depth.asks.is_empty() {
+                        if let Some(sender) = event_sender.read().await.as_ref() {
+                            sender.on_depth(depth);
+                        }
                     }
                 }
             });

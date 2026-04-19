@@ -91,6 +91,8 @@ pub use trader::{
     ContractManager,
     // Trading session manager
     TradingSessionManager, TradingSession,
+    // Order book
+    OrderBook, OrderBookManager, OrderBookSnapshot, DepthData,
 };
 
 // Re-export Binance gateways

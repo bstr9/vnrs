@@ -4,11 +4,11 @@ use tokio::sync::RwLock;
 use chrono::{Utc, Duration};
 
 use crate::trader::{
-    MainEngine, TickData, OrderData, OrderRequest, TradeData, BarData,
+    MainEngine, TickData, OrderData, OrderRequest, TradeData, BarData, DepthData,
     SubscribeRequest, CancelRequest, HistoryRequest,
     Direction, Interval, Exchange, Offset, Status, BaseEngine, GatewayEvent,
     BarSynthesizer,
-    EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE,
+    EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE, EVENT_DEPTH,
 };
 use crate::trader::database::BaseDatabase;
 use crate::event::EventEngine;
@@ -165,6 +165,11 @@ impl StrategyEngine {
                     self.process_trade_event(trade);
                 }
             }
+            depth_type if depth_type.starts_with(EVENT_DEPTH) => {
+                if let GatewayEvent::DepthBook(depth) = event {
+                    self.process_depth_event(depth);
+                }
+            }
             _ => {}
         }
     }
@@ -276,6 +281,24 @@ impl StrategyEngine {
                     if let Some(strategy) = strategies.get_mut(strategy_name) {
                         strategy.on_bar(&synthesized_bar, context);
                     }
+                }
+            }
+        }
+    }
+
+    /// Process depth/order book event and dispatch to subscribed strategies
+    fn process_depth_event(&self, depth: &DepthData) {
+        let vt_symbol = depth.vt_symbol();
+        let strategy_names: Vec<String> = self.symbol_strategy_map.blocking_read()
+            .get(&vt_symbol).cloned()
+            .unwrap_or_default();
+
+        for strategy_name in &strategy_names {
+            let contexts = self.contexts.blocking_read();
+            if let Some(context) = contexts.get(strategy_name) {
+                let mut strategies = self.strategies.blocking_write();
+                if let Some(strategy) = strategies.get_mut(strategy_name) {
+                    strategy.on_depth(depth, context);
                 }
             }
         }

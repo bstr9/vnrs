@@ -45,6 +45,7 @@ pub mod stop_order;
 pub mod sync_bar_generator;
 pub mod utility;
 pub mod order_emulator;
+pub mod order_book;
 pub mod session;
 
 #[cfg(feature = "sqlite")]
@@ -74,7 +75,7 @@ pub use gateway::{BaseGateway, GatewayEvent, GatewayEventSender, GatewaySettings
 pub use identifier::{ClientOrderId, InstrumentId, PositionId, StrategyId};
 pub use logger::{init_logger, Logger, DEBUG, ERROR, INFO, WARNING, CRITICAL};
 pub use object::{
-    AccountData, BarData, CancelRequest, ContractData, HistoryRequest, LogData, OrderData,
+    AccountData, BarData, CancelRequest, ContractData, DepthData, HistoryRequest, LogData, OrderData,
     OrderRequest, PositionData, QuoteData, QuoteRequest, SubscribeRequest, TickData, TradeData,
 };
 pub use optimize::{check_optimization_setting, run_bf_optimization, run_ga_optimization, OptimizationSetting};
@@ -84,6 +85,7 @@ pub use risk::{DailyStats, RiskCheckResult, RiskConfig, RiskManager};
 pub use setting::{Settings, SettingValue, SETTINGS};
 pub use stop_order::{StopOrderEngine, StopOrder, StopOrderRequest, StopOrderType, StopOrderStatus, StopOrderId};
 pub use order_emulator::{OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId, EmulatorSendOrderCallback, EmulatorCancelOrderCallback};
+pub use order_book::{OrderBook, OrderBookManager, OrderBookSnapshot};
 pub use session::{TradingSessionManager, TradingSession};
 pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use bar_synthesizer::BarSynthesizer;

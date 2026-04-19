@@ -29,3 +29,6 @@ pub const EVENT_CONTRACT: &str = "eContract.";
 
 /// Log event type
 pub const EVENT_LOG: &str = "eLog";
+
+/// Depth/Order book event type (with optional symbol suffix)
+pub const EVENT_DEPTH: &str = "eDepth.";

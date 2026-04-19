@@ -17,6 +17,7 @@ use super::risk::RiskManager;
 use super::bracket_order::BracketOrderEngine;
 use super::stop_order::StopOrderEngine;
 use super::order_emulator::OrderEmulator;
+use super::order_book::OrderBookManager;
 use super::session::TradingSessionManager;
 
 use super::event::*;
@@ -479,6 +480,7 @@ pub struct MainEngine {
     order_emulator: Arc<OrderEmulator>,
     contract_manager: Arc<ContractManager>,
     session_manager: Arc<TradingSessionManager>,
+    order_book_manager: Arc<OrderBookManager>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -526,6 +528,7 @@ impl MainEngine {
         let order_emulator = Arc::new(OrderEmulator::new());
         let contract_manager = Arc::new(ContractManager::new());
         let session_manager = Arc::new(TradingSessionManager::new());
+        let order_book_manager = Arc::new(OrderBookManager::new());
 
         // Create OffsetConverter with contract lookup from OmsEngine
         let oms_for_converter = oms_engine.clone();
@@ -550,6 +553,7 @@ impl MainEngine {
             order_emulator,
             contract_manager,
             session_manager,
+            order_book_manager,
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -577,6 +581,7 @@ impl MainEngine {
             engines.insert("OrderEmulator".to_string(), engine.order_emulator.clone());
             engines.insert("ContractManager".to_string(), engine.contract_manager.clone());
             engines.insert("TradingSessionManager".to_string(), engine.session_manager.clone());
+            engines.insert("OrderBookManager".to_string(), engine.order_book_manager.clone());
         }
         
         engine
@@ -668,6 +673,9 @@ impl MainEngine {
                 self.log_engine.process_log(log);
                 self.oms_engine.process_log(log.clone());
             }
+            GatewayEvent::DepthBook(_) => {
+                // Handled by OrderBookManager via sub-engine dispatch below
+            }
         }
 
         // Persist order/trade/position to database for crash recovery (#10)
@@ -691,8 +699,8 @@ impl MainEngine {
                 }
                 _ => {}
             }
-            // Event journaling — record all event types except ticks/bars (too high frequency)
-            if !matches!(event, GatewayEvent::Tick(_) | GatewayEvent::Bar(_)) {
+            // Event journaling — record all event types except ticks/bars/depth (too high frequency)
+            if !matches!(event, GatewayEvent::Tick(_) | GatewayEvent::Bar(_) | GatewayEvent::DepthBook(_)) {
                 let event_id = self.event_id_counter.fetch_add(1, Ordering::Relaxed);
                 let gateway_name = match event {
                     GatewayEvent::Tick(t) => t.gateway_name.clone(),
@@ -704,6 +712,7 @@ impl MainEngine {
                     GatewayEvent::Contract(c) => c.gateway_name.clone(),
                     GatewayEvent::Quote(q) => q.gateway_name.clone(),
                     GatewayEvent::Log(l) => l.gateway_name.clone(),
+                    GatewayEvent::DepthBook(d) => d.gateway_name.clone(),
                 };
                 // Store a summary payload since GatewayEvent doesn't implement Serialize
                 let payload = format!("{:?}", event);
@@ -1011,6 +1020,11 @@ impl MainEngine {
     /// Get trading session manager
     pub fn session_manager(&self) -> &Arc<TradingSessionManager> {
         &self.session_manager
+    }
+
+    /// Get order book manager
+    pub fn order_book_manager(&self) -> &Arc<OrderBookManager> {
+        &self.order_book_manager
     }
 
     /// Get tick data

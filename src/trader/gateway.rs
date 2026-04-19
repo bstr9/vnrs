@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use super::constant::Exchange;
 use super::event::*;
 use super::object::{
-    AccountData, BarData, CancelRequest, ContractData, HistoryRequest, LogData,
+    AccountData, BarData, CancelRequest, ContractData, DepthData, HistoryRequest, LogData,
     OrderData, OrderRequest, PositionData, QuoteData, QuoteRequest, SubscribeRequest,
     TickData, TradeData,
 };
@@ -25,6 +25,7 @@ pub enum GatewayEvent {
     Quote(QuoteData),
     Contract(ContractData),
     Log(LogData),
+    DepthBook(DepthData),
 }
 
 /// Gateway setting value types
@@ -265,6 +266,13 @@ impl GatewayEventSender {
     /// Push a contract event
     pub fn on_contract(&self, contract: ContractData) {
         let _ = self.sender.send((EVENT_CONTRACT.to_string(), GatewayEvent::Contract(contract)));
+    }
+
+    /// Push a depth/book event
+    pub fn on_depth(&self, depth: DepthData) {
+        let event_type = format!("{}{}", EVENT_DEPTH, depth.vt_symbol());
+        let _ = self.sender.send((event_type, GatewayEvent::DepthBook(depth.clone())));
+        let _ = self.sender.send((EVENT_DEPTH.to_string(), GatewayEvent::DepthBook(depth)));
     }
 
     /// Write a log message from gateway

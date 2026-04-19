@@ -1,8 +1,9 @@
 //! Basic data structures used for general trading function in the trading platform.
 
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::constant::{Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status};
 
@@ -142,6 +143,133 @@ impl TickData {
 }
 
 impl BaseData for TickData {
+    fn gateway_name(&self) -> &str {
+        &self.gateway_name
+    }
+
+    fn extra(&self) -> Option<&HashMap<String, String>> {
+        self.extra.as_ref()
+    }
+
+    fn set_extra(&mut self, extra: HashMap<String, String>) {
+        self.extra = Some(extra);
+    }
+}
+
+/// Depth data contains a full order book snapshot with multiple price levels.
+/// Unlike TickData's fixed 5-level depth, DepthData supports variable-depth
+/// order books using BTreeMap for efficient sorted access and updates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DepthData {
+    pub gateway_name: String,
+    pub symbol: String,
+    pub exchange: Exchange,
+    pub datetime: DateTime<Utc>,
+
+    /// Bid side: price -> volume, sorted descending by price
+    pub bids: BTreeMap<Decimal, Decimal>,
+    /// Ask side: price -> volume, sorted ascending by price
+    pub asks: BTreeMap<Decimal, Decimal>,
+
+    #[serde(skip)]
+    pub extra: Option<HashMap<String, String>>,
+}
+
+impl DepthData {
+    /// Create a new DepthData
+    pub fn new(
+        gateway_name: String,
+        symbol: String,
+        exchange: Exchange,
+        datetime: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            gateway_name,
+            symbol,
+            exchange,
+            datetime,
+            bids: BTreeMap::new(),
+            asks: BTreeMap::new(),
+            extra: None,
+        }
+    }
+
+    /// Get vt_symbol (symbol.exchange)
+    pub fn vt_symbol(&self) -> String {
+        format!("{}.{}", self.symbol, self.exchange.value())
+    }
+
+    /// Create DepthData from a TickData's 5-level depth
+    pub fn from_tick(tick: &TickData) -> Self {
+        let mut depth = Self::new(
+            tick.gateway_name.clone(),
+            tick.symbol.clone(),
+            tick.exchange,
+            tick.datetime,
+        );
+
+        // Insert bid levels
+        let bid_prices = [
+            tick.bid_price_1, tick.bid_price_2, tick.bid_price_3,
+            tick.bid_price_4, tick.bid_price_5,
+        ];
+        let bid_volumes = [
+            tick.bid_volume_1, tick.bid_volume_2, tick.bid_volume_3,
+            tick.bid_volume_4, tick.bid_volume_5,
+        ];
+        let ask_prices = [
+            tick.ask_price_1, tick.ask_price_2, tick.ask_price_3,
+            tick.ask_price_4, tick.ask_price_5,
+        ];
+        let ask_volumes = [
+            tick.ask_volume_1, tick.ask_volume_2, tick.ask_volume_3,
+            tick.ask_volume_4, tick.ask_volume_5,
+        ];
+
+        for i in 0..5 {
+            if bid_prices[i] > 0.0 && bid_volumes[i] > 0.0 {
+                if let (Some(price), Some(vol)) = (
+                    Decimal::from_f64_retain(bid_prices[i]),
+                    Decimal::from_f64_retain(bid_volumes[i]),
+                ) {
+                    depth.bids.insert(price, vol);
+                }
+            }
+            if ask_prices[i] > 0.0 && ask_volumes[i] > 0.0 {
+                if let (Some(price), Some(vol)) = (
+                    Decimal::from_f64_retain(ask_prices[i]),
+                    Decimal::from_f64_retain(ask_volumes[i]),
+                ) {
+                    depth.asks.insert(price, vol);
+                }
+            }
+        }
+
+        depth
+    }
+
+    /// Get best bid price
+    pub fn best_bid_price(&self) -> Option<Decimal> {
+        self.bids.keys().next_back().copied()
+    }
+
+    /// Get best ask price
+    pub fn best_ask_price(&self) -> Option<Decimal> {
+        self.asks.keys().next().copied()
+    }
+
+    /// Get best bid volume
+    pub fn best_bid_volume(&self) -> Option<Decimal> {
+        self.bids.values().next_back().copied()
+    }
+
+    /// Get best ask volume
+    pub fn best_ask_volume(&self) -> Option<Decimal> {
+        self.asks.values().next().copied()
+    }
+}
+
+impl BaseData for DepthData {
     fn gateway_name(&self) -> &str {
         &self.gateway_name
     }
