@@ -17,10 +17,10 @@ use super::rest_client::BinanceRestClient;
 use super::websocket_client::{BinanceWebSocketClient, WsMessageHandler};
 
 use crate::trader::{
-    AccountData, BarData, CancelRequest, ContractData, DepthData, Exchange,
+    AccountData, BarData, CancelRequest, ContractData, DepthData, Direction, Exchange,
     GatewayEventSender, GatewaySettings, GatewaySettingValue,
     HistoryRequest, Offset, OrderData, OrderRequest, OrderType,
-    Product, Status, SubscribeRequest, TickData,
+    PositionData, Product, Status, SubscribeRequest, TickData,
     TradeData,
 };
 use crate::trader::gateway::BaseGateway;
@@ -61,6 +61,8 @@ pub struct BinanceSpotGateway {
     contracts: Arc<RwLock<HashMap<String, ContractData>>>,
     /// Cached ticks
     ticks: Arc<RwLock<HashMap<String, TickData>>>,
+    /// Cached positions
+    positions: Arc<RwLock<HashMap<String, PositionData>>>,
 }
 
 impl BinanceSpotGateway {
@@ -80,6 +82,7 @@ impl BinanceSpotGateway {
             order_submit_times: Arc::new(RwLock::new(HashMap::new())),
             contracts: Arc::new(RwLock::new(HashMap::new())),
             ticks: Arc::new(RwLock::new(HashMap::new())),
+            positions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -145,6 +148,14 @@ impl BinanceSpotGateway {
         }
     }
 
+    async fn on_position(&self, position: PositionData) {
+        let key = format!("{}_{}", position.symbol, position.direction);
+        self.positions.write().await.insert(key, position.clone());
+        if let Some(sender) = self.event_sender.read().await.as_ref() {
+            sender.on_position(position);
+        }
+    }
+
     /// Push contract event
     async fn on_contract(&self, contract: ContractData) {
         self.contracts.write().await.insert(contract.symbol.clone(), contract.clone());
@@ -201,6 +212,38 @@ impl BinanceSpotGateway {
         }
 
         self.write_log("账户资金查询成功").await;
+        Ok(())
+    }
+
+    async fn query_position_impl(&self) -> Result<(), String> {
+        let params = HashMap::new();
+        let data = self.rest_client.get("/api/v3/account", &params, Security::Signed).await?;
+
+        if let Some(balances) = data["balances"].as_array() {
+            for balance in balances {
+                let free: f64 = balance["free"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                let locked: f64 = balance["locked"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                let total = free + locked;
+
+                if total > 0.0 {
+                    let position = PositionData {
+                        symbol: balance["asset"].as_str().unwrap_or("").to_lowercase(),
+                        exchange: Exchange::Binance,
+                        direction: Direction::Long,
+                        volume: total,
+                        frozen: locked,
+                        price: 0.0,
+                        pnl: 0.0,
+                        yd_volume: 0.0,
+                        gateway_name: self.gateway_name.clone(),
+                        extra: None,
+                    };
+                    self.on_position(position).await;
+                }
+            }
+        }
+
+        self.write_log("持仓信息查询成功").await;
         Ok(())
     }
 
@@ -665,6 +708,7 @@ impl BaseGateway for BinanceSpotGateway {
 
         self.query_time().await?;
         self.query_account_impl().await?;
+        self.query_position_impl().await?;
         self.query_order_impl().await?;
         self.query_trade_impl().await?;
         self.query_contract_impl().await?;
@@ -1208,7 +1252,7 @@ impl BaseGateway for BinanceSpotGateway {
     }
 
     async fn query_account(&self) -> Result<(), String> { self.query_account_impl().await }
-    async fn query_position(&self) -> Result<(), String> { Ok(()) }
+    async fn query_position(&self) -> Result<(), String> { self.query_position_impl().await }
 
     async fn query_history(&self, req: HistoryRequest) -> Result<Vec<BarData>, String> {
         let mut history = Vec::new();
