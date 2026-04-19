@@ -89,3 +89,39 @@ This file records backtest results for the Volatility Strategy on BTCUSDT.
 - Framework integration verified: DataDownloadManager → BinanceRestClient → BacktestingEngine → VolatilityStrategy → Statistics pipeline works end-to-end
 
 ---
+## Backtest Result — 2026-04-19 04:44:37 UTC
+
+| Item | Value |
+|------|-------|
+| Strategy | VolBTC_Spot |
+| Symbol | BTCUSDT.BINANCE |
+| Bars | 30000 |
+| Period | 2025-01-01 to 2025-01-21 |
+| Total Days | 21 |
+| **Sharpe Ratio** | **3.2156** |
+| **Max Drawdown** | **141.56 (0.14%)** |
+| End Balance | 100306.56 |
+| Total Net PnL | 306.56 |
+| Total Return | 3.68% |
+| Win Rate | 44.44% |
+| Profit Factor | 1.6242 |
+| Total Trades | 22 |
+| Sortino Ratio | 4.1399 |
+| Calmar Ratio | 25.9940 |
+| Max Consecutive Wins | 2 |
+| Max Consecutive Losses | 2 |
+| Total Commission | 103.96 |
+| Total Slippage | 1.10 |
+
+**Parameters:**
+- `atr_length` = 14
+- `tp_atr_mult` = 4.0
+- `sl_atr_mult` = 1.0
+- `boll_dev` = 2.0
+- `boll_length` = 30
+- `am_length` = 100
+- `fixed_size` = 0.1
+- `natr_threshold` = 0.6
+
+---
+

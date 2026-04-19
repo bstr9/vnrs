@@ -30,6 +30,7 @@ pub mod contract_manager;
 pub mod converter;
 pub mod database;
 pub mod data_download;
+pub mod data_engine;
 pub mod datafeed;
 pub mod engine;
 pub mod event;
@@ -72,6 +73,7 @@ pub use database::{BarOverview, BaseDatabase, EventRecord, FileDatabase, MemoryD
 #[cfg(feature = "sqlite")]
 pub use sqlite_database::SqliteDatabase;
 pub use data_download::{DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult};
+pub use data_engine::{DataEngine, TickBarAggregator, DefaultBarAggregator};
 pub use datafeed::{BaseDatafeed, EmptyDatafeed};
 pub use engine::{BaseEngine, LogEngine, MainEngine, OmsEngine};
 pub use event::*;

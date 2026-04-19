@@ -19,6 +19,7 @@ use super::stop_order::StopOrderEngine;
 use super::order_emulator::OrderEmulator;
 use super::order_book::OrderBookManager;
 use super::reconciliation::ReconciliationEngine;
+use super::data_engine::DataEngine;
 use super::session::TradingSessionManager;
 
 use super::event::*;
@@ -483,6 +484,7 @@ pub struct MainEngine {
     session_manager: Arc<TradingSessionManager>,
     order_book_manager: Arc<OrderBookManager>,
     reconciliation_engine: RwLock<Option<Arc<ReconciliationEngine>>>,
+    data_engine: RwLock<Option<Arc<DataEngine>>>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -557,6 +559,7 @@ impl MainEngine {
             session_manager,
             order_book_manager,
             reconciliation_engine: RwLock::new(None),
+            data_engine: RwLock::new(None),
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -1047,6 +1050,29 @@ impl MainEngine {
     /// Get the ReconciliationEngine if one has been added
     pub fn reconciliation_engine(&self) -> Option<Arc<ReconciliationEngine>> {
         self.reconciliation_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Add a DataEngine for centralized subscription management and tick→bar aggregation
+    ///
+    /// The DataEngine will:
+    /// - De-duplicate gateway subscriptions when multiple strategies subscribe to same symbol
+    /// - Aggregate ticks into 1-minute bars centrally
+    /// - Synthesize higher-timeframe bars (5m/15m/1h/4h/1d) from 1m bars
+    /// - Emit bar events into the event stream for StrategyEngine consumption
+    ///
+    /// # Returns
+    /// The created DataEngine, already registered as a sub-engine
+    pub fn add_data_engine(self: &Arc<Self>) -> Arc<DataEngine> {
+        let data_engine = Arc::new(DataEngine::new(self.clone(), self.event_tx.clone()));
+        self.add_engine(data_engine.clone());
+        *self.data_engine.write().unwrap_or_else(|e| e.into_inner()) = Some(data_engine.clone());
+        info!("DataEngine已注册为子引擎");
+        data_engine
+    }
+
+    /// Get the DataEngine if one has been added
+    pub fn data_engine(&self) -> Option<Arc<DataEngine>> {
+        self.data_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get tick data

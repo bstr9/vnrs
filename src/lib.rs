@@ -99,6 +99,8 @@ pub use trader::{
     ReconciliationEngine, PositionDrift, OrderDrift, ReconciliationResult,
     // Message bus
     MessageBus, BusMessage,
+    // Data engine
+    DataEngine, TickBarAggregator, DefaultBarAggregator,
 };
 
 // Re-export Binance gateways
