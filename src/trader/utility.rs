@@ -46,6 +46,8 @@ pub fn extract_vt_symbol(vt_symbol: &str) -> Option<(String, Exchange)> {
         "BINANCE" => Exchange::Binance,
         "BINANCE_USDM" => Exchange::BinanceUsdm,
         "BINANCE_COINM" => Exchange::BinanceCoinm,
+        "OKX" => Exchange::Okx,
+        "BYBIT" => Exchange::Bybit,
         "LOCAL" => Exchange::Local,
         "GLOBAL" => Exchange::Global,
         _ => return None,

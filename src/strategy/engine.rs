@@ -618,6 +618,10 @@ impl StrategyEngine {
         let symbol = parts[0].to_string();
         let exchange = match parts[1].to_uppercase().as_str() {
             "BINANCE" => Exchange::Binance,
+            "BINANCE_USDM" => Exchange::BinanceUsdm,
+            "BINANCE_COINM" => Exchange::BinanceCoinm,
+            "OKX" => Exchange::Okx,
+            "BYBIT" => Exchange::Bybit,
             _ => {
                 tracing::error!("Unsupported exchange: {}", parts[1]);
                 return;

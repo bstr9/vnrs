@@ -143,8 +143,10 @@ pub enum OrderType {
     Limit,
     /// Market order (市价)
     Market,
-    /// Stop order
+    /// Stop order (止损市价)
     Stop,
+    /// Stop limit order (止损限价)
+    StopLimit,
     /// Fill and Kill
     Fak,
     /// Fill or Kill
@@ -160,7 +162,8 @@ impl fmt::Display for OrderType {
         match self {
             OrderType::Limit => write!(f, "限价"),
             OrderType::Market => write!(f, "市价"),
-            OrderType::Stop => write!(f, "STOP"),
+            OrderType::Stop => write!(f, "止损市价"),
+            OrderType::StopLimit => write!(f, "止损限价"),
             OrderType::Fak => write!(f, "FAK"),
             OrderType::Fok => write!(f, "FOK"),
             OrderType::Rfq => write!(f, "询价"),
@@ -293,6 +296,10 @@ pub enum Exchange {
     BinanceUsdm,
     /// Binance Coin-M Futures
     BinanceCoinm,
+    /// OKX Exchange
+    Okx,
+    /// Bybit Exchange
+    Bybit,
 
     // Special Function
     /// For local generated data
@@ -355,6 +362,8 @@ impl Exchange {
             Exchange::Binance => "BINANCE",
             Exchange::BinanceUsdm => "BINANCE_USDM",
             Exchange::BinanceCoinm => "BINANCE_COINM",
+            Exchange::Okx => "OKX",
+            Exchange::Bybit => "BYBIT",
             Exchange::Local => "LOCAL",
             Exchange::Global => "GLOBAL",
         }

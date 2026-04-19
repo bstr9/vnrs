@@ -347,6 +347,8 @@ impl BacktestingEngine {
                 "BINANCE" => Exchange::Binance,
                 "BINANCE_USDM" => Exchange::BinanceUsdm,
                 "BINANCE_COINM" => Exchange::BinanceCoinm,
+                "OKX" => Exchange::Okx,
+                "BYBIT" => Exchange::Bybit,
                 "CFFEX" => Exchange::Cffex,
                 "SHFE" => Exchange::Shfe,
                 "CZCE" => Exchange::Czce,
@@ -1084,7 +1086,7 @@ impl BacktestingEngine {
                 order_type: stop_order.order_type,
                 direction: Some(stop_order.direction),
                 offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: stop_order.price,
+                price: stop_order.limit_price.unwrap_or(stop_order.price),
                 volume: stop_order.volume,
                 traded: 0.0,
                 status: Status::NotTraded,
@@ -1093,8 +1095,17 @@ impl BacktestingEngine {
                 extra: None,
             };
 
-            // Use FillModel to simulate the stop fill with trigger price
-            let fill_result = self.fill_model.simulate_stop_fill(&order, bar, stop_order.price);
+            // Use appropriate fill simulation based on order type
+            let fill_result = match stop_order.order_type {
+                OrderType::StopLimit => {
+                    // StopLimit: after trigger, behaves like a limit order at limit_price
+                    self.fill_model.simulate_limit_fill(&order, bar)
+                }
+                _ => {
+                    // Stop (market): fill at market price after trigger
+                    self.fill_model.simulate_stop_fill(&order, bar, stop_order.price)
+                }
+            };
 
             if fill_result.filled {
                 self.trade_count += 1;
@@ -1273,7 +1284,7 @@ impl BacktestingEngine {
                 order_type: stop_order.order_type,
                 direction: Some(stop_order.direction),
                 offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: stop_order.price,
+                price: stop_order.limit_price.unwrap_or(stop_order.price),
                 volume: stop_order.volume,
                 traded: 0.0,
                 status: Status::NotTraded,
@@ -1475,6 +1486,7 @@ impl BacktestingEngine {
             price: req.price,
             volume: req.volume,
             order_type: req.order_type,
+            limit_price: None, // Will be set for StopLimit if needed
             strategy_name: req.reference.clone(),
             lock: false,
             vt_orderid: None,

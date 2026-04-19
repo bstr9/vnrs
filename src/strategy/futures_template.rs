@@ -286,6 +286,8 @@ impl FuturesStrategy {
         if parts.len() == 2 {
             match parts[1].to_uppercase().as_str() {
                 "BINANCE" => Exchange::Binance,
+                "OKX" => Exchange::Okx,
+                "BYBIT" => Exchange::Bybit,
                 "SHFE" => Exchange::Shfe,
                 "INE" => Exchange::Ine,
                 "DCE" => Exchange::Dce,

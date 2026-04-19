@@ -337,6 +337,8 @@ impl BaseDatabase for SqliteDatabase {
                     let exchange_str: String = row.get(1)?;
                     let exchange = match exchange_str.as_str() {
                         "Binance" => Exchange::Binance,
+                        "OKX" => Exchange::Okx,
+                        "Bybit" => Exchange::Bybit,
                         _ => Exchange::Local,
                     };
 
@@ -413,6 +415,8 @@ impl BaseDatabase for SqliteDatabase {
                     let exchange_str: String = row.get(1)?;
                     let exchange = match exchange_str.as_str() {
                         "Binance" => Exchange::Binance,
+                        "OKX" => Exchange::Okx,
+                        "Bybit" => Exchange::Bybit,
                         _ => Exchange::Local,
                     };
 
@@ -540,6 +544,8 @@ impl BaseDatabase for SqliteDatabase {
                 let exchange_str: String = row.get(1)?;
                 let exchange = match exchange_str.as_str() {
                     "Binance" => Some(Exchange::Binance),
+                    "OKX" => Some(Exchange::Okx),
+                    "Bybit" => Some(Exchange::Bybit),
                     _ => Some(Exchange::Local),
                 };
 
@@ -599,6 +605,8 @@ impl BaseDatabase for SqliteDatabase {
                 let exchange_str: String = row.get(1)?;
                 let exchange = match exchange_str.as_str() {
                     "Binance" => Some(Exchange::Binance),
+                    "OKX" => Some(Exchange::Okx),
+                    "Bybit" => Some(Exchange::Bybit),
                     _ => Some(Exchange::Local),
                 };
 

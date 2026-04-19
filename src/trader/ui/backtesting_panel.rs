@@ -849,7 +849,8 @@ impl BacktestingPanel {
                     "BINANCE" => Exchange::Binance,
                     "BINANCE_USDM" => Exchange::BinanceUsdm,
                     "BINANCE_COINM" => Exchange::BinanceCoinm,
-                    "OKEX" | "OKX" | "BYBIT" | "HUOBI" => Exchange::Global,
+                    "OKX" => Exchange::Okx,
+                    "BYBIT" => Exchange::Bybit,
                     "LOCAL" => Exchange::Local,
                     other => {
                         tracing::warn!("Unknown exchange '{}', defaulting to Binance", other);

@@ -74,6 +74,8 @@ fn exchange_from_str(s: &str) -> Option<Exchange> {
         "BINANCE" => Some(Exchange::Binance),
         "BINANCE_USDM" => Some(Exchange::BinanceUsdm),
         "BINANCE_COINM" => Some(Exchange::BinanceCoinm),
+        "OKX" => Some(Exchange::Okx),
+        "BYBIT" => Some(Exchange::Bybit),
         "LOCAL" => Some(Exchange::Local),
         "GLOBAL" => Some(Exchange::Global),
         _ => None,

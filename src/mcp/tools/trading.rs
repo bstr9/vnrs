@@ -104,6 +104,8 @@ fn parse_exchange(s: &str) -> Result<Exchange, McpError> {
         "BINANCE" => Ok(Exchange::Binance),
         "BINANCE_USDM" => Ok(Exchange::BinanceUsdm),
         "BINANCE_COINM" => Ok(Exchange::BinanceCoinm),
+        "OKX" => Ok(Exchange::Okx),
+        "BYBIT" => Ok(Exchange::Bybit),
         "LOCAL" => Ok(Exchange::Local),
         _ => Err(McpError::invalid_params(
             format!("Unknown exchange: {}", s),
@@ -133,6 +135,7 @@ fn parse_order_type(s: &str) -> Result<OrderType, McpError> {
         "limit" => Ok(OrderType::Limit),
         "market" => Ok(OrderType::Market),
         "stop" => Ok(OrderType::Stop),
+        "stop_limit" | "stoplimit" => Ok(OrderType::StopLimit),
         "fak" => Ok(OrderType::Fak),
         "fok" => Ok(OrderType::Fok),
         _ => Err(McpError::invalid_params(

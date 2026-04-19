@@ -555,6 +555,10 @@ pub struct PyBarData {
     pub close_price: f64,
     #[pyo3(get, set)]
     pub volume: f64,
+    #[pyo3(get, set)]
+    pub turnover: f64,
+    #[pyo3(get, set)]
+    pub open_interest: f64,
 }
 
 #[pymethods]
@@ -572,6 +576,8 @@ impl PyBarData {
         low_price: f64,
         close_price: f64,
         volume: f64,
+        turnover: f64,
+        open_interest: f64,
     ) -> Self {
         Self {
             gateway_name,
@@ -584,6 +590,8 @@ impl PyBarData {
             low_price,
             close_price,
             volume,
+            turnover,
+            open_interest,
         }
     }
 
@@ -618,7 +626,8 @@ impl PyBarData {
             "low_price" | "low" => Ok(self.low_price.into_pyobject(py)?.into_any().unbind()),
             "close_price" | "close" => Ok(self.close_price.into_pyobject(py)?.into_any().unbind()),
             "volume" => Ok(self.volume.into_pyobject(py)?.into_any().unbind()),
-            "turnover" | "open_interest" => Ok(0.0_f64.into_pyobject(py)?.into_any().unbind()),
+            "turnover" => Ok(self.turnover.into_pyobject(py)?.into_any().unbind()),
+            "open_interest" => Ok(self.open_interest.into_pyobject(py)?.into_any().unbind()),
             "symbol" => Ok(self.symbol.clone().into_pyobject(py)?.into_any().unbind()),
             "exchange" => Ok(self.exchange.clone().into_pyobject(py)?.into_any().unbind()),
             "gateway_name" => Ok(self.gateway_name.clone().into_pyobject(py)?.into_any().unbind()),
@@ -647,8 +656,8 @@ impl PyBarData {
     fn to_rust(&self) -> PyResult<BarData> {
         let exchange = match self.exchange.to_uppercase().as_str() {
             "BINANCE" => Exchange::Binance,
-            "OKX" => Exchange::Global,   // Exchange::Okx not defined
-            "BYBIT" => Exchange::Global, // Exchange::Bybit not defined
+            "OKX" => Exchange::Okx,
+            "BYBIT" => Exchange::Bybit,
             _ => Exchange::Local,
         };
 
@@ -672,8 +681,8 @@ impl PyBarData {
             low_price: self.low_price,
             close_price: self.close_price,
             volume: self.volume,
-            turnover: 0.0,
-            open_interest: 0.0,
+            turnover: self.turnover,
+            open_interest: self.open_interest,
             extra: None,
         })
     }
