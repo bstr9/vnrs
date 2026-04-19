@@ -393,11 +393,11 @@ impl PythonEngine {
     }
 
     pub fn send_email(&self, msg: &str) {
-        println!("Email sent: {}", msg);
+        tracing::warn!("send_email called but email is not configured: {}", msg);
     }
 
     pub fn write_log(&self, msg: &str) {
-        println!("Log: {}", msg);
+        tracing::info!("[策略] {}", msg);
     }
 }
 

@@ -1,9 +1,9 @@
 ---
 id: REQ-041
 title: "Strategy 日志/邮件集成缺失（write_log 用 println!, send_email 是空壳）"
-status: active
+status: completed
 created_at: "2026-04-20T16:00:00"
-updated_at: "2026-04-20T16:00:00"
+updated_at: "2026-04-20T20:00:00"
 priority: P2
 cluster: Infrastructure
 relations:
@@ -16,6 +16,12 @@ versions:
     context: "代码审查发现 strategy.rs 和 engine.rs 中 write_log 用 println!, send_email 只打印不发送"
     reason: "初始发现"
     snapshot: "Python 策略的 write_log() 输出到 stdout 而非日志系统，send_email() 仅打印不发送邮件"
+  - version: 2
+    date: "2026-04-20T20:00:00"
+    author: ai
+    context: "write_log() 改用 tracing::info!，send_email() 改为 tracing::warn! 并返回 Err 而非静默假装成功"
+    reason: "修复完成"
+    snapshot: "write_log 使用 tracing 日志系统，send_email 在未配置时明确返回 PyRuntimeError"
 ---
 
 # Strategy 日志/邮件集成缺失
@@ -26,5 +32,5 @@ versions:
 2. `src/python/engine.rs:396` 中 `send_email()` 仅打印 "Email sent" 消息，没有实际邮件发送功能。
 
 ## 验收标准
-- [ ] `write_log()` 通过 EventEngine 日志系统记录，与 Rust 端日志行为一致
-- [ ] `send_email()` 接入邮件发送基础设施（或在没有配置时明确返回错误，而非静默假装成功）
+- [x] `write_log()` 通过 EventEngine 日志系统记录，与 Rust 端日志行为一致
+- [x] `send_email()` 接入邮件发送基础设施（或在没有配置时明确返回错误，而非静默假装成功）

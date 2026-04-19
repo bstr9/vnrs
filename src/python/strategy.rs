@@ -402,18 +402,20 @@ impl Strategy {
 
     /// Write log message
     fn write_log(&self, msg: &str) -> PyResult<()> {
-        println!("[Strategy Log] {}", msg);
+        tracing::info!("[策略:{}] {}", self.strategy_name, msg);
         Ok(())
     }
 
     /// Send email notification
     fn send_email(&self, msg: &str) -> PyResult<()> {
-        if let Some(ref engine) = self.engine {
-            Python::attach(|py| {
-                let _ = engine.call_method1(py, "send_email", (msg,));
-            });
-        }
-        Ok(())
+        tracing::warn!(
+            "[策略:{}] send_email called but email is not configured: {}",
+            self.strategy_name,
+            msg
+        );
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Email is not configured. Please set up SMTP settings first.",
+        ))
     }
 }
 
