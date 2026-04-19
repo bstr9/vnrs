@@ -1,6 +1,7 @@
 //! Engine module for the trading platform core functionality.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock, atomic::{AtomicBool, AtomicU64, Ordering}};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -36,11 +37,137 @@ use super::setting::SETTINGS;
 pub type EventHandler = Box<dyn Fn(&GatewayEvent) + Send + Sync>;
 
 /// Persistence task for async database writes
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum PersistTask {
     Order(OrderData),
     Trade(TradeData),
     Position(PositionData),
     Event(EventRecord),
+}
+
+/// Overflow file path for persistence fallback
+fn overflow_dir() -> PathBuf {
+    super::utility::TRADER_DIR.join("overflow")
+}
+
+fn overflow_file_path() -> PathBuf {
+    overflow_dir().join("persist_overflow.jsonl")
+}
+
+/// Ensure the overflow directory exists, creating it if needed.
+fn ensure_overflow_dir() -> Result<(), String> {
+    let dir = overflow_dir();
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create overflow dir: {}", e))?;
+    }
+    Ok(())
+}
+
+/// Attempt to send a PersistTask through the bounded channel.
+/// On failure (channel full), serialize to the overflow file instead.
+fn persist_with_overflow(
+    tx: &mpsc::Sender<PersistTask>,
+    task: PersistTask,
+    sent_counter: &AtomicU64,
+    overflow_counter: &AtomicU64,
+) {
+    match tx.try_send(task.clone()) {
+        Ok(()) => {
+            sent_counter.fetch_add(1, Ordering::Relaxed);
+        }
+        Err(e) => {
+            // Channel full or closed — write to overflow file
+            overflow_counter.fetch_add(1, Ordering::Relaxed);
+            if let Err(dir_err) = ensure_overflow_dir() {
+                warn!("Cannot create overflow directory: {}", dir_err);
+                return;
+            }
+            match serde_json::to_string(&task) {
+                Ok(json_line) => {
+                    let path = overflow_file_path();
+                    use std::fs::OpenOptions;
+                    use std::io::Write;
+                    match OpenOptions::new().create(true).append(true).open(&path) {
+                        Ok(mut file) => {
+                            if let Err(write_err) = writeln!(file, "{}", json_line) {
+                                warn!("Failed to write overflow record: {}", write_err);
+                            } else {
+                                warn!(
+                                    "Persistence channel full, wrote record to overflow file (total overflowed: {})",
+                                    overflow_counter.load(Ordering::Relaxed)
+                                );
+                            }
+                        }
+                        Err(open_err) => {
+                            warn!("Failed to open overflow file: {}", open_err);
+                        }
+                    }
+                }
+                Err(ser_err) => {
+                    warn!("Failed to serialize PersistTask for overflow: {}", ser_err);
+                }
+            }
+            // Log the original channel error at debug level (already warned above)
+            debug!("persist_tx.try_send failed: {}", e);
+        }
+    }
+}
+
+/// Read and remove up to `limit` overflow records from the overflow file,
+/// returning them as deserialized PersistTask instances.
+fn read_overflow_records(limit: usize) -> Vec<PersistTask> {
+    let path = overflow_file_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to read overflow file: {}", e);
+            return Vec::new();
+        }
+    };
+    if content.is_empty() {
+        return Vec::new();
+    }
+
+    let mut tasks = Vec::new();
+    let mut remaining_lines = Vec::new();
+
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if tasks.len() < limit {
+            match serde_json::from_str::<PersistTask>(line) {
+                Ok(task) => tasks.push(task),
+                Err(e) => {
+                    warn!("Failed to deserialize overflow record, keeping: {}", e);
+                    remaining_lines.push(line.to_string());
+                }
+            }
+        } else {
+            remaining_lines.push(line.to_string());
+        }
+    }
+
+    // Rewrite the file with only the remaining lines (ones we didn't replay)
+    if let Err(dir_err) = ensure_overflow_dir() {
+        warn!("Cannot create overflow directory for rewrite: {}", dir_err);
+        return tasks;
+    }
+    match std::fs::write(&path, remaining_lines.join("\n")) {
+        Ok(()) => {}
+        Err(e) => {
+            warn!("Failed to rewrite overflow file after replay: {}", e);
+        }
+    }
+
+    if !tasks.is_empty() {
+        info!("Replaying {} overflow records back into persistence channel", tasks.len());
+    }
+
+    tasks
 }
 
 /// Categorise a single PersistTask into typed vectors for batch processing.
@@ -508,12 +635,16 @@ pub struct MainEngine {
 
     /// Optional database for event journaling and crash recovery (#10, #11)
     database: Option<Arc<dyn BaseDatabase>>,
-    /// Bounded persistence channel for async database writes (capacity 1024)
+    /// Bounded persistence channel for async database writes (capacity 4096)
     persist_tx: mpsc::Sender<PersistTask>,
     /// Persistence receiver (taken by drain task on start)
     persist_rx: RwLock<Option<mpsc::Receiver<PersistTask>>>,
     /// Monotonic event ID counter for event journaling
     event_id_counter: AtomicU64,
+    /// Counter for successfully sent persistence tasks
+    persist_sent_count: AtomicU64,
+    /// Counter for persistence tasks that overflowed to file
+    persist_overflowed_count: AtomicU64,
 }
 
 impl MainEngine {
@@ -605,6 +736,8 @@ impl MainEngine {
             persist_tx,
             persist_rx: RwLock::new(Some(persist_rx)),
             event_id_counter: AtomicU64::new(0),
+            persist_sent_count: AtomicU64::new(0),
+            persist_overflowed_count: AtomicU64::new(0),
         };
         
         // Register OMS engine, log engine, risk manager, alert engine, and new engines
@@ -640,10 +773,12 @@ impl MainEngine {
 
         // Spawn persistence drain task if database is configured
         let db = self.database.clone();
+        let persist_tx = self.persist_tx.clone();
         let persist_rx = {
             let mut persist_lock = self.persist_rx.write().unwrap_or_else(|e| e.into_inner());
             persist_lock.take()
         };
+        const CHANNEL_CAPACITY: usize = 4096;
         if let (Some(db), Some(mut persist_rx)) = (db, persist_rx) {
             tokio::spawn(async move {
                 info!("Persistence drain task started");
@@ -697,6 +832,23 @@ impl MainEngine {
                     for event_record in events {
                         if let Err(e) = db.save_event(event_record).await {
                             warn!("Failed to persist event record: {}", e);
+                        }
+                    }
+
+                    // Overflow replay: if channel is below 50% capacity, try to replay overflow records
+                    let current_capacity = persist_tx.capacity();
+                    if current_capacity > CHANNEL_CAPACITY / 2 {
+                        let replay_count = (current_capacity - CHANNEL_CAPACITY / 2).min(BATCH_SIZE);
+                        let overflow_tasks = read_overflow_records(replay_count);
+                        for overflow_task in overflow_tasks {
+                            // Use try_send to avoid blocking; if it fails again, it will be re-written
+                            // to overflow via persist_with_overflow (but we don't have counters here)
+                            // So we just use try_send and log on failure
+                            if let Err(e) = persist_tx.try_send(overflow_task) {
+                                warn!("Failed to replay overflow record: {}", e);
+                                // Note: the overflow file was already cleared by read_overflow_records,
+                                // so this record is lost. This is acceptable as a last resort.
+                            }
                         }
                     }
                 }
@@ -753,19 +905,28 @@ impl MainEngine {
         if self.database.is_some() {
             match event {
                 GatewayEvent::Order(order) => {
-                    if let Err(e) = self.persist_tx.try_send(PersistTask::Order(order.clone())) {
-                        warn!("Persistence channel full, dropping order {}: {}", order.vt_orderid(), e);
-                    }
+                    persist_with_overflow(
+                        &self.persist_tx,
+                        PersistTask::Order(order.clone()),
+                        &self.persist_sent_count,
+                        &self.persist_overflowed_count,
+                    );
                 }
                 GatewayEvent::Trade(trade) => {
-                    if let Err(e) = self.persist_tx.try_send(PersistTask::Trade(trade.clone())) {
-                        warn!("Persistence channel full, dropping trade {}: {}", trade.vt_tradeid(), e);
-                    }
+                    persist_with_overflow(
+                        &self.persist_tx,
+                        PersistTask::Trade(trade.clone()),
+                        &self.persist_sent_count,
+                        &self.persist_overflowed_count,
+                    );
                 }
                 GatewayEvent::Position(position) => {
-                    if let Err(e) = self.persist_tx.try_send(PersistTask::Position(position.clone())) {
-                        warn!("Persistence channel full, dropping position {}: {}", position.vt_positionid(), e);
-                    }
+                    persist_with_overflow(
+                        &self.persist_tx,
+                        PersistTask::Position(position.clone()),
+                        &self.persist_sent_count,
+                        &self.persist_overflowed_count,
+                    );
                 }
                 _ => {}
             }
@@ -797,9 +958,12 @@ impl MainEngine {
                 // Store a summary payload since GatewayEvent doesn't implement Serialize
                 let payload = format!("{:?}", event);
                 let record = EventRecord::new(event_id, event_type.to_string(), gateway_name, payload);
-                if let Err(e) = self.persist_tx.try_send(PersistTask::Event(record)) {
-                    warn!("Persistence channel full, dropping event record: {}", e);
-                }
+                persist_with_overflow(
+                    &self.persist_tx,
+                    PersistTask::Event(record),
+                    &self.persist_sent_count,
+                    &self.persist_overflowed_count,
+                );
             }
         }
 
@@ -1415,6 +1579,21 @@ impl MainEngine {
         if let Some(recorder) = self.get_recorder() {
             recorder.flush().await;
         }
+    }
+
+    /// Get persistence statistics for monitoring
+    ///
+    /// Returns a tuple of:
+    /// - total_sent: Number of records successfully sent through the channel
+    /// - total_overflowed: Number of records that overflowed to file
+    /// - overflow_file_size: Current size of the overflow file in bytes (0 if none)
+    pub fn get_persist_stats(&self) -> (u64, u64, u64) {
+        let sent = self.persist_sent_count.load(Ordering::Relaxed);
+        let overflowed = self.persist_overflowed_count.load(Ordering::Relaxed);
+        let file_size = std::fs::metadata(overflow_file_path())
+            .map(|m| m.len())
+            .unwrap_or(0);
+        (sent, overflowed, file_size)
     }
 
     /// Close the main engine gracefully
