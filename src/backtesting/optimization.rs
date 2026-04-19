@@ -480,13 +480,24 @@ impl OptimizationEngine {
 }
 
 /// Optimization target
-#[derive(Debug, Clone)]
 pub enum OptimizationTarget {
     TotalReturn,
     SharpeRatio,
     MaxDrawdown,
     AnnualReturn,
-    Custom(String),
+    Custom(Box<dyn Fn(&BacktestingStatistics) -> f64 + Send + Sync>),
+}
+
+impl std::fmt::Debug for OptimizationTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OptimizationTarget::TotalReturn => write!(f, "TotalReturn"),
+            OptimizationTarget::SharpeRatio => write!(f, "SharpeRatio"),
+            OptimizationTarget::MaxDrawdown => write!(f, "MaxDrawdown"),
+            OptimizationTarget::AnnualReturn => write!(f, "AnnualReturn"),
+            OptimizationTarget::Custom(_) => write!(f, "Custom(<closure>)"),
+        }
+    }
 }
 
 /// Extract target value from statistics
@@ -502,7 +513,7 @@ fn extract_target_value(stats: &BacktestingStatistics, target: &OptimizationTarg
         OptimizationTarget::SharpeRatio => stats.sharpe_ratio,
         OptimizationTarget::MaxDrawdown => -stats.max_drawdown_percent, // Minimize drawdown
         OptimizationTarget::AnnualReturn => stats.return_mean,
-        OptimizationTarget::Custom(_) => 0.0, // Placeholder
+        OptimizationTarget::Custom(f) => f(stats),
     }
 }
 
@@ -520,5 +531,35 @@ impl Clone for OptimizationSettings {
             capital: self.capital,
             mode: self.mode,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_custom_optimization_target() {
+        let target = OptimizationTarget::Custom(Box::new(|stats| {
+            stats.total_net_pnl + stats.sharpe_ratio * 100.0
+        }));
+
+        let mut stats = BacktestingStatistics::default();
+        stats.total_net_pnl = 5000.0;
+        stats.sharpe_ratio = 1.5;
+
+        let value = extract_target_value(&stats, &target);
+        assert!((value - 5150.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_custom_optimization_target_return_mean() {
+        let target = OptimizationTarget::Custom(Box::new(|stats| stats.return_mean));
+
+        let mut stats = BacktestingStatistics::default();
+        stats.return_mean = 0.25;
+
+        let value = extract_target_value(&stats, &target);
+        assert!((value - 0.25).abs() < 1e-10);
     }
 }
