@@ -2617,6 +2617,55 @@ impl BacktestingEngine {
         trades
     }
 
+    /// Get historical bar data for the given vt_symbol within the last N days.
+    ///
+    /// This is used by Python strategies in `on_init()` to warm up indicators.
+    /// Returns bars whose datetime is within `days` days before the latest bar
+    /// in the history data (or before `end` if no bars exist yet).
+    pub fn get_history_bars(&self, _vt_symbol: &str, days: i32) -> Vec<BarData> {
+        if self.history_data.is_empty() {
+            return Vec::new();
+        }
+
+        // Determine the cutoff: last bar's datetime minus `days` days
+        let latest_dt = self.history_data
+            .last()
+            .map(|b| b.datetime)
+            .unwrap_or(self.end);
+
+        let cutoff = latest_dt - Duration::days(days as i64);
+
+        self.history_data
+            .iter()
+            .filter(|b| b.datetime >= cutoff)
+            .cloned()
+            .collect()
+    }
+
+    /// Get historical tick data for the given vt_symbol within the last N days.
+    ///
+    /// Returns ticks whose datetime is within `days` days before the latest tick
+    /// in the tick data. Returns empty Vec with a warning if tick data is unavailable.
+    pub fn get_history_ticks(&self, _vt_symbol: &str, days: i32) -> Vec<TickData> {
+        if self.tick_data.is_empty() {
+            tracing::warn!("load_tick: tick data not available in backtesting engine");
+            return Vec::new();
+        }
+
+        let latest_dt = self.tick_data
+            .last()
+            .map(|t| t.datetime)
+            .unwrap_or(self.end);
+
+        let cutoff = latest_dt - Duration::days(days as i64);
+
+        self.tick_data
+            .iter()
+            .filter(|t| t.datetime >= cutoff)
+            .cloned()
+            .collect()
+    }
+
     /// Get vt_symbol
     pub fn get_vt_symbol(&self) -> &str {
         &self.vt_symbol
