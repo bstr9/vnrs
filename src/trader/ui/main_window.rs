@@ -133,8 +133,8 @@ pub struct MainWindow {
     
     // Strategy engine reference for async data sync
     strategy_engine: Option<Arc<StrategyEngine>>,
-    // Cached strategy data for sync access from UI thread
-    strategy_cache: Arc<Mutex<Vec<(String, StrategyState)>>>,
+    // Cached strategy data for sync access from UI thread: (name, state, total_pnl)
+    strategy_cache: Arc<Mutex<Vec<(String, StrategyState, f64)>>>,
     // Frame counter for periodic strategy data refresh
     strategy_update_counter: u32,
     // Frame counter for periodic dashboard data logging (every ~10 frames = 1 second)
@@ -335,7 +335,9 @@ impl MainWindow {
                                 "Stopped" => StrategyState::Stopped,
                                 _ => StrategyState::NotInited,
                             };
-                            data.push((name, state));
+                            // Get total PnL (realized + unrealized) for this strategy
+                            let total_pnl = engine.get_strategy_total_pnl(&name);
+                            data.push((name, state, total_pnl));
                         }
                     }
                     if let Ok(mut cache) = cache.lock() {
@@ -350,7 +352,7 @@ impl MainWindow {
             use super::dashboard::{StrategySummary, StrategyStateDisplay};
             
             // Update dashboard strategies card
-            let strategies: Vec<StrategySummary> = cache.iter().map(|(name, state)| {
+            let strategies: Vec<StrategySummary> = cache.iter().map(|(name, state, total_pnl)| {
                 let display_state = match state {
                     StrategyState::Trading => StrategyStateDisplay::Running,
                     StrategyState::Inited => StrategyStateDisplay::Inited,
@@ -359,13 +361,13 @@ impl MainWindow {
                 StrategySummary {
                     name: name.clone(),
                     state: display_state,
-                    today_pnl: 0.0, // TODO: per-strategy PnL tracking
+                    today_pnl: *total_pnl,
                 }
             }).collect();
             self.dashboard_panel.update_strategies(strategies);
             
             // Update strategy panel
-            let rows: Vec<super::strategy_panel::StrategyRow> = cache.iter().map(|(name, state)| {
+            let rows: Vec<super::strategy_panel::StrategyRow> = cache.iter().map(|(name, state, _pnl)| {
                 let state_str = match state {
                     StrategyState::NotInited => "NotInited",
                     StrategyState::Inited => "Inited",
@@ -1184,8 +1186,8 @@ impl MainWindow {
                 if let Some(ref se) = self.strategy_engine {
                     if let Ok(cache) = self.strategy_cache.lock() {
                         let names: Vec<String> = cache.iter()
-                            .filter(|(_, state)| *state == StrategyState::Inited)
-                            .map(|(name, _)| name.clone())
+                            .filter(|(_, state, _)| *state == StrategyState::Inited)
+                            .map(|(name, _, _)| name.clone())
                             .collect();
                         if names.is_empty() {
                             self.toast_manager.add("没有可启动的策略（需要先初始化）", ToastType::Info);
@@ -1214,8 +1216,8 @@ impl MainWindow {
                 if let Some(ref se) = self.strategy_engine {
                     if let Ok(cache) = self.strategy_cache.lock() {
                         let names: Vec<String> = cache.iter()
-                            .filter(|(_, state)| *state == StrategyState::Trading)
-                            .map(|(name, _)| name.clone())
+                            .filter(|(_, state, _)| *state == StrategyState::Trading)
+                            .map(|(name, _, _)| name.clone())
                             .collect();
                         if names.is_empty() {
                             self.toast_manager.add("没有运行中的策略", ToastType::Info);
