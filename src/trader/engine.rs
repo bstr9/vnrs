@@ -43,6 +43,18 @@ enum PersistTask {
     Event(EventRecord),
 }
 
+/// Categorise a single PersistTask into typed vectors for batch processing.
+fn categorize_persist_task(
+    task: PersistTask,
+) -> (Vec<OrderData>, Vec<TradeData>, Vec<PositionData>, Vec<EventRecord>) {
+    match task {
+        PersistTask::Order(o) => (vec![o], vec![], vec![], vec![]),
+        PersistTask::Trade(t) => (vec![], vec![t], vec![], vec![]),
+        PersistTask::Position(p) => (vec![], vec![], vec![p], vec![]),
+        PersistTask::Event(e) => (vec![], vec![], vec![], vec![e]),
+    }
+}
+
 /// Base engine trait for implementing function engines
 pub trait BaseEngine: Send + Sync {
     /// Get the engine name
@@ -541,7 +553,7 @@ impl MainEngine {
     /// Internal constructor
     fn new_internal(database: Option<Arc<dyn BaseDatabase>>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (persist_tx, persist_rx) = mpsc::channel(1024);
+        let (persist_tx, persist_rx) = mpsc::channel(4096);
         
         let oms_engine = Arc::new(OmsEngine::new());
         let log_engine = Arc::new(LogEngine::new());
@@ -635,27 +647,56 @@ impl MainEngine {
         if let (Some(db), Some(mut persist_rx)) = (db, persist_rx) {
             tokio::spawn(async move {
                 info!("Persistence drain task started");
+                // Batch processing: collect up to 64 tasks per iteration to
+                // amortise expensive database I/O (especially FileDatabase
+                // which does read-all/rewrite-all per save call).
+                const BATCH_SIZE: usize = 64;
                 while let Some(task) = persist_rx.recv().await {
-                    match task {
-                        PersistTask::Order(order) => {
-                            if let Err(e) = db.save_order_data(vec![order]).await {
-                                warn!("Failed to persist order: {}", e);
+                    let mut orders = Vec::new();
+                    let mut trades = Vec::new();
+                    let mut positions = Vec::new();
+                    let mut events = Vec::new();
+
+                    // Collect first task and try to drain more
+                    let (o, t, p, e) = categorize_persist_task(task);
+                    orders.extend(o);
+                    trades.extend(t);
+                    positions.extend(p);
+                    events.extend(e);
+
+                    // Non-blocking drain of additional queued tasks
+                    for _ in 0..BATCH_SIZE {
+                        match persist_rx.try_recv() {
+                            Ok(task) => {
+                                let (o, t, p, e) = categorize_persist_task(task);
+                                orders.extend(o);
+                                trades.extend(t);
+                                positions.extend(p);
+                                events.extend(e);
                             }
+                            Err(_) => break,
                         }
-                        PersistTask::Trade(trade) => {
-                            if let Err(e) = db.save_trade_data(vec![trade]).await {
-                                warn!("Failed to persist trade: {}", e);
-                            }
+                    }
+
+                    // Batch-write each category
+                    if !orders.is_empty() {
+                        if let Err(e) = db.save_order_data(orders).await {
+                            warn!("Failed to persist orders batch: {}", e);
                         }
-                        PersistTask::Position(position) => {
-                            if let Err(e) = db.save_position_data(vec![position]).await {
-                                warn!("Failed to persist position: {}", e);
-                            }
+                    }
+                    if !trades.is_empty() {
+                        if let Err(e) = db.save_trade_data(trades).await {
+                            warn!("Failed to persist trades batch: {}", e);
                         }
-                        PersistTask::Event(event_record) => {
-                            if let Err(e) = db.save_event(event_record).await {
-                                warn!("Failed to persist event: {}", e);
-                            }
+                    }
+                    if !positions.is_empty() {
+                        if let Err(e) = db.save_position_data(positions).await {
+                            warn!("Failed to persist positions batch: {}", e);
+                        }
+                    }
+                    for event_record in events {
+                        if let Err(e) = db.save_event(event_record).await {
+                            warn!("Failed to persist event record: {}", e);
                         }
                     }
                 }
@@ -728,8 +769,18 @@ impl MainEngine {
                 }
                 _ => {}
             }
-            // Event journaling — record all event types except ticks/bars/depth (too high frequency)
-            if !matches!(event, GatewayEvent::Tick(_) | GatewayEvent::Bar(_) | GatewayEvent::DepthBook(_)) {
+            // Event journaling — record event types that are NOT already persisted above.
+            // Order/Trade/Position are already persisted as typed records, so skip them
+            // here to avoid doubling channel traffic. Also skip tick/bar/depth (too high frequency).
+            if !matches!(
+                event,
+                GatewayEvent::Tick(_)
+                    | GatewayEvent::Bar(_)
+                    | GatewayEvent::DepthBook(_)
+                    | GatewayEvent::Order(_)
+                    | GatewayEvent::Trade(_)
+                    | GatewayEvent::Position(_)
+            ) {
                 let event_id = self.event_id_counter.fetch_add(1, Ordering::Relaxed);
                 let gateway_name = match event {
                     GatewayEvent::Tick(t) => t.gateway_name.clone(),
@@ -1086,7 +1137,7 @@ impl MainEngine {
     /// # Returns
     /// The created DataEngine, already registered as a sub-engine
     pub fn add_data_engine(self: &Arc<Self>) -> Arc<DataEngine> {
-        let data_engine = Arc::new(DataEngine::new(self.clone(), self.event_tx.clone()));
+        let data_engine = Arc::new(DataEngine::new(self.event_tx.clone()));
         self.add_engine(data_engine.clone());
         *self.data_engine.write().unwrap_or_else(|e| e.into_inner()) = Some(data_engine.clone());
         info!("DataEngine已注册为子引擎");
