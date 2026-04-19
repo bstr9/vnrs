@@ -87,6 +87,8 @@ pub use trader::{
     BracketOrderRequest, OcoOrderRequest, OtoOrderRequest, GroupId, ChildOrder,
     // Order emulator engine
     OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId,
+    // Clock abstraction
+    Clock, LiveClock, TestClock,
     // Contract manager
     ContractManager,
     // Trading session manager
@@ -95,6 +97,8 @@ pub use trader::{
     OrderBook, OrderBookManager, OrderBookSnapshot, DepthData,
     // Reconciliation engine
     ReconciliationEngine, PositionDrift, OrderDrift, ReconciliationResult,
+    // Message bus
+    MessageBus, BusMessage,
 };
 
 // Re-export Binance gateways

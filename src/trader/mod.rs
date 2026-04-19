@@ -25,6 +25,7 @@ pub mod app;
 pub mod bar_synthesizer;
 pub mod bracket_order;
 pub mod constant;
+pub mod clock;
 pub mod contract_manager;
 pub mod converter;
 pub mod database;
@@ -35,6 +36,7 @@ pub mod event;
 pub mod gateway;
 pub mod identifier;
 pub mod logger;
+pub mod message_bus;
 pub mod object;
 pub mod optimize;
 pub mod portfolio;
@@ -60,6 +62,7 @@ pub use alert::{AlertChannel, AlertConfig, AlertEngine, AlertLevel, AlertMessage
 pub use algo::{AlgoEngine, AlgoId, AlgoOrderState, AlgoStatus, AlgoType, TwapConfig, VwapConfig, OrderExecutor};
 pub use app::{AppInfo, BaseApp};
 pub use bracket_order::{BracketOrderEngine, ContingencyType, OrderGroupState, OrderRole, OrderGroup, BracketOrderRequest, OcoOrderRequest, OtoOrderRequest, GroupId, ChildOrder};
+pub use clock::{Clock, LiveClock, TestClock};
 pub use constant::{
     Currency, Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status,
 };
@@ -75,6 +78,7 @@ pub use event::*;
 pub use gateway::{BaseGateway, GatewayEvent, GatewayEventSender, GatewaySettings, GatewaySettingValue};
 pub use identifier::{ClientOrderId, InstrumentId, PositionId, StrategyId};
 pub use logger::{init_logger, Logger, DEBUG, ERROR, INFO, WARNING, CRITICAL};
+pub use message_bus::{BusMessage, MessageBus};
 pub use object::{
     AccountData, BarData, CancelRequest, ContractData, DepthData, HistoryRequest, LogData, OrderData,
     OrderRequest, PositionData, QuoteData, QuoteRequest, SubscribeRequest, TickData, TradeData,
