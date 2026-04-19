@@ -378,16 +378,12 @@ impl fmt::Debug for InstrumentMatchingEngine {
 impl InstrumentMatchingEngine {
     /// Create a new instrument matching engine.
     pub fn new(config: InstrumentConfig) -> Self {
-        let parts: Vec<&str> = config.vt_symbol.split('.').collect();
-        let symbol = parts.first().map_or("", |s| *s).to_string();
-        let exchange = if parts.len() > 1 {
-            match parts[1].to_uppercase().as_str() {
-                "BINANCE" => Exchange::Binance,
-                _ => Exchange::Binance,
-            }
-        } else {
-            Exchange::Binance
-        };
+        let (symbol, exchange) = crate::trader::utility::extract_vt_symbol(&config.vt_symbol)
+            .unwrap_or_else(|| {
+                // Fallback: split from left, default exchange to Binance
+                let symbol = config.vt_symbol.split('.').next().unwrap_or("").to_string();
+                (symbol, Exchange::Binance)
+            });
 
         let position = Position::new(
             Position::generate_position_id(&symbol, exchange, 0),
@@ -491,12 +487,8 @@ impl InstrumentMatchingEngine {
             tracing::debug!("订单取消成功: {}", vt_orderid);
             Ok(order)
         } else if let Some(stop_order) = self.active_stop_orders.remove(vt_orderid) {
-            let symbol = self.config.vt_symbol.split('.').next().unwrap_or("").to_string();
-            let exchange_val = self.config.vt_symbol.split('.').nth(1)
-                .map_or(Exchange::Binance, |e| match e.to_uppercase().as_str() {
-                    "BINANCE" => Exchange::Binance,
-                    _ => Exchange::Binance,
-                });
+            let (symbol, exchange_val) = crate::trader::utility::extract_vt_symbol(&self.config.vt_symbol)
+                .unwrap_or((self.config.vt_symbol.split('.').next().unwrap_or("").to_string(), Exchange::Binance));
             Ok(OrderData {
                 gateway_name: "SIMULATED_EXCHANGE".to_string(),
                 symbol,
@@ -608,6 +600,26 @@ impl InstrumentMatchingEngine {
     /// Cross stop orders with bar data using FillModel.
     ///
     /// Replicates the logic from BacktestingEngine::cross_stop_order.
+      /// Evaluate stop orders against the current bar and trigger matches.
+    ///
+    /// **Bar-mode stop trigger (backtesting) vs tick-mode trigger (live trading):**
+    ///
+    /// In backtesting, stop orders are evaluated once per bar using the bar's
+    /// high/low prices. A buy stop triggers when `bar.high >= stop_price`,
+    /// and a sell stop triggers when `bar.low <= stop_price`. This is an
+    /// approximation — in reality, the exact intra-bar price path is unknown,
+    /// so the fill price may differ from what would happen in live trading
+    /// where stops trigger on every tick.
+    ///
+    /// **Implications:**
+    /// - In a single-bar scenario, both a buy stop and a sell stop could
+    ///   trigger on the same bar (e.g., a large wick). In live trading,
+    ///   only one would execute first depending on tick ordering.
+    /// - The fill price is determined by the `FillModel` (e.g., worst-case
+    ///   for stop fills to account for slippage), not the exact trigger price.
+    /// - For strategies that rely on precise stop execution timing (e.g.,
+    ///   scalping), bar-mode backtesting will overestimate fill quality.
+    ///   Use tick-level data for such strategies.
     fn cross_stop_order(
         &mut self,
         bar: &BarData,

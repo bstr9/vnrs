@@ -132,7 +132,24 @@ impl Position {
         self.avg_px_close
     }
 
-    /// Get realized PnL
+    /// Get realized PnL.
+    ///
+    /// **Gross PnL vs Net PnL (after commission):**
+    ///
+    /// This field contains the **gross** realized PnL, calculated as:
+    /// - Long: `(close_price - avg_entry_price) * quantity * size_multiplier`
+    /// - Short: `(avg_entry_price - close_price) * quantity * size_multiplier`
+    ///
+    /// Commission and funding costs are tracked separately:
+    /// - Commission reduces `realized_return` (via `add_commission()` → `apply_adjustment()`)
+    /// - Funding is added to `realized_pnl` (via `add_funding()`)
+    ///
+    /// To get **net** PnL after all costs, use: `realized_pnl + realized_return`
+    /// (note: `realized_return` is typically negative after commissions).
+    ///
+    /// This separation exists because gross PnL reflects the trading decision
+    /// quality, while the net result also depends on execution costs that vary
+    /// by exchange/volume tier.
     pub fn realized_pnl(&self) -> f64 {
         self.realized_pnl
     }

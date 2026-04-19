@@ -12,6 +12,7 @@ pub mod portfolio;
 pub mod position;
 pub mod fill_model;
 pub mod risk_engine;
+pub mod margin_model;
 pub mod simulated_exchange;
 pub mod data_merge;
 
@@ -28,6 +29,11 @@ pub use fill_model::{
     ProbabilisticFillModel, IdealFillModel,
 };
 pub use risk_engine::{RiskEngine, RiskConfig, RiskCheckResult};
+pub use margin_model::{
+    MarginModel, MarginCheckResult, MarginBracket,
+    LinearMarginModel, TieredMarginModel, NoMarginModel, CannedMarginModel,
+    BinanceUsdmMarginModel,
+};
 pub use simulated_exchange::{
     SimulatedExchange, InstrumentMatchingEngine, InstrumentConfig,
     FeeModel, MakerTakerFeeModel, FlatFeeModel, PercentFeeModel, NoFeeModel,

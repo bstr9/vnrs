@@ -154,6 +154,9 @@ pub struct BacktestingEngine {
     
     // Position tracking (enhanced with avg price, realized PnL, flip handling)
     position: Position,
+
+    /// Frozen close volume - volume reserved by pending close orders
+    frozen_close_volume: f64,
     
     // Fill model for realistic order fill simulation
     fill_model: Box<dyn FillModel>,
@@ -224,6 +227,7 @@ impl BacktestingEngine {
                 String::new(),
                 Exchange::Binance,
             ),
+            frozen_close_volume: 0.0,
             fill_model: Box::new(BestPriceFillModel::new(0.0)),
             risk_engine: RiskEngine::new_unrestricted(),
             daily_results: HashMap::new(),
@@ -255,6 +259,7 @@ impl BacktestingEngine {
         self.trades.clear();
         
         self.position.reset();
+        self.frozen_close_volume = 0.0;
         self.daily_results.clear();
         self.daily_result = None;
         
@@ -335,17 +340,30 @@ impl BacktestingEngine {
     ) {
         self.vt_symbol = vt_symbol.clone();
         
-        // Parse symbol and exchange
-        let parts: Vec<&str> = vt_symbol.split('.').collect();
+        // Parse symbol and exchange (use rsplitn to handle multi-part symbols)
+        let parts: Vec<&str> = vt_symbol.rsplitn(2, '.').collect();
         if parts.len() == 2 {
-            self.symbol = parts[0].to_string();
-            self.exchange = match parts[1].to_uppercase().as_str() {
+            self.exchange = match parts[0].to_uppercase().as_str() {
                 "BINANCE" => Exchange::Binance,
+                "BINANCE_USDM" => Exchange::BinanceUsdm,
+                "BINANCE_COINM" => Exchange::BinanceCoinm,
+                "CFFEX" => Exchange::Cffex,
+                "SHFE" => Exchange::Shfe,
+                "CZCE" => Exchange::Czce,
+                "DCE" => Exchange::Dce,
+                "INE" => Exchange::Ine,
+                "GFEX" => Exchange::Gfex,
+                "SSE" => Exchange::Sse,
+                "SZSE" => Exchange::Szse,
+                "BSE" => Exchange::Bse,
+                "LOCAL" => Exchange::Local,
+                "GLOBAL" => Exchange::Global,
                 other => {
                     tracing::warn!("Unknown exchange '{}', defaulting to Binance", other);
                     Exchange::Binance
                 }
             };
+            self.symbol = parts[1].to_string();
         }
         
         self.interval = interval;
@@ -730,7 +748,7 @@ impl BacktestingEngine {
             }
             
             // 4. Cross pending stop orders from previous bar
-            if let Some(ref mut sim_exchange) = self.simulated_exchange {
+            if let Some(ref mut _sim_exchange) = self.simulated_exchange {
                 // Stop orders already handled by SimulatedExchange.process_bar above
                 // (SimulatedExchange processes both limit and stop orders together)
             } else {
@@ -926,6 +944,11 @@ impl BacktestingEngine {
         }
     }
 
+    /// Check if offset is a close offset
+    fn is_close_offset(offset: Offset) -> bool {
+        matches!(offset, Offset::Close | Offset::CloseYesterday | Offset::CloseToday)
+    }
+
     /// Cross limit orders with bar using FillModel
     fn cross_limit_order(&mut self, bar: &BarData) {
         // Collect active orders to avoid borrow issues
@@ -963,6 +986,11 @@ impl BacktestingEngine {
                 // Update position using apply_fill
                 self.position.apply_fill(&trade)
                     .expect("Position apply_fill failed");
+
+                // Unfreeze close volume when fill occurs
+                if Self::is_close_offset(trade.offset) {
+                    self.frozen_close_volume = (self.frozen_close_volume - trade.volume).max(0.0);
+                }
                 
                 // Record trade in risk engine
                 self.risk_engine.record_trade(trade.price * trade.volume * self.size);
@@ -1005,6 +1033,26 @@ impl BacktestingEngine {
     }
 
     /// Cross stop orders with bar using FillModel
+      /// Evaluate stop orders against the current bar and trigger matches.
+    ///
+    /// **Bar-mode stop trigger (backtesting) vs tick-mode trigger (live trading):**
+    ///
+    /// In backtesting, stop orders are evaluated once per bar using the bar's
+    /// high/low prices. A buy stop triggers when `bar.high >= stop_price`,
+    /// and a sell stop triggers when `bar.low <= stop_price`. This is an
+    /// approximation — in reality, the exact intra-bar price path is unknown,
+    /// so the fill price may differ from what would happen in live trading
+    /// where stops trigger on every tick.
+    ///
+    /// **Implications:**
+    /// - In a single-bar scenario, both a buy stop and a sell stop could
+    ///   trigger on the same bar (e.g., a large wick). In live trading,
+    ///   only one would execute first depending on tick ordering.
+    /// - The fill price is determined by the `FillModel` (e.g., worst-case
+    ///   for stop fills to account for slippage), not the exact trigger price.
+    /// - For strategies that rely on precise stop execution timing (e.g.,
+    ///   scalping), bar-mode backtesting will overestimate fill quality.
+    ///   Use tick-level data for such strategies.
     fn cross_stop_order(&mut self, bar: &BarData) {
         let mut to_trigger = Vec::new();
         
@@ -1068,6 +1116,11 @@ impl BacktestingEngine {
                 // Update position using apply_fill
                 self.position.apply_fill(&trade)
                     .expect("Position apply_fill failed");
+
+                // Unfreeze close volume when fill occurs
+                if Self::is_close_offset(trade.offset) {
+                    self.frozen_close_volume = (self.frozen_close_volume - trade.volume).max(0.0);
+                }
 
                 // Record trade in risk engine
                 self.risk_engine.record_trade(trade.price * trade.volume * self.size);
@@ -1141,6 +1194,11 @@ impl BacktestingEngine {
                 // Update position using apply_fill
                 self.position.apply_fill(&trade)
                     .expect("Position apply_fill failed");
+
+                // Unfreeze close volume when fill occurs
+                if Self::is_close_offset(trade.offset) {
+                    self.frozen_close_volume = (self.frozen_close_volume - trade.volume).max(0.0);
+                }
 
                 // Record trade in risk engine
                 self.risk_engine.record_trade(trade.price * trade.volume * self.size);
@@ -1246,6 +1304,11 @@ impl BacktestingEngine {
                 self.position.apply_fill(&trade)
                     .expect("Position apply_fill failed");
 
+                // Unfreeze close volume when fill occurs
+                if Self::is_close_offset(trade.offset) {
+                    self.frozen_close_volume = (self.frozen_close_volume - trade.volume).max(0.0);
+                }
+
                 // Record trade in risk engine
                 self.risk_engine.record_trade(trade.price * trade.volume * self.size);
 
@@ -1282,7 +1345,32 @@ impl BacktestingEngine {
     }
 
     /// Send limit order (called by strategy)
-    pub fn send_limit_order(&mut self, req: OrderRequest) -> String {
+    pub fn send_limit_order(&mut self, mut req: OrderRequest) -> String {
+        // For close orders, check available position and freeze volume
+        if Self::is_close_offset(req.offset) {
+            let pos_qty = self.position.signed_qty().abs();
+            let available = (pos_qty - self.frozen_close_volume).max(0.0);
+
+            if req.volume > available {
+                if available > 0.0 {
+                    self.write_log(&format!(
+                        "Close order volume {} exceeds available {} - reducing to available",
+                        req.volume, available
+                    ));
+                    req.volume = available;
+                } else {
+                    self.write_log(&format!(
+                        "No available position to close (pos={}, frozen={})",
+                        pos_qty, self.frozen_close_volume
+                    ));
+                    return String::new();
+                }
+            }
+
+            // Freeze the close volume
+            self.frozen_close_volume += req.volume;
+        }
+
         self.limit_order_count += 1;
         let vt_orderid = format!("BACKTEST_{}", self.limit_order_count);
 
@@ -1345,7 +1433,32 @@ impl BacktestingEngine {
     }
 
     /// Send stop order (called by strategy)
-    pub fn send_stop_order(&mut self, req: OrderRequest) -> String {
+    pub fn send_stop_order(&mut self, mut req: OrderRequest) -> String {
+        // For close orders, check available position and freeze volume
+        if Self::is_close_offset(req.offset) {
+            let pos_qty = self.position.signed_qty().abs();
+            let available = (pos_qty - self.frozen_close_volume).max(0.0);
+
+            if req.volume > available {
+                if available > 0.0 {
+                    self.write_log(&format!(
+                        "Close order volume {} exceeds available {} - reducing to available",
+                        req.volume, available
+                    ));
+                    req.volume = available;
+                } else {
+                    self.write_log(&format!(
+                        "No available position to close (pos={}, frozen={})",
+                        pos_qty, self.frozen_close_volume
+                    ));
+                    return String::new();
+                }
+            }
+
+            // Freeze the close volume
+            self.frozen_close_volume += req.volume;
+        }
+
         self.stop_order_count += 1;
         let stop_orderid = format!("STOP_{}", self.stop_order_count);
 
@@ -1431,8 +1544,23 @@ impl BacktestingEngine {
         }
         
         if self.active_limit_orders.contains_key(vt_orderid) {
+            // Unfreeze close volume when cancelling a close order
+            if let Some(order) = self.active_limit_orders.get(vt_orderid) {
+                if Self::is_close_offset(order.offset) {
+                    let remaining = order.volume - order.traded;
+                    self.frozen_close_volume = (self.frozen_close_volume - remaining).max(0.0);
+                }
+            }
             self.active_limit_orders.remove(vt_orderid);
         } else if self.active_stop_orders.contains_key(vt_orderid) {
+            // Unfreeze close volume when cancelling a close stop order
+            if let Some(stop_order) = self.active_stop_orders.get(vt_orderid) {
+                if let Some(offset) = stop_order.offset {
+                    if Self::is_close_offset(offset) {
+                        self.frozen_close_volume = (self.frozen_close_volume - stop_order.volume).max(0.0);
+                    }
+                }
+            }
             self.active_stop_orders.remove(vt_orderid);
         }
     }
@@ -2459,6 +2587,17 @@ impl BacktestingEngine {
     /// Get logs
     pub fn get_logs(&self) -> &[String] {
         &self.logs
+    }
+
+    /// Get all trades from backtesting as a flat vector (sorted by datetime)
+    pub fn get_all_trades(&self) -> Vec<TradeData> {
+        let mut trades: Vec<_> = self.trades.values().cloned().collect();
+        trades.sort_by(|a, b| {
+            a.datetime
+                .unwrap_or_else(chrono::Utc::now)
+                .cmp(&b.datetime.unwrap_or_else(chrono::Utc::now))
+        });
+        trades
     }
 
     /// Get vt_symbol

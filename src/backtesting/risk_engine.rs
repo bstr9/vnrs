@@ -3,6 +3,7 @@
 //! Validates orders before they are sent to the matching engine.
 //! Based on nautilus_trader's risk management approach.
 
+use crate::backtesting::margin_model::MarginModel;
 use crate::backtesting::position::Position;
 use crate::trader::{Direction, Offset, OrderData};
 use std::collections::HashMap;
@@ -97,6 +98,9 @@ pub struct RiskEngine {
     is_halted: bool,
     position_notional: HashMap<String, f64>,
     total_notional: f64,
+    // Margin model (optional, for futures margin checks)
+    margin_model: Option<Box<dyn MarginModel>>,
+    available_balance: f64,
 }
 
 impl RiskEngine {
@@ -110,6 +114,8 @@ impl RiskEngine {
             is_halted: false,
             position_notional: HashMap::new(),
             total_notional: 0.0,
+            margin_model: None,
+            available_balance: 0.0,
         }
     }
 
@@ -132,6 +138,27 @@ impl RiskEngine {
             is_halted: false,
             position_notional: HashMap::new(),
             total_notional: 0.0,
+            margin_model: None,
+            available_balance: 0.0,
+        }
+    }
+
+    /// Create a risk engine with margin model and available balance.
+    ///
+    /// When a margin model is set, `check_order` will also verify that
+    /// available balance covers the initial margin requirement.
+    pub fn with_margin_model(config: RiskConfig, model: Box<dyn MarginModel>, balance: f64) -> Self {
+        Self {
+            config,
+            daily_trade_count: 0,
+            daily_turnover: 0.0,
+            peak_equity: 0.0,
+            current_equity: 0.0,
+            is_halted: false,
+            position_notional: HashMap::new(),
+            total_notional: 0.0,
+            margin_model: Some(model),
+            available_balance: balance,
         }
     }
 
@@ -200,6 +227,25 @@ impl RiskEngine {
             ));
         }
 
+        // Check margin if margin model is set
+        if let Some(ref model) = self.margin_model {
+            let direction = order.direction.unwrap_or(Direction::Net);
+            let product = crate::trader::Product::Futures;
+            let margin_result = model.check_margin(
+                order.volume,
+                order.price,
+                direction,
+                product,
+                self.available_balance,
+            );
+            if !margin_result.is_sufficient {
+                return RiskCheckResult::rejected(&format!(
+                    "保证金检查失败: {}",
+                    margin_result.reason.unwrap_or_else(|| "保证金不足".to_string())
+                ));
+            }
+        }
+
         RiskCheckResult::approved()
     }
 
@@ -243,6 +289,26 @@ impl RiskEngine {
     /// Update risk config
     pub fn set_config(&mut self, config: RiskConfig) {
         self.config = config;
+    }
+
+    /// Set the margin model for futures margin checks.
+    pub fn set_margin_model(&mut self, model: Box<dyn MarginModel>) {
+        self.margin_model = Some(model);
+    }
+
+    /// Update available balance for margin checks.
+    pub fn set_available_balance(&mut self, balance: f64) {
+        self.available_balance = balance;
+    }
+
+    /// Get available balance.
+    pub fn available_balance(&self) -> f64 {
+        self.available_balance
+    }
+
+    /// Get reference to margin model (if set).
+    pub fn margin_model(&self) -> Option<&dyn MarginModel> {
+        self.margin_model.as_deref()
     }
 
     // ── Portfolio-level risk checks ──────────────────────────────────
@@ -522,5 +588,123 @@ mod tests {
         let engine = RiskEngine::new_unrestricted();
         let result = engine.check_position_concentration("BTCUSDT", 100_000.0, 0.0);
         assert!(result.is_approved);
+    }
+
+    // === Margin Model Integration Tests ===
+
+    #[test]
+    fn test_risk_engine_with_margin_model_pass() {
+        use crate::backtesting::margin_model::LinearMarginModel;
+
+        let model = Box::new(LinearMarginModel::new(0.10, 0.05));
+        let engine = RiskEngine::with_margin_model(
+            RiskConfig {
+                check_order_size: false,
+                check_notional: false,
+                ..RiskConfig::default()
+            },
+            model,
+            10_000.0,
+        );
+
+        let order = OrderData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: crate::trader::Exchange::Binance,
+            orderid: "O001".to_string(),
+            order_type: crate::trader::OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50_000.0,
+            volume: 0.1, // notional = 5,000, initial margin = 500
+            traded: 0.0,
+            status: crate::trader::Status::NotTraded,
+            datetime: None,
+            reference: String::new(),
+            extra: None,
+        };
+
+        let position = Position::new("P001".to_string(), "BTCUSDT".to_string(), crate::trader::Exchange::Binance);
+        let result = engine.check_order(&order, &position, 0, 1.0);
+        assert!(result.is_approved);
+    }
+
+    #[test]
+    fn test_risk_engine_with_margin_model_fail() {
+        use crate::backtesting::margin_model::LinearMarginModel;
+
+        let model = Box::new(LinearMarginModel::new(0.10, 0.05));
+        let engine = RiskEngine::with_margin_model(
+            RiskConfig {
+                check_order_size: false,
+                check_notional: false,
+                ..RiskConfig::default()
+            },
+            model,
+            100.0, // Not enough for 0.1 BTC @ 50k (initial margin = 500)
+        );
+
+        let order = OrderData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: crate::trader::Exchange::Binance,
+            orderid: "O001".to_string(),
+            order_type: crate::trader::OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50_000.0,
+            volume: 0.1, // notional = 5,000, initial margin = 500 > 100
+            traded: 0.0,
+            status: crate::trader::Status::NotTraded,
+            datetime: None,
+            reference: String::new(),
+            extra: None,
+        };
+
+        let position = Position::new("P001".to_string(), "BTCUSDT".to_string(), crate::trader::Exchange::Binance);
+        let result = engine.check_order(&order, &position, 0, 1.0);
+        assert!(!result.is_approved);
+        assert!(result.reason.as_ref().map_or(false, |r| r.contains("保证金")));
+    }
+
+    #[test]
+    fn test_risk_engine_no_margin_model_backward_compat() {
+        // Without margin model, margin check is skipped
+        let engine = RiskEngine::new_unrestricted();
+
+        let order = OrderData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: crate::trader::Exchange::Binance,
+            orderid: "O001".to_string(),
+            order_type: crate::trader::OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50_000.0,
+            volume: 100.0, // Large order, but no margin check
+            traded: 0.0,
+            status: crate::trader::Status::NotTraded,
+            datetime: None,
+            reference: String::new(),
+            extra: None,
+        };
+
+        let position = Position::new("P001".to_string(), "BTCUSDT".to_string(), crate::trader::Exchange::Binance);
+        let result = engine.check_order(&order, &position, 0, 1.0);
+        assert!(result.is_approved);
+    }
+
+    #[test]
+    fn test_risk_engine_set_margin_model() {
+        use crate::backtesting::margin_model::LinearMarginModel;
+
+        let mut engine = RiskEngine::new_unrestricted();
+        assert!(engine.margin_model().is_none());
+
+        engine.set_available_balance(10_000.0);
+        assert!((engine.available_balance() - 10_000.0).abs() < 1e-10);
+
+        engine.set_margin_model(Box::new(LinearMarginModel::new(0.10, 0.05)));
+        assert!(engine.margin_model().is_some());
     }
 }
