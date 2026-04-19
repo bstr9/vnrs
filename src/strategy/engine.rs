@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tokio::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 use chrono::{Utc, Duration};
 
 use crate::trader::{
@@ -15,8 +14,11 @@ use crate::event::EventEngine;
 use super::template::{StrategyTemplate, StrategyContext};
 use super::base::{
     StrategyState, StopOrder, StopOrderStatus, 
-    StrategySetting, StopOrderRequest, CancelRequestType
+    StrategySetting, StopOrderRequest, CancelRequestType,
+    StrategyRiskConfig,
 };
+#[cfg(feature = "python")]
+use crate::python::strategy_adapter::PythonStrategyAdapter;
 
 // Event type constants for strategy
 pub const EVENT_STRATEGY_TICK: &str = "eStrategyTick";
@@ -76,8 +78,10 @@ pub struct StrategyEngine {
     /// Frozen close volume per strategy per symbol (to prevent double-closing)
     /// Key: strategy_name, Value: HashMap<vt_symbol, frozen_close_volume>
     strategy_frozen_closes: Arc<RwLock<HashMap<String, HashMap<String, f64>>>>,
-    /// Maps vt_orderid �?CloseOrderInfo for unfreezing on fill/cancel/reject
+    /// Maps vt_orderid → CloseOrderInfo for unfreezing on fill/cancel/reject
     order_close_info: Arc<RwLock<HashMap<String, CloseOrderInfo>>>,
+    /// Per-strategy risk configuration (limits enforced before MainEngine)
+    strategy_risk_configs: Arc<RwLock<HashMap<String, StrategyRiskConfig>>>,
     /// Optional database for loading historical data
     database: Option<Arc<dyn BaseDatabase>>,
 }
@@ -124,6 +128,7 @@ impl StrategyEngine {
             strategy_avg_price: Arc::new(RwLock::new(HashMap::new())),
             strategy_frozen_closes: Arc::new(RwLock::new(HashMap::new())),
             order_close_info: Arc::new(RwLock::new(HashMap::new())),
+            strategy_risk_configs: Arc::new(RwLock::new(HashMap::new())),
             database,
         }
     }
@@ -134,9 +139,9 @@ impl StrategyEngine {
     }
 
     /// Initialize the engine
-    pub async fn init(&self) {
+    pub fn init(&self) {
         // Load strategy settings
-        self.load_strategy_settings().await;
+        self.load_strategy_settings();
         
         tracing::info!("Strategy engine initialized successfully");
     }
@@ -177,28 +182,28 @@ impl StrategyEngine {
     /// Process tick event and dispatch to subscribed strategies
     fn process_tick_event(&self, tick: &TickData) {
         let vt_symbol = tick.vt_symbol();
-        let strategy_names: Vec<String> = self.symbol_strategy_map.blocking_read()
+        let strategy_names: Vec<String> = self.symbol_strategy_map.read().unwrap_or_else(|e| e.into_inner())
             .get(&vt_symbol).cloned()
             .unwrap_or_default();
 
         for strategy_name in &strategy_names {
-            let contexts = self.contexts.blocking_read();
+            let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
             if let Some(context) = contexts.get(strategy_name) {
                 context.update_tick(tick.clone());
-                let mut strategies = self.strategies.blocking_write();
+                let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
                 if let Some(strategy) = strategies.get_mut(strategy_name) {
                     strategy.on_tick(tick, context);
                 }
             }
 
             // Update unrealized PnL for this strategy on every tick
-            let pos = self.strategies.blocking_read()
+            let pos = self.strategies.read().unwrap_or_else(|e| e.into_inner())
                 .get(strategy_name)
                 .map(|s| s.get_position(&vt_symbol))
                 .unwrap_or(0.0);
 
             if pos != 0.0 {
-                let avg_entry = self.strategy_avg_price.blocking_read()
+                let avg_entry = self.strategy_avg_price.read().unwrap_or_else(|e| e.into_inner())
                     .get(&(strategy_name.to_string(), vt_symbol.clone()))
                     .copied()
                     .unwrap_or(tick.last_price);
@@ -209,14 +214,14 @@ impl StrategyEngine {
                     (avg_entry - tick.last_price) * pos.abs()
                 };
 
-                self.strategy_unrealized_pnl.blocking_write()
+                self.strategy_unrealized_pnl.write().unwrap_or_else(|e| e.into_inner())
                     .insert(strategy_name.to_string(), unrealized);
             }
         }
 
         // Check stop orders
         {
-            let mut stop_orders = self.stop_orders.blocking_write();
+            let mut stop_orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
             let mut triggered = Vec::new();
             for (stop_orderid, stop_order) in stop_orders.iter() {
                 if stop_order.vt_symbol != vt_symbol { continue; }
@@ -235,7 +240,7 @@ impl StrategyEngine {
                     stop_order.status = StopOrderStatus::Triggered;
                     let strategy_name = stop_order.strategy_name.clone();
                     // Notify the owning strategy about the stop order trigger
-                    let mut strategies = self.strategies.blocking_write();
+                    let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
                     if let Some(strategy) = strategies.get_mut(&strategy_name) {
                         strategy.on_stop_order(&stop_orderid);
                     }
@@ -247,15 +252,15 @@ impl StrategyEngine {
     /// Process bar event and dispatch to subscribed strategies
     fn process_bar_event(&self, bar: &BarData) {
         let vt_symbol = bar.vt_symbol();
-        let strategy_names: Vec<String> = self.symbol_strategy_map.blocking_read()
+        let strategy_names: Vec<String> = self.symbol_strategy_map.read().unwrap_or_else(|e| e.into_inner())
             .get(&vt_symbol).cloned()
             .unwrap_or_default();
 
         for strategy_name in &strategy_names {
-            let contexts = self.contexts.blocking_read();
+            let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
             if let Some(context) = contexts.get(strategy_name) {
                 context.update_bar(bar.clone());
-                let mut strategies = self.strategies.blocking_write();
+                let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
                 if let Some(strategy) = strategies.get_mut(strategy_name) {
                     strategy.on_bar(bar, context);
                 }
@@ -264,7 +269,7 @@ impl StrategyEngine {
 
         // Multi-period bar synthesis: feed base bars into synthesizers
         // and deliver synthesized higher-timeframe bars to strategies
-        let mut synthesizers = self.bar_synthesizers.blocking_write();
+        let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(|e| e.into_inner());
         for ((strategy_name, syn_vt_symbol), synthesizer) in synthesizers.iter_mut() {
             // Only process synthesizers that match this bar's symbol
             if syn_vt_symbol != &vt_symbol {
@@ -274,10 +279,10 @@ impl StrategyEngine {
             // Feed the base bar into the synthesizer
             if let Some(synthesized_bar) = synthesizer.update_bar(bar) {
                 // A higher-timeframe bar was completed �?deliver to strategy
-                let contexts = self.contexts.blocking_read();
+                let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
                 if let Some(context) = contexts.get(strategy_name) {
                     context.update_bar(synthesized_bar.clone());
-                    let mut strategies = self.strategies.blocking_write();
+                    let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
                     if let Some(strategy) = strategies.get_mut(strategy_name) {
                         strategy.on_bar(&synthesized_bar, context);
                     }
@@ -289,14 +294,14 @@ impl StrategyEngine {
     /// Process depth/order book event and dispatch to subscribed strategies
     fn process_depth_event(&self, depth: &DepthData) {
         let vt_symbol = depth.vt_symbol();
-        let strategy_names: Vec<String> = self.symbol_strategy_map.blocking_read()
+        let strategy_names: Vec<String> = self.symbol_strategy_map.read().unwrap_or_else(|e| e.into_inner())
             .get(&vt_symbol).cloned()
             .unwrap_or_default();
 
         for strategy_name in &strategy_names {
-            let contexts = self.contexts.blocking_read();
+            let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
             if let Some(context) = contexts.get(strategy_name) {
-                let mut strategies = self.strategies.blocking_write();
+                let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
                 if let Some(strategy) = strategies.get_mut(strategy_name) {
                     strategy.on_depth(depth, context);
                 }
@@ -307,7 +312,7 @@ impl StrategyEngine {
     /// Process order event and dispatch to owning strategy
     /// Also handles unfreezing of close volume when orders are cancelled or rejected
     fn process_order_event(&self, order: &OrderData) {
-        let strategy_name = self.orderid_strategy_map.blocking_read()
+        let strategy_name = self.orderid_strategy_map.read().unwrap_or_else(|e| e.into_inner())
             .get(&order.vt_orderid())
             .cloned();
 
@@ -315,14 +320,13 @@ impl StrategyEngine {
             // Unfreeze close volume on order cancellation or rejection
             if order.status == Status::Cancelled || order.status == Status::Rejected {
                 let vt_orderid = order.vt_orderid();
-                let mut close_info_map = self.order_close_info.blocking_write();
+                let mut close_info_map = self.order_close_info.write().unwrap_or_else(|e| e.into_inner());
                 if let Some(close_info) = close_info_map.remove(&vt_orderid) {
                     // For cancelled/rejected orders, unfreeze the remaining volume
                     let remaining = close_info.remaining;
                     if remaining > 0.0 {
                         drop(close_info_map);
-                        // Use blocking_write on the async RwLock
-                        let mut frozen = self.strategy_frozen_closes.blocking_write();
+                        let mut frozen = self.strategy_frozen_closes.write().unwrap_or_else(|e| e.into_inner());
                         if let Some(strategy_frozen) = frozen.get_mut(&close_info.strategy_name) {
                             let current = strategy_frozen.get(&close_info.vt_symbol).copied().unwrap_or(0.0);
                             let new_val = (current - remaining).max(0.0);
@@ -340,7 +344,7 @@ impl StrategyEngine {
                 }
             } else if order.status == Status::PartTraded {
                 // Update remaining volume in close order info on partial fill
-                let mut close_info_map = self.order_close_info.blocking_write();
+                let mut close_info_map = self.order_close_info.write().unwrap_or_else(|e| e.into_inner());
                 if let Some(close_info) = close_info_map.get_mut(&order.vt_orderid()) {
                     let filled = order.traded;
                     let old_remaining = close_info.remaining;
@@ -351,7 +355,7 @@ impl StrategyEngine {
                         let strategy_name = close_info.strategy_name.clone();
                         let vt_symbol = close_info.vt_symbol.clone();
                         drop(close_info_map);
-                        let mut frozen = self.strategy_frozen_closes.blocking_write();
+                        let mut frozen = self.strategy_frozen_closes.write().unwrap_or_else(|e| e.into_inner());
                         if let Some(strategy_frozen) = frozen.get_mut(&strategy_name) {
                             let current = strategy_frozen.get(&vt_symbol).copied().unwrap_or(0.0);
                             let new_val = (current - unfreeze_amount).max(0.0);
@@ -365,7 +369,7 @@ impl StrategyEngine {
                 }
             }
 
-            let mut strategies = self.strategies.blocking_write();
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
             if let Some(strategy) = strategies.get_mut(&strategy_name) {
                 strategy.on_order(order);
             }
@@ -379,12 +383,12 @@ impl StrategyEngine {
         const TRADEID_CAPACITY: usize = 10000;
         let vt_tradeid = trade.vt_tradeid();
         {
-            let mut processed = self.processed_tradeids.blocking_write();
+            let mut processed = self.processed_tradeids.write().unwrap_or_else(|e| e.into_inner());
             if processed.contains(&vt_tradeid) {
                 return;
             }
             processed.insert(vt_tradeid.clone());
-            let mut order = self.processed_tradeids_order.blocking_write();
+            let mut order = self.processed_tradeids_order.write().unwrap_or_else(|e| e.into_inner());
             order.push(vt_tradeid);
             // Evict oldest 50% when over capacity (instead of clearing all)
             if order.len() > TRADEID_CAPACITY {
@@ -396,7 +400,7 @@ impl StrategyEngine {
             }
         }
 
-        let strategy_name = self.orderid_strategy_map.blocking_read()
+        let strategy_name = self.orderid_strategy_map.read().unwrap_or_else(|e| e.into_inner())
             .get(&trade.vt_orderid())
             .cloned();
 
@@ -404,7 +408,7 @@ impl StrategyEngine {
             // Unfreeze close volume on trade fill
             if Self::is_close_offset(trade.offset) {
                 let vt_orderid = trade.vt_orderid();
-                let mut close_info_map = self.order_close_info.blocking_write();
+                let mut close_info_map = self.order_close_info.write().unwrap_or_else(|e| e.into_inner());
                 if let Some(close_info) = close_info_map.get_mut(&vt_orderid) {
                     // Unfreeze the traded volume
                     let unfreeze_amount = trade.volume.min(close_info.remaining);
@@ -417,12 +421,12 @@ impl StrategyEngine {
 
                     // Remove the close info if fully filled
                     if is_complete {
-                        self.order_close_info.blocking_write().remove(&vt_orderid);
+                        self.order_close_info.write().unwrap_or_else(|e| e.into_inner()).remove(&vt_orderid);
                     }
 
                     // Unfreeze the volume
                     if unfreeze_amount > 0.0 {
-                        let mut frozen = self.strategy_frozen_closes.blocking_write();
+                        let mut frozen = self.strategy_frozen_closes.write().unwrap_or_else(|e| e.into_inner());
                         if let Some(strategy_frozen) = frozen.get_mut(&strategy_name_clone) {
                             let current = strategy_frozen.get(&vt_symbol_clone).copied().unwrap_or(0.0);
                             let new_val = (current - unfreeze_amount).max(0.0);
@@ -450,12 +454,12 @@ impl StrategyEngine {
             // Calculate realized PnL from this trade
             let vt_symbol = trade.vt_symbol();
             let key = (strategy_name.clone(), vt_symbol.clone());
-            let mut avg_prices = self.strategy_avg_price.blocking_write();
-            let mut pnl_map = self.strategy_pnl.blocking_write();
-            let mut trade_count_map = self.strategy_trade_count.blocking_write();
+            let mut avg_prices = self.strategy_avg_price.write().unwrap_or_else(|e| e.into_inner());
+            let mut pnl_map = self.strategy_pnl.write().unwrap_or_else(|e| e.into_inner());
+            let mut trade_count_map = self.strategy_trade_count.write().unwrap_or_else(|e| e.into_inner());
 
             let current_pos = {
-                let strategies = self.strategies.blocking_read();
+                let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
                 strategies.get(&strategy_name)
                     .map(|s| s.get_position(&vt_symbol))
                     .unwrap_or(0.0)
@@ -509,7 +513,7 @@ impl StrategyEngine {
             drop(trade_count_map);
 
             // Update strategy position and notify
-            let mut strategies = self.strategies.blocking_write();
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
             if let Some(strategy) = strategies.get_mut(&strategy_name) {
                 strategy.update_position(&vt_symbol, new_pos);
                 strategy.on_trade(trade);
@@ -527,7 +531,7 @@ impl StrategyEngine {
         
         // Check and insert atomically under write lock to prevent TOCTOU race
         {
-            let mut strategies = self.strategies.write().await;
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
             if strategies.contains_key(&strategy_name) {
                 return Err(format!("Strategy {} already exists", strategy_name));
             }
@@ -540,18 +544,65 @@ impl StrategyEngine {
             None => StrategyContext::new(),
         };
         
-        // Subscribe to symbols
-        for vt_symbol in self.strategies.read().await.get(&strategy_name)
-            .map(|s| s.vt_symbols())
-            .unwrap_or_default()
-        {
-            self.subscribe_symbol(&strategy_name, vt_symbol).await;
+        // Subscribe to symbols - collect first to release lock before await
+        let vt_symbols: Vec<String> = self.strategies.read().unwrap_or_else(|e| e.into_inner())
+            .get(&strategy_name)
+            .map(|s| s.vt_symbols().to_vec())
+            .unwrap_or_default();
+
+        for vt_symbol in vt_symbols {
+            self.subscribe_symbol(&strategy_name, &vt_symbol).await;
         }
 
-        self.strategy_settings.write().await.insert(strategy_name.clone(), setting);
-        self.contexts.write().await.insert(strategy_name.clone(), context);
+        self.strategy_settings.write().unwrap_or_else(|e| e.into_inner()).insert(strategy_name.clone(), setting);
+        self.contexts.write().unwrap_or_else(|e| e.into_inner()).insert(strategy_name.clone(), context);
 
         tracing::info!("Strategy {} added successfully", strategy_name);
+        Ok(())
+    }
+
+    /// Add a Python strategy adapter to the engine for live trading
+    ///
+    /// This method creates a `PythonStrategyAdapter` wrapping the Python strategy
+    /// and inserts it into the engine so it receives live market data events
+    /// through the normal StrategyEngine event routing path.
+    #[cfg(feature = "python")]
+    pub async fn add_python_strategy(
+        &self,
+        adapter: PythonStrategyAdapter,
+        setting: StrategySetting,
+    ) -> Result<(), String> {
+        let strategy_name = adapter.strategy_name().to_string();
+
+        // Check and insert atomically under write lock to prevent TOCTOU race
+        {
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
+            if strategies.contains_key(&strategy_name) {
+                return Err(format!("Strategy {} already exists", strategy_name));
+            }
+            strategies.insert(strategy_name.clone(), Box::new(adapter));
+        }
+
+        // Create context for this strategy (with database if available)
+        let context = match &self.database {
+            Some(db) => StrategyContext::with_database(Arc::clone(db)),
+            None => StrategyContext::new(),
+        };
+
+        // Subscribe to symbols - collect first to release lock before await
+        let vt_symbols: Vec<String> = self.strategies.read().unwrap_or_else(|e| e.into_inner())
+            .get(&strategy_name)
+            .map(|s| s.vt_symbols().to_vec())
+            .unwrap_or_default();
+
+        for vt_symbol in vt_symbols {
+            self.subscribe_symbol(&strategy_name, &vt_symbol).await;
+        }
+
+        self.strategy_settings.write().unwrap_or_else(|e| e.into_inner()).insert(strategy_name.clone(), setting);
+        self.contexts.write().unwrap_or_else(|e| e.into_inner()).insert(strategy_name.clone(), context);
+
+        tracing::info!("Python strategy {} added successfully", strategy_name);
         Ok(())
     }
 
@@ -584,7 +635,7 @@ impl StrategyEngine {
         }
 
         // Update symbol-strategy mapping
-        let mut map = self.symbol_strategy_map.write().await;
+        let mut map = self.symbol_strategy_map.write().unwrap_or_else(|e| e.into_inner());
         map.entry(vt_symbol.to_string())
             .or_insert_with(Vec::new)
             .push(strategy_name.to_string());
@@ -592,30 +643,43 @@ impl StrategyEngine {
 
     /// Initialize a strategy
     pub async fn init_strategy(&self, strategy_name: &str) -> Result<(), String> {
-        let mut strategies = self.strategies.write().await;
-        let contexts = self.contexts.read().await;
+        // Check strategy exists and get context reference under lock
+        let context_exists = {
+            let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
+            let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+            strategies.contains_key(strategy_name) && contexts.contains_key(strategy_name)
+        };
 
-        if let Some(strategy) = strategies.get_mut(strategy_name) {
-            if let Some(context) = contexts.get(strategy_name) {
-                // Load historical data
-                self.load_historical_data(strategy_name, context).await?;
-
-                // Initialize strategy
-                strategy.on_init(context);
-
-                tracing::info!("Strategy {} initialized", strategy_name);
-                Ok(())
+        if !context_exists {
+            if !self.strategies.read().unwrap_or_else(|e| e.into_inner()).contains_key(strategy_name) {
+                return Err(format!("Strategy {} not found", strategy_name));
             } else {
-                Err(format!("Context not found for strategy {}", strategy_name))
+                return Err(format!("Context not found for strategy {}", strategy_name));
             }
-        } else {
-            Err(format!("Strategy {} not found", strategy_name))
         }
+
+        // Load historical data (no locks held across await)
+        // Pass self to load_historical_data so it can acquire locks internally after each await
+        self.load_historical_data(strategy_name).await?;
+
+        // Initialize strategy
+        {
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
+            let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+            if let Some(strategy) = strategies.get_mut(strategy_name) {
+                if let Some(context) = contexts.get(strategy_name) {
+                    strategy.on_init(context);
+                }
+            }
+        }
+
+        tracing::info!("Strategy {} initialized", strategy_name);
+        Ok(())
     }
 
     /// Start a strategy
-    pub async fn start_strategy(&self, strategy_name: &str) -> Result<(), String> {
-        let mut strategies = self.strategies.write().await;
+    pub fn start_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
 
         if let Some(strategy) = strategies.get_mut(strategy_name) {
             if strategy.state() != StrategyState::Inited {
@@ -636,7 +700,7 @@ impl StrategyEngine {
     /// Stop a strategy
     pub async fn stop_strategy(&self, strategy_name: &str) -> Result<(), String> {
         {
-            let mut strategies = self.strategies.write().await;
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
 
             if let Some(strategy) = strategies.get_mut(strategy_name) {
                 if strategy.state() != StrategyState::Trading {
@@ -669,93 +733,108 @@ impl StrategyEngine {
     async fn load_historical_data(
         &self,
         strategy_name: &str,
-        context: &StrategyContext,
     ) -> Result<(), String> {
-        let strategies = self.strategies.read().await;
+        // Collect vt_symbols under lock, then release before async work
+        let vt_symbols: Vec<String> = {
+            let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
+            strategies.get(strategy_name)
+                .map(|s| s.vt_symbols().to_vec())
+                .unwrap_or_default()
+        };
         
-        if let Some(strategy) = strategies.get(strategy_name) {
-            for vt_symbol in strategy.vt_symbols() {
-                let parts: Vec<&str> = vt_symbol.split('.').collect();
-                if parts.len() != 2 {
-                    continue;
-                }
+        for vt_symbol in &vt_symbols {
+            let parts: Vec<&str> = vt_symbol.split('.').collect();
+            if parts.len() != 2 {
+                continue;
+            }
 
-                let symbol = parts[0].to_string();
-                let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
-                    .map(|(_, e)| e)
-                    .unwrap_or(Exchange::Binance);
+            let symbol = parts[0].to_string();
+            let exchange = crate::trader::utility::extract_vt_symbol(vt_symbol)
+                .map(|(_, e)| e)
+                .unwrap_or(Exchange::Binance);
 
-                let end = Utc::now();
-                let start = end - Duration::days(30);
+            let end = Utc::now();
+            let start = end - Duration::days(30);
 
-                // Try loading from database first
-                let mut bars_loaded = false;
-                if let Some(db) = &self.database {
-                    match db.load_bar_data(&symbol, exchange, Interval::Minute, start, end).await {
-                        Ok(bars) if !bars.is_empty() => {
-                            tracing::info!(
-                                "Loaded {} historical bars for {} from database",
-                                bars.len(), vt_symbol
-                            );
-                            for bar in &bars {
-                                context.update_bar(bar.clone());
-                            }
-                            bars_loaded = true;
-                        }
-                        Ok(_) => {
-                            tracing::info!(
-                                "No historical bars in database for {}, falling back to gateway",
-                                vt_symbol
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to load history from database for {}: {}, falling back to gateway",
-                                vt_symbol, e
-                            );
-                        }
-                    }
-                }
-
-                // Fallback to gateway query if database had no data
-                if !bars_loaded {
-                    let req = HistoryRequest {
-                        symbol,
-                        exchange,
-                        start,
-                        end: Some(end),
-                        interval: Some(Interval::Minute),
-                    };
-
-                    if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
-                        match self.main_engine.query_history(req, &gw_name).await {
-                            Ok(bars) => {
-                                tracing::info!(
-                                    "Loaded {} historical bars for {} from gateway",
-                                    bars.len(), vt_symbol
-                                );
+            // Try loading from database first
+            let mut bars_loaded = false;
+            if let Some(db) = &self.database {
+                match db.load_bar_data(&symbol, exchange, Interval::Minute, start, end).await {
+                    Ok(bars) if !bars.is_empty() => {
+                        tracing::info!(
+                            "Loaded {} historical bars for {} from database",
+                            bars.len(), vt_symbol
+                        );
+                        // Feed bars into context (short-lived lock, no await)
+                        {
+                            let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+                            if let Some(context) = contexts.get(strategy_name) {
                                 for bar in &bars {
                                     context.update_bar(bar.clone());
                                 }
+                            }
+                        }
+                        bars_loaded = true;
+                    }
+                    Ok(_) => {
+                        tracing::info!(
+                            "No historical bars in database for {}, falling back to gateway",
+                            vt_symbol
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to load history from database for {}: {}, falling back to gateway",
+                            vt_symbol, e
+                        );
+                    }
+                }
+            }
 
-                                // Save loaded bars to database for future warmups
-                                if !bars.is_empty() {
-                                    if let Some(db) = &self.database {
-                                        if let Err(e) = db.save_bar_data(bars, false).await {
-                                            tracing::warn!(
-                                                "Failed to cache historical bars for {}: {}",
-                                                vt_symbol, e
-                                            );
-                                        }
+            // Fallback to gateway query if database had no data
+            if !bars_loaded {
+                let req = HistoryRequest {
+                    symbol,
+                    exchange,
+                    start,
+                    end: Some(end),
+                    interval: Some(Interval::Minute),
+                };
+
+                if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+                    match self.main_engine.query_history(req, &gw_name).await {
+                        Ok(bars) => {
+                            tracing::info!(
+                                "Loaded {} historical bars for {} from gateway",
+                                bars.len(), vt_symbol
+                            );
+                            // Feed bars into context (short-lived lock, no await)
+                            {
+                                let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+                                if let Some(context) = contexts.get(strategy_name) {
+                                    for bar in &bars {
+                                        context.update_bar(bar.clone());
                                     }
                                 }
                             }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to load history for {} from gateway: {}",
-                                    vt_symbol, e
-                                );
+
+                            // Save loaded bars to database for future warmups
+                            if !bars.is_empty() {
+                                if let Some(db) = &self.database {
+                                    if let Err(e) = db.save_bar_data(bars, false).await {
+                                        tracing::warn!(
+                                            "Failed to cache historical bars for {}: {}",
+                                            vt_symbol, e
+                                        );
+                                    }
+                                }
                             }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to load history for {} from gateway: {}",
+                                vt_symbol, e
+                            );
                         }
                     }
                 }
@@ -769,17 +848,16 @@ impl StrategyEngine {
     /// Stops the strategy if currently trading, then removes all associated mappings
     pub async fn remove_strategy(&self, strategy_name: &str) -> Result<(), String> {
         // Stop the strategy first if it's trading
-        {
-            let strategies = self.strategies.read().await;
-            if let Some(strategy) = strategies.get(strategy_name) {
-                let state = strategy.state();
-                if state == StrategyState::Trading {
-                    drop(strategies);
-                    self.stop_strategy(strategy_name).await?;
-                }
-            } else {
-                return Err(format!("Strategy {} not found", strategy_name));
+        // Check state under lock, then release before async work
+        let needs_stop = {
+            let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
+            match strategies.get(strategy_name) {
+                Some(strategy) => strategy.state() == StrategyState::Trading,
+                None => return Err(format!("Strategy {} not found", strategy_name)),
             }
+        };
+        if needs_stop {
+            self.stop_strategy(strategy_name).await?;
         }
 
         // Cancel all open orders for this strategy
@@ -787,13 +865,13 @@ impl StrategyEngine {
 
         // Remove from strategies map
         {
-            let mut strategies = self.strategies.write().await;
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
             strategies.remove(strategy_name);
         }
 
         // Remove from symbol-strategy mapping
         {
-            let mut map = self.symbol_strategy_map.write().await;
+            let mut map = self.symbol_strategy_map.write().unwrap_or_else(|e| e.into_inner());
             for strategies in map.values_mut() {
                 strategies.retain(|name| name != strategy_name);
             }
@@ -803,8 +881,8 @@ impl StrategyEngine {
 
         // Remove from orderid-strategy mapping
         {
-            let mut orderid_map = self.orderid_strategy_map.write().await;
-            let mut strategy_map = self.strategy_orderid_map.write().await;
+            let mut orderid_map = self.orderid_strategy_map.write().unwrap_or_else(|e| e.into_inner());
+            let mut strategy_map = self.strategy_orderid_map.write().unwrap_or_else(|e| e.into_inner());
 
             if let Some(orderids) = strategy_map.remove(strategy_name) {
                 for orderid in &orderids {
@@ -815,50 +893,53 @@ impl StrategyEngine {
 
         // Remove from stop orders
         {
-            let mut stop_orders = self.stop_orders.write().await;
+            let mut stop_orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
             stop_orders.retain(|_, so| so.strategy_name != strategy_name);
         }
 
         // Remove context and settings
         {
-            let mut contexts = self.contexts.write().await;
+            let mut contexts = self.contexts.write().unwrap_or_else(|e| e.into_inner());
             contexts.remove(strategy_name);
         }
         {
-            let mut settings = self.strategy_settings.write().await;
+            let mut settings = self.strategy_settings.write().unwrap_or_else(|e| e.into_inner());
             settings.remove(strategy_name);
         }
 
         // Remove PnL tracking data
         {
-            let mut pnl = self.strategy_pnl.write().await;
+            let mut pnl = self.strategy_pnl.write().unwrap_or_else(|e| e.into_inner());
             pnl.remove(strategy_name);
         }
         {
-            let mut unrealized = self.strategy_unrealized_pnl.write().await;
+            let mut unrealized = self.strategy_unrealized_pnl.write().unwrap_or_else(|e| e.into_inner());
             unrealized.remove(strategy_name);
         }
         {
-            let mut trade_count = self.strategy_trade_count.write().await;
+            let mut trade_count = self.strategy_trade_count.write().unwrap_or_else(|e| e.into_inner());
             trade_count.remove(strategy_name);
         }
         {
-            let mut avg_prices = self.strategy_avg_price.write().await;
+            let mut avg_prices = self.strategy_avg_price.write().unwrap_or_else(|e| e.into_inner());
             avg_prices.retain(|(name, _), _| name != strategy_name);
         }
 
         // Remove frozen close tracking data
         {
-            let mut frozen = self.strategy_frozen_closes.write().await;
+            let mut frozen = self.strategy_frozen_closes.write().unwrap_or_else(|e| e.into_inner());
             frozen.remove(strategy_name);
         }
         {
-            let mut close_info = self.order_close_info.write().await;
+            let mut close_info = self.order_close_info.write().unwrap_or_else(|e| e.into_inner());
             close_info.retain(|_, info| info.strategy_name != strategy_name);
         }
 
         // Unregister bar synthesizers for this strategy
-        self.unregister_bar_synthesizers(strategy_name).await;
+        self.unregister_bar_synthesizers(strategy_name);
+
+        // Remove risk config for this strategy
+        self.remove_strategy_risk_config(strategy_name);
 
         tracing::info!("Strategy {} removed", strategy_name);
         Ok(())
@@ -885,7 +966,7 @@ impl StrategyEngine {
         interval: Interval,
         days: i64,
     ) -> Result<usize, String> {
-        let contexts = self.contexts.read().await;
+        let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
         let context = contexts.get(strategy_name)
             .ok_or_else(|| format!("Context not found for strategy {}", strategy_name))?;
 
@@ -964,28 +1045,36 @@ impl StrategyEngine {
 
     /// Cancel all orders for a strategy
     async fn cancel_all_orders(&self, strategy_name: &str) {
-        let orderid_map = self.strategy_orderid_map.read().await;
-        
-        if let Some(orderids) = orderid_map.get(strategy_name) {
-            for vt_orderid in orderids {
-                if let Some(order) = self.main_engine.get_order(vt_orderid) {
-                    let req = CancelRequest::new(
-                        order.orderid.clone(),
-                        order.symbol.clone(),
-                        order.exchange,
-                    );
-                    if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(order.exchange) {
-                        if let Err(e) = self.main_engine.cancel_order(req, &gw_name).await {
-                            tracing::warn!("Failed to cancel order {}: {}", vt_orderid, e);
+        // Collect cancel requests under lock, then release before async work
+        let cancel_requests: Vec<(CancelRequest, String)> = {
+            let orderid_map = self.strategy_orderid_map.read().unwrap_or_else(|e| e.into_inner());
+            let mut requests = Vec::new();
+            if let Some(orderids) = orderid_map.get(strategy_name) {
+                for vt_orderid in orderids {
+                    if let Some(order) = self.main_engine.get_order(vt_orderid) {
+                        let req = CancelRequest::new(
+                            order.orderid.clone(),
+                            order.symbol.clone(),
+                            order.exchange,
+                        );
+                        if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(order.exchange) {
+                            requests.push((req, gw_name));
                         }
                     }
                 }
+            }
+            requests
+        };
+
+        for (req, gw_name) in cancel_requests {
+            if let Err(e) = self.main_engine.cancel_order(req, &gw_name).await {
+                tracing::warn!("Failed to cancel order: {}", e);
             }
         }
     }
 
     /// Load strategy settings from file
-    async fn load_strategy_settings(&self) {
+    fn load_strategy_settings(&self) {
         let path = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("trade_engine")
@@ -1000,7 +1089,7 @@ impl StrategyEngine {
             Ok(content) => {
                 match serde_json::from_str::<HashMap<String, StrategySetting>>(&content) {
                     Ok(settings_map) => {
-                        let mut settings = self.strategy_settings.write().await;
+                        let mut settings = self.strategy_settings.write().unwrap_or_else(|e| e.into_inner());
                         for (name, setting) in settings_map {
                             settings.insert(name, setting);
                         }
@@ -1018,7 +1107,7 @@ impl StrategyEngine {
     }
 
     /// Save strategy settings to file
-    pub async fn save_strategy_settings(&self) {
+    pub fn save_strategy_settings(&self) {
         let path = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("trade_engine")
@@ -1031,7 +1120,7 @@ impl StrategyEngine {
             }
         }
 
-        let settings = self.strategy_settings.read().await;
+        let settings = self.strategy_settings.read().unwrap_or_else(|e| e.into_inner());
         match serde_json::to_string_pretty(&*settings) {
             Ok(content) => {
                 if let Err(e) = std::fs::write(&path, content) {
@@ -1047,13 +1136,13 @@ impl StrategyEngine {
     }
 
     /// Get all strategy names
-    pub async fn get_all_strategy_names(&self) -> Vec<String> {
-        self.strategies.read().await.keys().cloned().collect()
+    pub fn get_all_strategy_names(&self) -> Vec<String> {
+        self.strategies.read().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect()
     }
 
     /// Get strategy information
-    pub async fn get_strategy_info(&self, strategy_name: &str) -> Option<HashMap<String, String>> {
-        let strategies = self.strategies.read().await;
+    pub fn get_strategy_info(&self, strategy_name: &str) -> Option<HashMap<String, String>> {
+        let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
         
         if let Some(strategy) = strategies.get(strategy_name) {
             let mut info = HashMap::new();
@@ -1068,6 +1157,37 @@ impl StrategyEngine {
         }
     }
 
+    /// Set the per-strategy risk configuration.
+    ///
+    /// When set, orders from this strategy are validated against the configured
+    /// limits before being forwarded to `MainEngine`. This complements the
+    /// global `RiskEngine` with strategy-scoped guard rails.
+    pub fn set_strategy_risk_config(
+        &self,
+        strategy_name: &str,
+        config: StrategyRiskConfig,
+    ) {
+        self.strategy_risk_configs.write().unwrap_or_else(|e| e.into_inner())
+            .insert(strategy_name.to_string(), config);
+        tracing::info!("Set risk config for strategy {}", strategy_name);
+    }
+
+    /// Get the current risk configuration for a strategy.
+    pub fn get_strategy_risk_config(
+        &self,
+        strategy_name: &str,
+    ) -> StrategyRiskConfig {
+        self.strategy_risk_configs.read().unwrap_or_else(|e| e.into_inner())
+            .get(strategy_name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Remove risk config for a strategy (called during cleanup).
+    fn remove_strategy_risk_config(&self, strategy_name: &str) {
+        self.strategy_risk_configs.write().unwrap_or_else(|e| e.into_inner()).remove(strategy_name);
+    }
+
     /// Send an order on behalf of a strategy, routing through MainEngine (with risk check)
     /// Also populates orderid_strategy_map and strategy_orderid_map for callback routing
     ///
@@ -1075,16 +1195,71 @@ impl StrategyEngine {
     /// 1. Checks available position (actual position minus frozen close volume from pending orders)
     /// 2. Reduces order volume if it exceeds available position
     /// 3. Freezes the close volume to prevent other strategies from double-closing
+    ///
+    /// Strategy-level risk checks (max order volume, max position, max notional, max active orders)
+    /// are enforced BEFORE the close-order logic so that limits are never exceeded.
     pub async fn send_order(
         &self,
         strategy_name: &str,
         mut req: OrderRequest,
     ) -> Result<String, String> {
+        // ── Strategy-level risk checks ──────────────────────────────────
+        let risk_config = self.strategy_risk_configs.read().unwrap_or_else(|e| e.into_inner())
+            .get(strategy_name)
+            .cloned()
+            .unwrap_or_default();
+
+        // Check order volume
+        if risk_config.check_order_volume && req.volume > risk_config.max_order_volume {
+            return Err(format!(
+                "策略风控: 订单数量 {} 超过限制 {} (策略: {})",
+                req.volume, risk_config.max_order_volume, strategy_name
+            ));
+        }
+
+        // Check order notional
+        if risk_config.check_order_notional {
+            let notional = req.price * req.volume;
+            if notional > risk_config.max_order_notional {
+                return Err(format!(
+                    "策略风控: 订单金额 {} 超过限制 {} (策略: {})",
+                    notional, risk_config.max_order_notional, strategy_name
+                ));
+            }
+        }
+
+        // Check active orders limit
+        if risk_config.check_active_orders {
+            let active_count = self.strategy_orderid_map.read().unwrap_or_else(|e| e.into_inner())
+                .get(strategy_name)
+                .map(|orders| orders.len())
+                .unwrap_or(0);
+            if active_count >= risk_config.max_active_orders {
+                return Err(format!(
+                    "策略风控: 活跃订单数 {} 超过限制 {} (策略: {})",
+                    active_count, risk_config.max_active_orders, strategy_name
+                ));
+            }
+        }
+
+        // Check projected position for open orders
+        if risk_config.check_position_volume && !Self::is_close_offset(req.offset) {
+            let vt_symbol = req.vt_symbol();
+            let current_pos = self.get_strategy_position(strategy_name, &vt_symbol);
+            let projected = current_pos.abs() + req.volume;
+            if projected > risk_config.max_position_volume {
+                return Err(format!(
+                    "策略风控: 预计持仓 {} 超过限制 {} (策略: {}, 合约: {})",
+                    projected, risk_config.max_position_volume, strategy_name, vt_symbol
+                ));
+            }
+        }
+
         // Check if this is a close order and enforce position isolation
         if Self::is_close_offset(req.offset) {
             let vt_symbol = req.vt_symbol();
-            let pos = self.get_strategy_position(strategy_name, &vt_symbol).await;
-            let frozen = self.get_frozen_close_volume_async(strategy_name, &vt_symbol).await;
+            let pos = self.get_strategy_position(strategy_name, &vt_symbol);
+            let frozen = self.get_frozen_close_volume(strategy_name, &vt_symbol);
             let available = (pos - frozen).max(0.0);
 
             if req.volume > available {
@@ -1103,7 +1278,7 @@ impl StrategyEngine {
             }
 
             // Freeze the close volume
-            self.freeze_close_volume(strategy_name, &vt_symbol, req.volume).await;
+            self.freeze_close_volume(strategy_name, &vt_symbol, req.volume);
         }
 
         let exchange = req.exchange;
@@ -1114,11 +1289,11 @@ impl StrategyEngine {
 
         // Track order -> strategy mapping for callback routing
         {
-            let mut orderid_map = self.orderid_strategy_map.write().await;
+            let mut orderid_map = self.orderid_strategy_map.write().unwrap_or_else(|e| e.into_inner());
             orderid_map.insert(result.clone(), strategy_name.to_string());
         }
         {
-            let mut strategy_map = self.strategy_orderid_map.write().await;
+            let mut strategy_map = self.strategy_orderid_map.write().unwrap_or_else(|e| e.into_inner());
             strategy_map.entry(strategy_name.to_string())
                 .or_default()
                 .push(result.clone());
@@ -1133,7 +1308,7 @@ impl StrategyEngine {
                 volume: req.volume,
                 remaining: req.volume,
             };
-            self.order_close_info.write().await.insert(result.clone(), close_info);
+            self.order_close_info.write().unwrap_or_else(|e| e.into_inner()).insert(result.clone(), close_info);
         }
 
         Ok(result)
@@ -1142,7 +1317,7 @@ impl StrategyEngine {
     /// Process pending orders from a strategy (called after on_bar/on_tick callbacks)
     pub async fn process_pending_orders(&self, strategy_name: &str) -> Vec<Result<String, String>> {
         let pending: Vec<OrderRequest> = {
-            let mut strategies = self.strategies.write().await;
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
             if let Some(strategy) = strategies.get_mut(strategy_name) {
                 strategy.drain_pending_orders()
             } else {
@@ -1164,7 +1339,7 @@ impl StrategyEngine {
     /// the stop order will be converted to a market/limit order.
     pub async fn process_pending_stop_orders(&self, strategy_name: &str) -> Vec<String> {
         let pending: Vec<StopOrderRequest> = {
-            let mut strategies = self.strategies.write().await;
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
             if let Some(strategy) = strategies.get_mut(strategy_name) {
                 strategy.drain_pending_stop_orders()
             } else {
@@ -1174,7 +1349,7 @@ impl StrategyEngine {
 
         let mut results = Vec::new();
         for req in pending {
-            let stop_orderid = self.register_stop_order(strategy_name, req).await;
+            let stop_orderid = self.register_stop_order(strategy_name, req);
             results.push(stop_orderid);
         }
         results
@@ -1185,7 +1360,7 @@ impl StrategyEngine {
     /// Handles both regular order and stop order cancellation requests.
     pub async fn process_pending_cancellations(&self, strategy_name: &str) -> Vec<Result<(), String>> {
         let pending: Vec<CancelRequestType> = {
-            let mut strategies = self.strategies.write().await;
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
             if let Some(strategy) = strategies.get_mut(strategy_name) {
                 strategy.drain_pending_cancellations()
             } else {
@@ -1200,7 +1375,7 @@ impl StrategyEngine {
                     self.cancel_strategy_order(strategy_name, &vt_orderid).await
                 }
                 CancelRequestType::StopOrder(stop_orderid) => {
-                    self.cancel_strategy_stop_order(&stop_orderid).await
+                    self.cancel_strategy_stop_order(&stop_orderid)
                 }
             };
             results.push(result);
@@ -1213,7 +1388,7 @@ impl StrategyEngine {
     /// Creates a StopOrder tracked by the engine. When the trigger price is reached
     /// (checked in process_tick_event), the stop order will be submitted as a
     /// market/limit order through the gateway.
-    async fn register_stop_order(&self, strategy_name: &str, req: StopOrderRequest) -> String {
+    fn register_stop_order(&self, strategy_name: &str, req: StopOrderRequest) -> String {
         let stop_orderid = {
             let mut count = self.stop_order_count.lock()
                 .unwrap_or_else(|e| e.into_inner());
@@ -1233,7 +1408,7 @@ impl StrategyEngine {
         );
         stop_order.lock = req.lock;
 
-        self.stop_orders.write().await.insert(stop_orderid.clone(), stop_order);
+        self.stop_orders.write().unwrap_or_else(|e| e.into_inner()).insert(stop_orderid.clone(), stop_order);
 
         tracing::info!(
             "策略{}注册止损单: {} 价格={} 方向={:?}",
@@ -1244,8 +1419,8 @@ impl StrategyEngine {
     }
 
     /// Cancel a stop order on behalf of a strategy
-    async fn cancel_strategy_stop_order(&self, stop_orderid: &str) -> Result<(), String> {
-        let mut stop_orders = self.stop_orders.write().await;
+    fn cancel_strategy_stop_order(&self, stop_orderid: &str) -> Result<(), String> {
+        let mut stop_orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
         let stop_order = stop_orders.get_mut(stop_orderid)
             .ok_or_else(|| format!("止损单{}不存在", stop_orderid))?;
 
@@ -1292,7 +1467,7 @@ impl StrategyEngine {
     /// For example, if a strategy needs 5-minute bars for BTCUSDT.BINANCE,
     /// call `register_bar_synthesizer("MyStrategy", "BTCUSDT.BINANCE", Interval::Minute5)`.
     /// The engine will accumulate 5 consecutive 1-minute bars and deliver one 5-minute bar.
-    pub async fn register_bar_synthesizer(
+    pub fn register_bar_synthesizer(
         &self,
         strategy_name: &str,
         vt_symbol: &str,
@@ -1306,7 +1481,7 @@ impl StrategyEngine {
         let key = (strategy_name.to_string(), vt_symbol.to_string());
         let synthesizer = BarSynthesizer::new(Interval::Minute, interval);
         
-        self.bar_synthesizers.write().await.insert(key, synthesizer);
+        self.bar_synthesizers.write().unwrap_or_else(|e| e.into_inner()).insert(key, synthesizer);
         tracing::info!(
             "Registered bar synthesizer for {} on {} with interval {:?}",
             strategy_name, vt_symbol, interval
@@ -1314,8 +1489,8 @@ impl StrategyEngine {
     }
 
     /// Unregister all bar synthesizers for a strategy
-    async fn unregister_bar_synthesizers(&self, strategy_name: &str) {
-        let mut synthesizers = self.bar_synthesizers.write().await;
+    fn unregister_bar_synthesizers(&self, strategy_name: &str) {
+        let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(|e| e.into_inner());
         synthesizers.retain(|(name, _), _| name != strategy_name);
     }
 
@@ -1324,49 +1499,49 @@ impl StrategyEngine {
     // ========================================================================
 
     /// Get realized PnL for a strategy
-    pub async fn get_strategy_pnl(&self, strategy_name: &str) -> f64 {
-        self.strategy_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0)
+    pub fn get_strategy_pnl(&self, strategy_name: &str) -> f64 {
+        self.strategy_pnl.read().unwrap_or_else(|e| e.into_inner()).get(strategy_name).copied().unwrap_or(0.0)
     }
 
     /// Get unrealized PnL for a strategy
-    pub async fn get_strategy_unrealized_pnl(&self, strategy_name: &str) -> f64 {
-        self.strategy_unrealized_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0)
+    pub fn get_strategy_unrealized_pnl(&self, strategy_name: &str) -> f64 {
+        self.strategy_unrealized_pnl.read().unwrap_or_else(|e| e.into_inner()).get(strategy_name).copied().unwrap_or(0.0)
     }
 
     /// Get total PnL (realized + unrealized) for a strategy
-    pub async fn get_strategy_total_pnl(&self, strategy_name: &str) -> f64 {
-        let realized = self.strategy_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0);
-        let unrealized = self.strategy_unrealized_pnl.read().await.get(strategy_name).copied().unwrap_or(0.0);
+    pub fn get_strategy_total_pnl(&self, strategy_name: &str) -> f64 {
+        let realized = self.strategy_pnl.read().unwrap_or_else(|e| e.into_inner()).get(strategy_name).copied().unwrap_or(0.0);
+        let unrealized = self.strategy_unrealized_pnl.read().unwrap_or_else(|e| e.into_inner()).get(strategy_name).copied().unwrap_or(0.0);
         realized + unrealized
     }
 
     /// Get trade count for a strategy
-    pub async fn get_strategy_trade_count(&self, strategy_name: &str) -> usize {
-        self.strategy_trade_count.read().await.get(strategy_name).copied().unwrap_or(0)
+    pub fn get_strategy_trade_count(&self, strategy_name: &str) -> usize {
+        self.strategy_trade_count.read().unwrap_or_else(|e| e.into_inner()).get(strategy_name).copied().unwrap_or(0)
     }
 
     /// Update unrealized PnL for a strategy based on current market prices
     /// Call this when ticks arrive to keep unrealized PnL up to date
-    pub async fn update_unrealized_pnl(&self, strategy_name: &str, vt_symbol: &str) {
-        let strategies = self.strategies.read().await;
+    pub fn update_unrealized_pnl(&self, strategy_name: &str, vt_symbol: &str) {
+        let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
         let pos = strategies.get(strategy_name)
             .map(|s| s.get_position(vt_symbol))
             .unwrap_or(0.0);
         drop(strategies);
 
         if pos == 0.0 {
-            self.strategy_unrealized_pnl.write().await.insert(strategy_name.to_string(), 0.0);
+            self.strategy_unrealized_pnl.write().unwrap_or_else(|e| e.into_inner()).insert(strategy_name.to_string(), 0.0);
             return;
         }
 
         // Get last price from context
-        let last_price = self.contexts.read().await
+        let last_price = self.contexts.read().unwrap_or_else(|e| e.into_inner())
             .get(strategy_name)
             .and_then(|ctx| ctx.get_tick(vt_symbol))
             .map(|tick| tick.last_price);
 
         if let Some(last_price) = last_price {
-            let avg_entry = self.strategy_avg_price.read().await
+            let avg_entry = self.strategy_avg_price.read().unwrap_or_else(|e| e.into_inner())
                 .get(&(strategy_name.to_string(), vt_symbol.to_string()))
                 .copied()
                 .unwrap_or(last_price);
@@ -1377,7 +1552,7 @@ impl StrategyEngine {
                 (avg_entry - last_price) * pos.abs()
             };
 
-            self.strategy_unrealized_pnl.write().await.insert(strategy_name.to_string(), unrealized);
+            self.strategy_unrealized_pnl.write().unwrap_or_else(|e| e.into_inner()).insert(strategy_name.to_string(), unrealized);
         }
     }
 
@@ -1391,8 +1566,8 @@ impl StrategyEngine {
     }
 
     /// Freeze volume for a pending close order
-    async fn freeze_close_volume(&self, strategy_name: &str, vt_symbol: &str, volume: f64) {
-        let mut frozen = self.strategy_frozen_closes.write().await;
+    fn freeze_close_volume(&self, strategy_name: &str, vt_symbol: &str, volume: f64) {
+        let mut frozen = self.strategy_frozen_closes.write().unwrap_or_else(|e| e.into_inner());
         let strategy_frozen = frozen.entry(strategy_name.to_string()).or_default();
         let current = strategy_frozen.get(vt_symbol).copied().unwrap_or(0.0);
         strategy_frozen.insert(vt_symbol.to_string(), current + volume);
@@ -1402,24 +1577,24 @@ impl StrategyEngine {
         );
     }
 
-    /// Get frozen close volume for a strategy-symbol (async version)
-    async fn get_frozen_close_volume_async(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
-        self.strategy_frozen_closes.read().await
+    /// Get frozen close volume for a strategy-symbol
+    fn get_frozen_close_volume(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        self.strategy_frozen_closes.read().unwrap_or_else(|e| e.into_inner())
             .get(strategy_name)
             .and_then(|s| s.get(vt_symbol).copied())
             .unwrap_or(0.0)
     }
 
     /// Get available position for a strategy (actual position minus frozen close volume)
-    pub async fn get_available_position(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
-        let pos = self.get_strategy_position(strategy_name, vt_symbol).await;
-        let frozen = self.get_frozen_close_volume_async(strategy_name, vt_symbol).await;
+    pub fn get_available_position(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        let pos = self.get_strategy_position(strategy_name, vt_symbol);
+        let frozen = self.get_frozen_close_volume(strategy_name, vt_symbol);
         (pos - frozen).max(0.0)
     }
 
     /// Get current position for a strategy-symbol
-    pub async fn get_strategy_position(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
-        let strategies = self.strategies.read().await;
+    pub fn get_strategy_position(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
         strategies.get(strategy_name)
             .map(|s| s.get_position(vt_symbol))
             .unwrap_or(0.0)
@@ -1460,6 +1635,7 @@ impl Clone for StrategyEngine {
             strategy_avg_price: self.strategy_avg_price.clone(),
             strategy_frozen_closes: self.strategy_frozen_closes.clone(),
             order_close_info: self.order_close_info.clone(),
+            strategy_risk_configs: self.strategy_risk_configs.clone(),
             database: self.database.clone(),
         }
     }
@@ -1479,24 +1655,24 @@ mod tests {
         StrategyEngine::new(main_engine, event_engine)
     }
 
-    #[tokio::test]
-    async fn test_strategy_engine_new() {
+    #[test]
+    fn test_strategy_engine_new() {
         let engine = create_strategy_engine();
-        let names = engine.get_all_strategy_names().await;
+        let names = engine.get_all_strategy_names();
         assert!(names.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_get_all_strategy_names_empty() {
+    #[test]
+    fn test_get_all_strategy_names_empty() {
         let engine = create_strategy_engine();
-        let names = engine.get_all_strategy_names().await;
+        let names = engine.get_all_strategy_names();
         assert!(names.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_get_strategy_info_not_found() {
+    #[test]
+    fn test_get_strategy_info_not_found() {
         let engine = create_strategy_engine();
-        let info = engine.get_strategy_info("nonexistent").await;
+        let info = engine.get_strategy_info("nonexistent");
         assert!(info.is_none());
     }
 
@@ -1508,10 +1684,10 @@ mod tests {
         assert!(result.unwrap_err().contains("not found"));
     }
 
-    #[tokio::test]
-    async fn test_start_strategy_not_found() {
+    #[test]
+    fn test_start_strategy_not_found() {
         let engine = create_strategy_engine();
-        let result = engine.start_strategy("nonexistent").await;
+        let result = engine.start_strategy("nonexistent");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
     }
@@ -1531,7 +1707,7 @@ mod tests {
         let setting = StrategySetting::new();
 
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
-        let names = engine.get_all_strategy_names().await;
+        let names = engine.get_all_strategy_names();
         assert_eq!(names.len(), 1);
         assert!(names.contains(&"TestStrategy".to_string()));
     }
@@ -1558,7 +1734,7 @@ mod tests {
         let setting = StrategySetting::new();
 
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
-        let info = engine.get_strategy_info("TestStrategy").await;
+        let info = engine.get_strategy_info("TestStrategy");
         assert!(info.is_some());
         let info = info.unwrap();
         assert_eq!(info.get("name").unwrap(), "TestStrategy");
@@ -1571,7 +1747,7 @@ mod tests {
         let setting = StrategySetting::new();
 
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
-        let result = engine.start_strategy("TestStrategy").await;
+        let result = engine.start_strategy("TestStrategy");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not initialized"));
     }
@@ -1652,33 +1828,33 @@ mod tests {
         let setting = StrategySetting::new();
 
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
-        assert!(engine.get_all_strategy_names().await.contains(&"TestStrategy".to_string()));
+        assert!(engine.get_all_strategy_names().contains(&"TestStrategy".to_string()));
 
         // Remove the strategy
         let result = engine.remove_strategy("TestStrategy").await;
         assert!(result.is_ok());
-        assert!(!engine.get_all_strategy_names().await.contains(&"TestStrategy".to_string()));
+        assert!(!engine.get_all_strategy_names().contains(&"TestStrategy".to_string()));
 
         // Remove nonexistent should fail
         let result = engine.remove_strategy("NonExistent").await;
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_pnl_tracking_initial_state() {
+    #[test]
+    fn test_pnl_tracking_initial_state() {
         let engine = create_strategy_engine();
         
         // PnL should be 0 for nonexistent strategy
-        let pnl = engine.get_strategy_pnl("NonExistent").await;
+        let pnl = engine.get_strategy_pnl("NonExistent");
         assert_eq!(pnl, 0.0);
         
-        let unrealized = engine.get_strategy_unrealized_pnl("NonExistent").await;
+        let unrealized = engine.get_strategy_unrealized_pnl("NonExistent");
         assert_eq!(unrealized, 0.0);
         
-        let total = engine.get_strategy_total_pnl("NonExistent").await;
+        let total = engine.get_strategy_total_pnl("NonExistent");
         assert_eq!(total, 0.0);
         
-        let count = engine.get_strategy_trade_count("NonExistent").await;
+        let count = engine.get_strategy_trade_count("NonExistent");
         assert_eq!(count, 0);
     }
 
@@ -1691,10 +1867,10 @@ mod tests {
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
         
         // Register a 5-minute synthesizer
-        engine.register_bar_synthesizer("TestStrategy", "BTCUSDT.BINANCE", Interval::Minute5).await;
+        engine.register_bar_synthesizer("TestStrategy", "BTCUSDT.BINANCE", Interval::Minute5);
         
         // Should not create synthesizer for base intervals
-        engine.register_bar_synthesizer("TestStrategy", "ETHUSDT.BINANCE", Interval::Minute).await;
+        engine.register_bar_synthesizer("TestStrategy", "ETHUSDT.BINANCE", Interval::Minute);
     }
 
     #[tokio::test]
@@ -1706,7 +1882,7 @@ mod tests {
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
 
         // No position and no frozen volume
-        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE");
         assert_eq!(available, 0.0);
     }
 
@@ -1719,15 +1895,15 @@ mod tests {
 
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
 
-        let pos = engine.get_strategy_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        let pos = engine.get_strategy_position("TestStrategy", "BTCUSDT.BINANCE");
         assert_eq!(pos, 1.5);
 
         // Nonexistent symbol returns 0
-        let pos = engine.get_strategy_position("TestStrategy", "ETHUSDT.BINANCE").await;
+        let pos = engine.get_strategy_position("TestStrategy", "ETHUSDT.BINANCE");
         assert_eq!(pos, 0.0);
 
         // Nonexistent strategy returns 0
-        let pos = engine.get_strategy_position("NonExistent", "BTCUSDT.BINANCE").await;
+        let pos = engine.get_strategy_position("NonExistent", "BTCUSDT.BINANCE");
         assert_eq!(pos, 0.0);
     }
 
@@ -1741,21 +1917,21 @@ mod tests {
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
 
         // Initially available = position = 2.0
-        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE");
         assert_eq!(available, 2.0);
 
         // Freeze 1.0
-        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 1.0).await;
+        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 1.0);
 
         // Available should be 2.0 - 1.0 = 1.0
-        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE");
         assert_eq!(available, 1.0);
 
         // Freeze another 0.5
-        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 0.5).await;
+        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 0.5);
 
         // Available should be 2.0 - 1.5 = 0.5
-        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE");
         assert_eq!(available, 0.5);
     }
 
@@ -1767,17 +1943,17 @@ mod tests {
         let setting = StrategySetting::new();
 
         engine.add_strategy(Box::new(strategy), setting).await.unwrap();
-        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 1.0).await;
+        engine.freeze_close_volume("TestStrategy", "BTCUSDT.BINANCE", 1.0);
 
         // Verify frozen
-        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE");
         assert_eq!(available, 1.0);
 
         // Remove strategy
         engine.remove_strategy("TestStrategy").await.unwrap();
 
         // Frozen data should be cleaned up (no panic when accessing nonexistent strategy)
-        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE").await;
+        let available = engine.get_available_position("TestStrategy", "BTCUSDT.BINANCE");
         assert_eq!(available, 0.0);
     }
 }

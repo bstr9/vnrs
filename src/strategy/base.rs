@@ -111,6 +111,85 @@ pub type StrategyParam = serde_json::Value;
 /// Strategy setting (parameters configuration)
 pub type StrategySetting = std::collections::HashMap<String, StrategyParam>;
 
+/// Per-strategy risk configuration for live trading.
+///
+/// These limits are enforced at the `StrategyEngine` level *before*
+/// orders reach `MainEngine`, providing strategy-level guard rails
+/// that complement the global `RiskEngine` checks.
+///
+/// By default all limits are disabled (set to `f64::MAX`) so that
+/// existing strategies are not affected. Enable specific checks by
+/// setting the corresponding `check_*` flag to `true`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyRiskConfig {
+    /// Maximum order volume per order (0 = unlimited)
+    pub max_order_volume: f64,
+    /// Maximum position volume (absolute value) per symbol (0 = unlimited)
+    pub max_position_volume: f64,
+    /// Maximum notional value per order: price * volume * size (0 = unlimited)
+    pub max_order_notional: f64,
+    /// Maximum active (pending) orders for this strategy (0 = unlimited)
+    pub max_active_orders: usize,
+    /// Whether to enforce max_order_volume
+    pub check_order_volume: bool,
+    /// Whether to enforce max_position_volume
+    pub check_position_volume: bool,
+    /// Whether to enforce max_order_notional
+    pub check_order_notional: bool,
+    /// Whether to enforce max_active_orders
+    pub check_active_orders: bool,
+}
+
+impl Default for StrategyRiskConfig {
+    fn default() -> Self {
+        Self {
+            max_order_volume: f64::MAX,
+            max_position_volume: f64::MAX,
+            max_order_notional: f64::MAX,
+            max_active_orders: usize::MAX,
+            check_order_volume: false,
+            check_position_volume: false,
+            check_order_notional: false,
+            check_active_orders: false,
+        }
+    }
+}
+
+impl StrategyRiskConfig {
+    /// Create an unrestricted config (all checks disabled)
+    pub fn unrestricted() -> Self {
+        Self::default()
+    }
+
+    /// Create a conservative config suitable for spot strategies
+    pub fn conservative_spot() -> Self {
+        Self {
+            max_order_volume: 1.0,
+            max_position_volume: 5.0,
+            max_order_notional: 500_000.0,
+            max_active_orders: 10,
+            check_order_volume: true,
+            check_position_volume: true,
+            check_order_notional: true,
+            check_active_orders: true,
+        }
+    }
+
+    /// Create a conservative config suitable for futures strategies
+    pub fn conservative_futures() -> Self {
+        Self {
+            max_order_volume: 10.0,
+            max_position_volume: 50.0,
+            max_order_notional: 1_000_000.0,
+            max_active_orders: 20,
+            check_order_volume: true,
+            check_position_volume: true,
+            check_order_notional: true,
+            check_active_orders: true,
+        }
+    }
+}
+
 /// APP name constant
 pub const APP_NAME: &str = "StrategyTrading";
 
