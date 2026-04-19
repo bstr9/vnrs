@@ -1,0 +1,47 @@
+---
+id: REQ-014
+title: "LMDB/Redis 可选持久化后端"
+status: active
+created_at: "2026-04-19T00:00:00"
+updated_at: "2026-04-19T00:00:00"
+priority: P2
+relations:
+  supersedes: []
+  conflicts_with: []
+  refines: [REQ-001]
+  merged_from: []
+  cluster: Infrastructure
+versions:
+  - version: 1
+    date: "2026-04-19T00:00:00"
+    author: ai
+    context: "plans.md 特性对比发现 nautilus_trader 使用 Redis 持久化，tesser 使用 SQLite + LMDB。用户已删除 parquet_database_p1/p2/p3.rs，表明对 Parquet 后端不感兴趣。"
+    reason: "不同场景需要不同持久化后端（低延迟用 LMDB，分布式用 Redis）"
+    snapshot: "添加 LMDB 和 Redis 可选持久化后端，通过 feature flag 控制，与现有 BaseDatabase trait 兼容"
+---
+
+# LMDB/Redis 可选持久化后端
+
+## 描述
+
+当前只有 SQLite 持久化实现（且尚不完整）。不同场景需要不同后端：
+- **LMDB**：低延迟、嵌入式、适合单机高频
+- **Redis**：分布式、适合多进程部署
+
+## 验收标准
+
+- [ ] `LmdbDatabase` 实现 `BaseDatabase` trait
+- [ ] `RedisDatabase` 实现 `BaseDatabase` trait
+- [ ] 可选 feature flags：`lmdb`, `redis`
+- [ ] `MainEngine` 支持选择不同后端
+- [ ] 与 SQLite 后端 API 一致
+
+## 依赖
+
+- `heed` 或 `lmdb-rs` crate（可选 feature `lmdb`）
+- `redis` crate（可选 feature `redis`）
+- **可避免**：先完善 SQLite 即可满足大部分需求
+
+## 工作量
+
+每个后端约 1-2 天

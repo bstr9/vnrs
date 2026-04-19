@@ -1,0 +1,7 @@
+# SQLite index database (can be rebuilt from markdown)
+index.db
+index.db-wal
+index.db-shm
+
+# Captured raw conversation data (optional, may contain sensitive info)
+captures/
