@@ -772,7 +772,49 @@ impl BracketOrderEngine {
         }
     }
 
-    fn handle_cancellation(&self, _vt_orderid: &str, _group_id: GroupId) {}
+    fn handle_cancellation(&self, vt_orderid: &str, group_id: GroupId) {
+        let role = self.find_role(group_id, vt_orderid);
+        match role {
+            Some(OrderRole::Entry) | Some(OrderRole::Primary) => {
+                // Entry/Primary cancelled → mark group Cancelled
+                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                  if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Cancelled; gr.completed_at = Some(Utc::now()); } }
+                self.fire_state_change(group_id);
+                info!("[BracketOrderEngine] 入场委托被撤销，组#{}已取消", group_id);
+            }
+            Some(OrderRole::TakeProfit) | Some(OrderRole::StopLoss) => {
+                // One exit leg cancelled externally — cancel sibling and mark group Cancelled
+                let sibling_role = if role == Some(OrderRole::TakeProfit) { OrderRole::StopLoss } else { OrderRole::TakeProfit };
+                let sibling_id = {
+                    let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+                    groups.get(&group_id).and_then(|g| g.orders.get(&role_key(sibling_role)).and_then(|c| c.vt_orderid.clone()))
+                };
+                if let Some(ref sid) = sibling_id { self.cancel_child_order(sid); }
+                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                  if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Cancelled; gr.completed_at = Some(Utc::now()); } }
+                self.fire_state_change(group_id);
+                warn!("[BracketOrderEngine] 出场委托被撤销，组#{}已取消", group_id);
+            }
+            Some(OrderRole::OrderA) | Some(OrderRole::OrderB) => {
+                // OCO: one leg cancelled — cancel sibling and mark group Cancelled
+                let sibling_role = if role == Some(OrderRole::OrderA) { OrderRole::OrderB } else { OrderRole::OrderA };
+                let sibling_id = {
+                    let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+                    groups.get(&group_id).and_then(|g| g.orders.get(&role_key(sibling_role)).and_then(|c| c.vt_orderid.clone()))
+                };
+                if let Some(ref sid) = sibling_id { self.cancel_child_order(sid); }
+                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                  if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Cancelled; gr.completed_at = Some(Utc::now()); } }
+                self.fire_state_change(group_id);
+                warn!("[BracketOrderEngine] OCO委托被撤销，组#{}已取消", group_id);
+            }
+            Some(OrderRole::Secondary) => {
+                // OTO: secondary cancelled — log; group may still have open primary
+                warn!("[BracketOrderEngine] 次委托被撤销 组#{} {}", group_id, vt_orderid);
+            }
+            _ => {}
+        }
+    }
 
     fn fire_state_change(&self, group_id: GroupId) {
         let cb = self.state_change_callback.read().unwrap_or_else(|e| e.into_inner());
