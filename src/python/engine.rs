@@ -37,6 +37,19 @@ impl PythonEngine {
         }
     }
 
+    /// Create a PythonEngine from an already-shared MainEngine reference.
+    /// This allows the engine to share the same MainEngine instance with
+    /// PythonEngineBridge registered on that MainEngine.
+    pub fn new_from_arc(main_engine: Arc<MainEngine>) -> Self {
+        PythonEngine {
+            main_engine,
+            strategy_engine: None,
+            strategies: HashMap::new(),
+            symbol_strategy_map: HashMap::new(),
+            portfolio_state: Arc::new(Mutex::new(PortfolioState::default())),
+        }
+    }
+
     /// Set the live StrategyEngine reference so that Python strategies
     /// added via `add_strategy` are also registered for live market data
     pub fn set_strategy_engine(&mut self, engine: Arc<StrategyEngine>) {
@@ -452,6 +465,14 @@ impl PythonEngineBridge {
         PythonEngineBridge {
             inner: Arc::new(std::sync::Mutex::new(engine)),
         }
+    }
+
+    /// Create a bridge from an already-shared PythonEngine reference.
+    /// This allows the PythonEngineWrapper and the bridge to share the
+    /// same PythonEngine instance, so events dispatched through MainEngine
+    /// reach the same strategies that the wrapper's on_tick/on_bar/etc forward to.
+    pub fn from_shared(inner: Arc<std::sync::Mutex<PythonEngine>>) -> Self {
+        PythonEngineBridge { inner }
     }
 }
 

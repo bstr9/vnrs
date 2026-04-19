@@ -1,10 +1,10 @@
-use crate::python::{OrderFactory, PyOrder, PythonEngine, Strategy};
+use crate::python::{OrderFactory, PyOrder, PythonEngine, PythonEngineBridge, Strategy};
 use crate::strategy::StrategyEngine;
 use crate::trader::constant::{Direction, Offset, OrderType};
 use crate::trader::MainEngine;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 /// Handle to a live StrategyEngine, allowing Python code to reference
@@ -173,7 +173,12 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
 /// Wrapper for PythonEngine to make it compatible with PyO3
 #[pyclass]
 pub struct PythonEngineWrapper {
-    inner: std::sync::Mutex<PythonEngine>,
+    inner: Arc<Mutex<PythonEngine>>,
+    /// Keep MainEngine alive so the registered PythonEngineBridge continues
+    /// receiving events. The bridge is owned by MainEngine.engines, so if
+    /// MainEngine is dropped, event routing stops.
+    #[allow(dead_code)]
+    main_engine: Arc<MainEngine>,
     #[allow(dead_code)]
     rt: Runtime,
 }
@@ -185,8 +190,18 @@ impl PythonEngineWrapper {
         let rt = Runtime::new()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyException, _>(e.to_string()))?;
 
+        let main_engine = Arc::new(MainEngine::new());
+        let python_engine = PythonEngine::new_from_arc(main_engine.clone());
+        let inner = Arc::new(Mutex::new(python_engine));
+
+        // Register PythonEngineBridge with MainEngine so gateway events
+        // flow: MainEngine → PythonEngineBridge.process_event() → PythonEngine.on_tick/on_bar/etc → strategy callbacks
+        let bridge = PythonEngineBridge::from_shared(inner.clone());
+        main_engine.add_engine(Arc::new(bridge));
+
         Ok(PythonEngineWrapper {
-            inner: std::sync::Mutex::new(PythonEngine::new(MainEngine::new())),
+            inner,
+            main_engine,
             rt,
         })
     }
@@ -238,36 +253,39 @@ impl PythonEngineWrapper {
             .stop_strategy_py(py, &strategy_name)
     }
 
-    fn on_tick(&self, _py: Python, tick_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        let _symbol: String = tick_dict
-            .get_item("symbol")?
-            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
-            .extract()?;
-
+    fn on_tick(&self, py: Python, tick_dict: &Bound<'_, PyDict>) -> PyResult<()> {
+        let tick = crate::python::data_converter::py_to_tick(py, tick_dict)?;
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .on_tick(py, &tick)?;
         Ok(())
     }
 
-    fn on_bar(&self, _py: Python, bar_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        let _symbol: String = bar_dict
-            .get_item("symbol")?
-            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
-            .extract()?;
+    fn on_bar(&self, py: Python, bar_dict: &Bound<'_, PyDict>) -> PyResult<()> {
+        let bar = crate::python::data_converter::py_to_bar(py, bar_dict)?;
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .on_bar(py, &bar)?;
         Ok(())
     }
 
-    fn on_trade(&self, _py: Python, trade_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        let _symbol: String = trade_dict
-            .get_item("symbol")?
-            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
-            .extract()?;
+    fn on_trade(&self, py: Python, trade_dict: &Bound<'_, PyDict>) -> PyResult<()> {
+        let trade = crate::python::data_converter::py_to_trade(py, trade_dict)?;
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .on_trade(py, &trade)?;
         Ok(())
     }
 
-    fn on_order(&self, _py: Python, order_dict: &Bound<'_, PyDict>) -> PyResult<()> {
-        let _symbol: String = order_dict
-            .get_item("symbol")?
-            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing required key: symbol"))?
-            .extract()?;
+    fn on_order(&self, py: Python, order_dict: &Bound<'_, PyDict>) -> PyResult<()> {
+        let order = crate::python::data_converter::py_to_order(py, order_dict)?;
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .on_order(py, &order)?;
         Ok(())
     }
 

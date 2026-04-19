@@ -496,32 +496,79 @@ impl PyBacktestingEngine {
         self.engine.lock().unwrap_or_else(|e| e.into_inner()).cancel_order(&vt_orderid);
     }
 
-    /// Load bar data
+    /// Load bar data from the backtesting engine's cached history.
+    ///
+    /// Called by Python strategies in `on_init()` to warm up indicators.
+    /// Returns bars for the given vt_symbol within the last `days` days.
+    #[pyo3(signature = (vt_symbol, days, interval=None, _callback=None, _use_database=false))]
     fn load_bar(
         &self,
+        py: Python,
         vt_symbol: String,
         days: i32,
-        interval: Bound<'_, PyAny>,
+        interval: Option<&Bound<'_, PyAny>>,
         _callback: Option<Py<PyAny>>,
         _use_database: bool,
     ) -> PyResult<Vec<Py<PyAny>>> {
-        let interval_str = if let Ok(s) = interval.extract::<String>() {
-            s
-        } else {
-            // Try to get .value property
-            if let Ok(v) = interval.getattr("value") {
-                v.extract::<String>().unwrap_or("1m".to_string())
-            } else {
-                "1m".to_string()
-            }
-        };
+        let _interval_str = interval
+            .and_then(|i| i.extract::<String>().ok())
+            .or_else(|| interval.and_then(|i| i.getattr("value").ok()?.extract::<String>().ok()))
+            .unwrap_or_else(|| "1m".to_string());
 
-        println!(
-            "load_bar: vt_symbol={}, days={}, interval={}",
-            vt_symbol, days, interval_str
-        );
-        // Placeholder: return empty list
-        Ok(Vec::new())
+        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let bars = engine.get_history_bars(&vt_symbol, days);
+
+        bars.into_iter()
+            .map(|bar| {
+                let py_bar = PyBarData::from_rust(&bar);
+                Py::new(py, py_bar).map(|p| p.into_any())
+            })
+            .collect()
+    }
+
+    /// Load tick data from the backtesting engine's cached history.
+    ///
+    /// Returns tick data for the given vt_symbol within the last `days` days.
+    /// If tick data is not available in the backtesting engine, returns an empty Vec.
+    #[pyo3(signature = (vt_symbol, days, _callback=None, _use_database=false))]
+    fn load_tick(
+        &self,
+        py: Python,
+        vt_symbol: String,
+        days: i32,
+        _callback: Option<Py<PyAny>>,
+        _use_database: bool,
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let ticks = engine.get_history_ticks(&vt_symbol, days);
+
+        // Convert each TickData to a Python dict (no PyTickData struct exists yet)
+        ticks.into_iter()
+            .map(|tick| {
+                let dict = PyDict::new(py);
+                dict.set_item("gateway_name", &tick.gateway_name)?;
+                dict.set_item("symbol", &tick.symbol)?;
+                dict.set_item("exchange", tick.exchange.value())?;
+                dict.set_item("datetime", tick.datetime.to_rfc3339())?;
+                dict.set_item("name", &tick.name)?;
+                dict.set_item("volume", tick.volume)?;
+                dict.set_item("turnover", tick.turnover)?;
+                dict.set_item("open_interest", tick.open_interest)?;
+                dict.set_item("last_price", tick.last_price)?;
+                dict.set_item("last_volume", tick.last_volume)?;
+                dict.set_item("limit_up", tick.limit_up)?;
+                dict.set_item("limit_down", tick.limit_down)?;
+                dict.set_item("open_price", tick.open_price)?;
+                dict.set_item("high_price", tick.high_price)?;
+                dict.set_item("low_price", tick.low_price)?;
+                dict.set_item("pre_close", tick.pre_close)?;
+                dict.set_item("bid_price_1", tick.bid_price_1)?;
+                dict.set_item("ask_price_1", tick.ask_price_1)?;
+                dict.set_item("bid_volume_1", tick.bid_volume_1)?;
+                dict.set_item("ask_volume_1", tick.ask_volume_1)?;
+                Ok(dict.unbind().into_any())
+            })
+            .collect()
     }
 
     /// Put strategy event
@@ -653,6 +700,29 @@ impl PyBarData {
 }
 
 impl PyBarData {
+    /// Convert a Rust BarData into a PyBarData
+    fn from_rust(bar: &BarData) -> Self {
+        let exchange_str = bar.exchange.value().to_string();
+        let interval_str = bar.interval
+            .map(|i| i.value().to_string())
+            .unwrap_or_else(|| "1m".to_string());
+
+        Self {
+            gateway_name: bar.gateway_name.clone(),
+            symbol: bar.symbol.clone(),
+            exchange: exchange_str,
+            datetime: bar.datetime.to_rfc3339(),
+            interval: interval_str,
+            open_price: bar.open_price,
+            high_price: bar.high_price,
+            low_price: bar.low_price,
+            close_price: bar.close_price,
+            volume: bar.volume,
+            turnover: bar.turnover,
+            open_interest: bar.open_interest,
+        }
+    }
+
     fn to_rust(&self) -> PyResult<BarData> {
         let exchange = match self.exchange.to_uppercase().as_str() {
             "BINANCE" => Exchange::Binance,

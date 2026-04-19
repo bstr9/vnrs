@@ -1,9 +1,9 @@
 ---
 id: REQ-038
 title: "PythonEngineWrapper 事件转发断裂"
-status: active
+status: completed
 created_at: "2026-04-20T16:00:00"
-updated_at: "2026-04-20T16:00:00"
+updated_at: "2026-04-20T22:00:00"
 priority: P0
 cluster: Bug-Fix
 relations:
@@ -16,6 +16,12 @@ versions:
     context: "代码审查发现 PythonEngineWrapper 的 on_tick/on_bar/on_trade/on_order 方法仅提取 symbol 后立即返回 Ok(())，不转发事件到任何策略"
     reason: "初始发现"
     snapshot: "PythonEngineWrapper 事件处理器不转发事件到策略，实盘路径下 Python 策略收不到行情和成交回调"
+  - version: 2
+    date: "2026-04-20T22:00:00"
+    author: ai
+    context: "修复完成：inner 改为 Arc<Mutex<PythonEngine>> 共享给 bridge，on_tick/on_bar/on_trade/on_order 实现完整的事件转发逻辑，添加 py_to_tick/py_to_order/py_to_trade 数据转换器"
+    reason: "Bug 修复完成"
+    snapshot: "PythonEngineWrapper 事件转发完整实现，通过 PythonEngineBridge 注册到 MainEngine"
 ---
 
 # PythonEngineWrapper 事件转发断裂
@@ -26,8 +32,8 @@ versions:
 `PythonEngineBridge`（`src/python/engine.rs`）中有正确的事件转发逻辑，但 PyO3 暴露的 Wrapper 没有使用。
 
 ## 验收标准
-- [ ] `PythonEngineWrapper.on_tick()` 将 tick 事件转发到已注册策略的 `on_tick` 回调
-- [ ] `PythonEngineWrapper.on_bar()` 将 bar 事件转发到已注册策略的 `on_bar` 回调
-- [ ] `PythonEngineWrapper.on_trade()` 将 trade 事件转发到已注册策略的 `on_trade` 回调
-- [ ] `PythonEngineWrapper.on_order()` 将 order 事件转发到已注册策略的 `on_order` 回调
-- [ ] 事件转发与 `PythonEngineBridge` 的转发逻辑保持一致
+- [x] `PythonEngineWrapper.on_tick()` 将 tick 事件转发到已注册策略的 `on_tick` 回调
+- [x] `PythonEngineWrapper.on_bar()` 将 bar 事件转发到已注册策略的 `on_bar` 回调
+- [x] `PythonEngineWrapper.on_trade()` 将 trade 事件转发到已注册策略的 `on_trade` 回调
+- [x] `PythonEngineWrapper.on_order()` 将 order 事件转发到已注册策略的 `on_order` 回调
+- [x] 事件转发与 `PythonEngineBridge` 的转发逻辑保持一致

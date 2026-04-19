@@ -268,3 +268,181 @@ pub fn tick_to_py<'py>(py: Python<'py>, tick: &TickData) -> PyResult<Bound<'py, 
 
     Ok(dict)
 }
+
+/// Parse direction string into Direction enum
+fn parse_direction_str(s: &str) -> Option<crate::trader::Direction> {
+    match s.to_uppercase().as_str() {
+        "LONG" | "多" => Some(crate::trader::Direction::Long),
+        "SHORT" | "空" => Some(crate::trader::Direction::Short),
+        "NET" | "净" => Some(crate::trader::Direction::Net),
+        _ => None,
+    }
+}
+
+/// Parse offset string into Offset enum
+fn parse_offset_str(s: &str) -> crate::trader::Offset {
+    match s.to_uppercase().as_str() {
+        "OPEN" | "开" => crate::trader::Offset::Open,
+        "CLOSE" | "平" => crate::trader::Offset::Close,
+        "CLOSETODAY" | "平今" => crate::trader::Offset::CloseToday,
+        "CLOSEYESTERDAY" | "平昨" => crate::trader::Offset::CloseYesterday,
+        _ => crate::trader::Offset::None,
+    }
+}
+
+/// Parse status string into Status enum
+fn parse_status_str(s: &str) -> crate::trader::Status {
+    match s.to_uppercase().as_str() {
+        "SUBMITTING" | "提交中" => crate::trader::Status::Submitting,
+        "NOTTRADED" | "未成交" => crate::trader::Status::NotTraded,
+        "PARTTRADED" | "部分成交" => crate::trader::Status::PartTraded,
+        "ALLTRADED" | "全部成交" => crate::trader::Status::AllTraded,
+        "CANCELLED" | "已撤销" => crate::trader::Status::Cancelled,
+        "REJECTED" | "拒单" => crate::trader::Status::Rejected,
+        _ => crate::trader::Status::Submitting,
+    }
+}
+
+/// Get an optional item from a dict, returning None if missing or extraction fails
+fn get_optional<T: for<'a, 'py> pyo3::FromPyObject<'a, 'py>>(dict: &Bound<'_, PyDict>, key: &str) -> Option<T> {
+    dict.get_item(key).ok().flatten().and_then(|v| v.extract::<T>().ok())
+}
+
+/// Convert Python dict to Rust TickData
+pub fn py_to_tick(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<TickData> {
+    let symbol: String = get_required!(py_dict, "symbol", String);
+    let datetime_str: String = get_required!(py_dict, "datetime", String);
+
+    let datetime = chrono::DateTime::parse_from_rfc3339(&datetime_str)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {}", e)))?
+        .into();
+
+    let exchange = get_optional::<String>(py_dict, "exchange")
+        .map(|s| parse_exchange_str(&s))
+        .unwrap_or(crate::trader::Exchange::Global);
+
+    let gateway_name = get_optional::<String>(py_dict, "gateway_name").unwrap_or_default();
+
+    Ok(TickData {
+        symbol,
+        exchange,
+        datetime,
+        gateway_name,
+        name: get_optional::<String>(py_dict, "name").unwrap_or_default(),
+        volume: get_optional::<f64>(py_dict, "volume").unwrap_or(0.0),
+        turnover: get_optional::<f64>(py_dict, "turnover").unwrap_or(0.0),
+        open_interest: get_optional::<f64>(py_dict, "open_interest").unwrap_or(0.0),
+        last_price: get_optional::<f64>(py_dict, "last_price").unwrap_or(0.0),
+        last_volume: get_optional::<f64>(py_dict, "last_volume").unwrap_or(0.0),
+        limit_up: get_optional::<f64>(py_dict, "limit_up").unwrap_or(0.0),
+        limit_down: get_optional::<f64>(py_dict, "limit_down").unwrap_or(0.0),
+        open_price: get_optional::<f64>(py_dict, "open_price").unwrap_or(0.0),
+        high_price: get_optional::<f64>(py_dict, "high_price").unwrap_or(0.0),
+        low_price: get_optional::<f64>(py_dict, "low_price").unwrap_or(0.0),
+        pre_close: get_optional::<f64>(py_dict, "pre_close").unwrap_or(0.0),
+        bid_price_1: get_optional::<f64>(py_dict, "bid_price_1").unwrap_or(0.0),
+        bid_price_2: get_optional::<f64>(py_dict, "bid_price_2").unwrap_or(0.0),
+        bid_price_3: get_optional::<f64>(py_dict, "bid_price_3").unwrap_or(0.0),
+        bid_price_4: get_optional::<f64>(py_dict, "bid_price_4").unwrap_or(0.0),
+        bid_price_5: get_optional::<f64>(py_dict, "bid_price_5").unwrap_or(0.0),
+        ask_price_1: get_optional::<f64>(py_dict, "ask_price_1").unwrap_or(0.0),
+        ask_price_2: get_optional::<f64>(py_dict, "ask_price_2").unwrap_or(0.0),
+        ask_price_3: get_optional::<f64>(py_dict, "ask_price_3").unwrap_or(0.0),
+        ask_price_4: get_optional::<f64>(py_dict, "ask_price_4").unwrap_or(0.0),
+        ask_price_5: get_optional::<f64>(py_dict, "ask_price_5").unwrap_or(0.0),
+        bid_volume_1: get_optional::<f64>(py_dict, "bid_volume_1").unwrap_or(0.0),
+        bid_volume_2: get_optional::<f64>(py_dict, "bid_volume_2").unwrap_or(0.0),
+        bid_volume_3: get_optional::<f64>(py_dict, "bid_volume_3").unwrap_or(0.0),
+        bid_volume_4: get_optional::<f64>(py_dict, "bid_volume_4").unwrap_or(0.0),
+        bid_volume_5: get_optional::<f64>(py_dict, "bid_volume_5").unwrap_or(0.0),
+        ask_volume_1: get_optional::<f64>(py_dict, "ask_volume_1").unwrap_or(0.0),
+        ask_volume_2: get_optional::<f64>(py_dict, "ask_volume_2").unwrap_or(0.0),
+        ask_volume_3: get_optional::<f64>(py_dict, "ask_volume_3").unwrap_or(0.0),
+        ask_volume_4: get_optional::<f64>(py_dict, "ask_volume_4").unwrap_or(0.0),
+        ask_volume_5: get_optional::<f64>(py_dict, "ask_volume_5").unwrap_or(0.0),
+        localtime: None,
+        extra: None,
+    })
+}
+
+/// Convert Python dict to Rust OrderData
+pub fn py_to_order(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::trader::OrderData> {
+    let symbol: String = get_required!(py_dict, "symbol", String);
+    let orderid: String = get_required!(py_dict, "orderid", String);
+
+    let exchange = get_optional::<String>(py_dict, "exchange")
+        .map(|s| parse_exchange_str(&s))
+        .unwrap_or(crate::trader::Exchange::Global);
+
+    let gateway_name = get_optional::<String>(py_dict, "gateway_name").unwrap_or_default();
+
+    let direction = get_optional::<String>(py_dict, "direction")
+        .and_then(|s| parse_direction_str(&s));
+
+    let offset = get_optional::<String>(py_dict, "offset")
+        .map(|s| parse_offset_str(&s))
+        .unwrap_or(crate::trader::Offset::None);
+
+    let status = get_optional::<String>(py_dict, "status")
+        .map(|s| parse_status_str(&s))
+        .unwrap_or(crate::trader::Status::Submitting);
+
+    let datetime = get_optional::<String>(py_dict, "datetime")
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+        .map(|dt| dt.into());
+
+    Ok(crate::trader::OrderData {
+        symbol,
+        exchange,
+        orderid,
+        gateway_name,
+        direction,
+        offset,
+        status,
+        datetime,
+        order_type: crate::trader::OrderType::Limit,
+        price: get_optional::<f64>(py_dict, "price").unwrap_or(0.0),
+        volume: get_optional::<f64>(py_dict, "volume").unwrap_or(0.0),
+        traded: get_optional::<f64>(py_dict, "traded").unwrap_or(0.0),
+        reference: String::new(),
+        extra: None,
+    })
+}
+
+/// Convert Python dict to Rust TradeData
+pub fn py_to_trade(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::trader::TradeData> {
+    let symbol: String = get_required!(py_dict, "symbol", String);
+    let orderid: String = get_required!(py_dict, "orderid", String);
+    let tradeid: String = get_required!(py_dict, "tradeid", String);
+
+    let exchange = get_optional::<String>(py_dict, "exchange")
+        .map(|s| parse_exchange_str(&s))
+        .unwrap_or(crate::trader::Exchange::Global);
+
+    let gateway_name = get_optional::<String>(py_dict, "gateway_name").unwrap_or_default();
+
+    let direction = get_optional::<String>(py_dict, "direction")
+        .and_then(|s| parse_direction_str(&s));
+
+    let offset = get_optional::<String>(py_dict, "offset")
+        .map(|s| parse_offset_str(&s))
+        .unwrap_or(crate::trader::Offset::None);
+
+    let datetime = get_optional::<String>(py_dict, "datetime")
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+        .map(|dt| dt.into());
+
+    Ok(crate::trader::TradeData {
+        symbol,
+        exchange,
+        orderid,
+        tradeid,
+        gateway_name,
+        direction,
+        offset,
+        datetime,
+        price: get_optional::<f64>(py_dict, "price").unwrap_or(0.0),
+        volume: get_optional::<f64>(py_dict, "volume").unwrap_or(0.0),
+        extra: None,
+    })
+}
