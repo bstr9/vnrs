@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use tracing::{error, warn};
+
 use crate::python::strategy::PendingOrder;
 use crate::strategy::{StrategyContext, StrategyState, StrategyTemplate, StrategyType};
 use crate::trader::{
@@ -259,21 +261,25 @@ impl StrategyTemplate for PythonStrategyAdapter {
 
     fn on_init(&mut self, _context: &StrategyContext) {
         if let Err(e) = self.call_py_method_no_args("on_init") {
-            eprintln!("on_init error: {}", e);
+            error!("策略 {} on_init 失败: {}", self.strategy_name, e);
+            self.state = StrategyState::Error;
+            return;
         }
         self.state = StrategyState::Inited;
     }
 
     fn on_start(&mut self) {
         if let Err(e) = self.call_py_method_no_args("on_start") {
-            eprintln!("on_start error: {}", e);
+            error!("策略 {} on_start 失败，自动停止: {}", self.strategy_name, e);
+            self.state = StrategyState::Stopped;
+            return;
         }
         self.state = StrategyState::Trading;
     }
 
     fn on_stop(&mut self) {
         if let Err(e) = self.call_py_method_no_args("on_stop") {
-            eprintln!("on_stop error: {}", e);
+            warn!("策略 {} on_stop 错误: {}", self.strategy_name, e);
         }
         self.state = StrategyState::Stopped;
     }
@@ -292,7 +298,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
             let _ = tick_dict.set_item("ask_volume_1", tick.ask_volume_1);
 
             if let Err(e) = self.call_py_method_with_dict("on_tick", py, &tick_dict) {
-                eprintln!("on_tick error: {}", e);
+                warn!("策略 {} on_tick 错误: {}", self.strategy_name, e);
             }
         });
     }
@@ -312,14 +318,16 @@ impl StrategyTemplate for PythonStrategyAdapter {
                 low_price: bar.low_price,
                 close_price: bar.close_price,
                 volume: bar.volume,
+                turnover: bar.turnover,
+                open_interest: bar.open_interest,
             };
             match Py::new(py, py_bar) {
                 Ok(py_bar_obj) => {
                     if let Err(e) = self.call_py_method1("on_bar", py, py_bar_obj.into_any()) {
-                        eprintln!("on_bar error: {}", e);
+                        warn!("策略 {} on_bar 错误: {}", self.strategy_name, e);
                     }
                 }
-                Err(e) => eprintln!("Failed to create PyBarData: {}", e),
+                Err(e) => error!("策略 {} 创建 PyBarData 失败: {}", self.strategy_name, e),
             }
         });
     }
@@ -342,7 +350,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
             );
 
             if let Err(e) = self.call_py_method_with_dict("on_order", py, &order_dict) {
-                eprintln!("on_order error: {}", e);
+                warn!("策略 {} on_order 错误: {}", self.strategy_name, e);
             }
         });
     }
@@ -364,7 +372,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
             );
 
             if let Err(e) = self.call_py_method_with_dict("on_trade", py, &trade_dict) {
-                eprintln!("on_trade error: {}", e);
+                warn!("策略 {} on_trade 错误: {}", self.strategy_name, e);
             }
         });
     }
@@ -372,7 +380,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
     fn on_stop_order(&mut self, stop_orderid: &str) {
         Python::attach(|py| {
             if let Err(e) = self.call_py_method_with_str("on_stop_order", py, stop_orderid) {
-                eprintln!("on_stop_order error: {}", e);
+                warn!("策略 {} on_stop_order 错误: {}", self.strategy_name, e);
             }
         });
     }
