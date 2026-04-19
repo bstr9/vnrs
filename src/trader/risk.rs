@@ -180,7 +180,7 @@ impl RiskManager {
 
     /// Set the trading state (kill switch)
     pub fn set_trading_state(&self, state: TradingState) {
-        let mut current = self.trading_state.write().unwrap();
+        let mut current = self.trading_state.write().unwrap_or_else(|e| e.into_inner());
         let old = *current;
         *current = state;
         drop(current);
@@ -195,19 +195,19 @@ impl RiskManager {
 
     /// Get the current trading state
     pub fn get_trading_state(&self) -> TradingState {
-        *self.trading_state.read().unwrap()
+        *self.trading_state.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Update risk configuration
     pub fn update_config(&self, config: RiskConfig) {
-        let mut current = self.config.write().unwrap();
+        let mut current = self.config.write().unwrap_or_else(|e| e.into_inner());
         *current = config;
         info!("[RiskManager] Configuration updated");
     }
 
     /// Get current risk configuration
     pub fn get_config(&self) -> RiskConfig {
-        self.config.read().unwrap().clone()
+        self.config.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Check an order request against all risk rules
@@ -216,7 +216,7 @@ impl RiskManager {
     pub fn check_order(&self, req: &OrderRequest) -> RiskCheckResult {
         // Check trading state (kill switch) first
         {
-            let state = *self.trading_state.read().unwrap();
+            let state = *self.trading_state.read().unwrap_or_else(|e| e.into_inner());
             match state {
                 TradingState::Halted => {
                     return RiskCheckResult::Rejected("Trading is HALTED - all orders blocked".to_string());
@@ -238,7 +238,7 @@ impl RiskManager {
             return RiskCheckResult::Approved;
         }
 
-        let config = self.config.read().unwrap();
+        let config = self.config.read().unwrap_or_else(|e| e.into_inner());
         let vt_symbol = format!("{}.{}", req.symbol, req.exchange.value());
 
         // 1. Check order volume
@@ -262,7 +262,7 @@ impl RiskManager {
 
         // 3. Check active order count per symbol
         if config.max_order_count > 0 {
-            let active = self.active_orders.read().unwrap();
+            let active = self.active_orders.read().unwrap_or_else(|e| e.into_inner());
             let count = active.get(&vt_symbol).copied().unwrap_or(0);
             if count >= config.max_order_count {
                 return RiskCheckResult::Rejected(format!(
@@ -274,7 +274,7 @@ impl RiskManager {
 
         // 4. Check total active order count
         if config.max_total_order_count > 0 {
-            let total = *self.total_active_orders.read().unwrap();
+            let total = *self.total_active_orders.read().unwrap_or_else(|e| e.into_inner());
             if total >= config.max_total_order_count {
                 return RiskCheckResult::Rejected(format!(
                     "Total active orders {} >= max {}",
@@ -286,7 +286,7 @@ impl RiskManager {
         // 5. Check daily trade count
         self.check_daily_reset();
         if config.max_daily_trades > 0 {
-            let stats = self.daily_stats.read().unwrap();
+            let stats = self.daily_stats.read().unwrap_or_else(|e| e.into_inner());
             if stats.trade_count >= config.max_daily_trades {
                 return RiskCheckResult::Rejected(format!(
                     "Daily trade count {} >= max {}",
@@ -297,7 +297,7 @@ impl RiskManager {
 
         // 6. Check daily turnover
         if config.max_daily_turnover > 0.0 {
-            let stats = self.daily_stats.read().unwrap();
+            let stats = self.daily_stats.read().unwrap_or_else(|e| e.into_inner());
             if stats.turnover >= config.max_daily_turnover {
                 return RiskCheckResult::Rejected(format!(
                     "Daily turnover {:.2} >= max {:.2}",
@@ -308,7 +308,7 @@ impl RiskManager {
 
         // 7. Check daily loss
         if config.max_daily_loss > 0.0 {
-            let stats = self.daily_stats.read().unwrap();
+            let stats = self.daily_stats.read().unwrap_or_else(|e| e.into_inner());
             if stats.realized_pnl < 0.0 && stats.realized_pnl.abs() >= config.max_daily_loss {
                 return RiskCheckResult::Rejected(format!(
                     "Daily loss {:.2} >= max loss {:.2}",
@@ -319,7 +319,7 @@ impl RiskManager {
 
         // 8. Check position per symbol
         if config.max_position_per_symbol > 0.0 {
-            let positions = self.positions.read().unwrap();
+            let positions = self.positions.read().unwrap_or_else(|e| e.into_inner());
             let current = positions.get(&vt_symbol).copied().unwrap_or(0.0);
             let new_pos = match req.direction {
                 Direction::Long | Direction::Net => current + req.volume,
@@ -335,7 +335,7 @@ impl RiskManager {
 
         // 9. Check total position
         if config.max_total_position > 0.0 {
-            let positions = self.positions.read().unwrap();
+            let positions = self.positions.read().unwrap_or_else(|e| e.into_inner());
             let total: f64 = positions.values().sum();
             if total + req.volume > config.max_total_position {
                 return RiskCheckResult::Rejected(format!(
@@ -374,10 +374,10 @@ impl RiskManager {
         }
 
         // Balance check (only if max_balance_usage_pct > 0)
-        let config = self.config.read().unwrap();
+        let config = self.config.read().unwrap_or_else(|e| e.into_inner());
         if config.max_balance_usage_pct > 0.0 && req.price > 0.0 {
             let notional = req.volume * req.price;
-            let balances = self.available_balance.read().unwrap();
+            let balances = self.available_balance.read().unwrap_or_else(|e| e.into_inner());
             if let Some(&available) = balances.get(gateway_name) {
                 let max_usable = available * (config.max_balance_usage_pct / 100.0);
                 if notional > max_usable {
@@ -396,7 +396,7 @@ impl RiskManager {
 
     /// Get available balance for a gateway
     pub fn get_available_balance(&self, gateway_name: &str) -> Option<f64> {
-        let balances = self.available_balance.read().unwrap();
+        let balances = self.available_balance.read().unwrap_or_else(|e| e.into_inner());
         balances.get(gateway_name).copied()
     }
 
@@ -404,7 +404,7 @@ impl RiskManager {
     pub fn record_trade(&self, trade: &TradeData) {
         self.check_daily_reset();
 
-        let mut stats = self.daily_stats.write().unwrap();
+        let mut stats = self.daily_stats.write().unwrap_or_else(|e| e.into_inner());
         stats.trade_count += 1;
 
         if trade.direction.is_some() {
@@ -415,7 +415,7 @@ impl RiskManager {
     /// Update position from position data
     pub fn update_position(&self, position: &PositionData) {
         let vt_symbol = position.vt_symbol();
-        let mut positions = self.positions.write().unwrap();
+        let mut positions = self.positions.write().unwrap_or_else(|e| e.into_inner());
         positions.insert(vt_symbol, position.volume);
     }
 
@@ -424,12 +424,12 @@ impl RiskManager {
         self.check_daily_reset();
         let vt_accountid = account.vt_accountid();
         {
-            let mut prev = self.prev_balance.write().unwrap();
+            let mut prev = self.prev_balance.write().unwrap_or_else(|e| e.into_inner());
             if let Some(&prev_balance) = prev.get(&vt_accountid) {
                 // Balance change ≈ realized PnL (approximation; deposits/withdrawals
                 // would also change balance but we have no way to distinguish them here)
                 let balance_change = account.balance - prev_balance;
-                let mut stats = self.daily_stats.write().unwrap();
+                let mut stats = self.daily_stats.write().unwrap_or_else(|e| e.into_inner());
                 stats.realized_pnl += balance_change;
             }
             prev.insert(vt_accountid, account.balance);
@@ -438,7 +438,7 @@ impl RiskManager {
         // Track available balance per gateway for balance check
         let available = (account.balance - account.frozen).max(0.0);
         {
-            let mut balances = self.available_balance.write().unwrap();
+            let mut balances = self.available_balance.write().unwrap_or_else(|e| e.into_inner());
             balances.insert(account.gateway_name.clone(), available);
         }
     }
@@ -446,11 +446,11 @@ impl RiskManager {
     /// Increment active order count for a symbol
     pub fn order_submitted(&self, vt_symbol: &str) {
         {
-            let mut active = self.active_orders.write().unwrap();
+            let mut active = self.active_orders.write().unwrap_or_else(|e| e.into_inner());
             *active.entry(vt_symbol.to_string()).or_insert(0) += 1;
         }
         {
-            let mut total = self.total_active_orders.write().unwrap();
+            let mut total = self.total_active_orders.write().unwrap_or_else(|e| e.into_inner());
             *total += 1;
         }
     }
@@ -458,13 +458,13 @@ impl RiskManager {
     /// Decrement active order count for a symbol
     pub fn order_completed(&self, vt_symbol: &str) {
         {
-            let mut active = self.active_orders.write().unwrap();
+            let mut active = self.active_orders.write().unwrap_or_else(|e| e.into_inner());
             if let Some(count) = active.get_mut(vt_symbol) {
                 *count = count.saturating_sub(1);
             }
         }
         {
-            let mut total = self.total_active_orders.write().unwrap();
+            let mut total = self.total_active_orders.write().unwrap_or_else(|e| e.into_inner());
             *total = total.saturating_sub(1);
         }
     }
@@ -472,7 +472,7 @@ impl RiskManager {
     /// Check if daily stats need to be reset (new day)
     fn check_daily_reset(&self) {
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        let mut stats = self.daily_stats.write().unwrap();
+        let mut stats = self.daily_stats.write().unwrap_or_else(|e| e.into_inner());
         if stats.date != today {
             if !stats.date.is_empty() {
                 info!(
@@ -490,7 +490,7 @@ impl RiskManager {
     /// Get daily statistics
     pub fn get_daily_stats(&self) -> DailyStats {
         self.check_daily_reset();
-        self.daily_stats.read().unwrap().clone()
+        self.daily_stats.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
