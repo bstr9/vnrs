@@ -18,6 +18,7 @@ use super::bracket_order::BracketOrderEngine;
 use super::stop_order::StopOrderEngine;
 use super::order_emulator::OrderEmulator;
 use super::order_book::OrderBookManager;
+use super::reconciliation::ReconciliationEngine;
 use super::session::TradingSessionManager;
 
 use super::event::*;
@@ -481,6 +482,7 @@ pub struct MainEngine {
     contract_manager: Arc<ContractManager>,
     session_manager: Arc<TradingSessionManager>,
     order_book_manager: Arc<OrderBookManager>,
+    reconciliation_engine: RwLock<Option<Arc<ReconciliationEngine>>>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
     
@@ -554,6 +556,7 @@ impl MainEngine {
             contract_manager,
             session_manager,
             order_book_manager,
+            reconciliation_engine: RwLock::new(None),
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
             event_tx,
@@ -1025,6 +1028,25 @@ impl MainEngine {
     /// Get order book manager
     pub fn order_book_manager(&self) -> &Arc<OrderBookManager> {
         &self.order_book_manager
+    }
+
+    /// Create and register a ReconciliationEngine for this MainEngine.
+    ///
+    /// The ReconciliationEngine will auto-trigger reconciliation on gateway
+    /// reconnect events and can be used to manually sync local vs venue state.
+    ///
+    /// Returns the created ReconciliationEngine, already registered as a sub-engine.
+    pub fn add_reconciliation_engine(self: &Arc<Self>) -> Arc<ReconciliationEngine> {
+        let recon = Arc::new(ReconciliationEngine::new(self.clone()));
+        self.add_engine(recon.clone());
+        *self.reconciliation_engine.write().unwrap_or_else(|e| e.into_inner()) = Some(recon.clone());
+        info!("ReconciliationEngine已注册为子引擎");
+        recon
+    }
+
+    /// Get the ReconciliationEngine if one has been added
+    pub fn reconciliation_engine(&self) -> Option<Arc<ReconciliationEngine>> {
+        self.reconciliation_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get tick data

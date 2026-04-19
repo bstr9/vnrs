@@ -93,6 +93,8 @@ pub use trader::{
     TradingSessionManager, TradingSession,
     // Order book
     OrderBook, OrderBookManager, OrderBookSnapshot, DepthData,
+    // Reconciliation engine
+    ReconciliationEngine, PositionDrift, OrderDrift, ReconciliationResult,
 };
 
 // Re-export Binance gateways
