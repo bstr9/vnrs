@@ -198,6 +198,19 @@ impl DataDownloadManager {
         self.total_downloaded.load(Ordering::Relaxed)
     }
 
+    /// Cancel an active download by setting running flag to false.
+    /// The download loop checks this flag on each iteration and will
+    /// stop gracefully.
+    pub fn cancel_download(&self) {
+        self.running.store(false, Ordering::SeqCst);
+        info!("[DataDownloadManager] Download cancellation requested");
+    }
+
+    /// Check if a download is currently running
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
     /// Download historical klines from Binance REST API
     ///
     /// Automatically paginates through the date range, converting
@@ -260,11 +273,20 @@ impl DataDownloadManager {
         let end_ms = end.timestamp_millis();
         let mut retry_count: u8 = 0;
 
+        // Mark running state
+        self.running.store(true, Ordering::SeqCst);
+
         while current_start < end_ms {
-            // Check if we should stop
-            if !self.running.load(Ordering::SeqCst) && self.running.load(Ordering::SeqCst) == false {
-                // If running was never set to true, that's fine — we just started
-                // Running is set to true by MainEngine when added
+            // Check if download was cancelled
+            if !self.running.load(Ordering::SeqCst) {
+                info!("[DataDownloadManager] Download cancelled for {}", symbol);
+                // Mark progress as complete with cancellation note
+                let mut progress = self.progress.write().unwrap_or_else(|e| e.into_inner());
+                if let Some(p) = progress.get_mut(&key) {
+                    p.complete = true;
+                    p.error = Some("Download cancelled".to_string());
+                }
+                return Err(format!("Download cancelled for {}", symbol));
             }
 
             let mut params = HashMap::new();
@@ -382,6 +404,7 @@ impl DataDownloadManager {
                             p.complete = true;
                         }
 
+                        self.running.store(false, Ordering::SeqCst);
                         return Err(err_msg);
                     }
                     warn!(
@@ -401,6 +424,9 @@ impl DataDownloadManager {
                 p.bars_downloaded = all_bars.len();
             }
         }
+
+        // Clear running state
+        self.running.store(false, Ordering::SeqCst);
 
         // Deduplicate bars by datetime (overlapping pages may produce duplicates)
         all_bars.sort_by_key(|b| b.datetime);
