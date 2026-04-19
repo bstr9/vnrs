@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::backtesting::{BacktestingEngine, BacktestingMode, BacktestingStatistics};
+use crate::chart::TradeOverlay;
 use crate::trader::{Exchange, Interval};
 
 #[cfg(feature = "python")]
@@ -238,6 +239,7 @@ pub struct BacktestingPanel {
     strategy_name: String,
     available_strategies: Vec<(String, String, String)>, // (file_name, file_path, class_name)
     selected_strategy_index: usize,
+    strategies_scanned: bool,
 
     // Parameters
     fast_window: String,
@@ -252,6 +254,13 @@ pub struct BacktestingPanel {
     // Results
     results: Option<BacktestingStatistics>,
     daily_pnl: Vec<(f64, f64)>, // (day_index, pnl)
+
+    // Data source warning
+    using_mock_data: bool,
+    using_mock_data_flag: Arc<Mutex<bool>>,
+
+    // Trade overlay for chart visualization
+    trade_overlay: TradeOverlay,
 
     // Engine
     engine: Arc<Mutex<Option<BacktestingEngine>>>,
@@ -277,6 +286,7 @@ impl Default for BacktestingPanel {
             strategy_name: "BollChannel".to_string(),
             available_strategies: Vec::new(),
             selected_strategy_index: 0,
+            strategies_scanned: false,
             fast_window: "10".to_string(),
             slow_window: "20".to_string(),
             fixed_size: "1.0".to_string(),
@@ -285,6 +295,9 @@ impl Default for BacktestingPanel {
             status_message: "就绪".to_string(),
             results: None,
             daily_pnl: Vec::new(),
+            using_mock_data: false,
+            using_mock_data_flag: Arc::new(Mutex::new(false)),
+            trade_overlay: TradeOverlay::new(),
             engine: Arc::new(Mutex::new(None)),
         }
     }
@@ -299,6 +312,13 @@ impl BacktestingPanel {
     pub fn ui(&mut self, _ctx: &Context, ui: &mut Ui) {
         // Check for background thread results
         self.check_results();
+
+        // Auto-scan strategies on first render if not already scanned
+        #[cfg(feature = "python")]
+        if !self.strategies_scanned {
+            self.scan_strategies_directory();
+            self.strategies_scanned = true;
+        }
 
         ui.heading("回测配置");
         ui.separator();
@@ -415,6 +435,8 @@ impl BacktestingPanel {
                                         // Update fields when selected
                                         self.strategy_file = self.available_strategies[i].1.clone();
                                         self.strategy_class = class_name.clone();
+                                        // Auto-generate strategy name from class name
+                                        self.strategy_name = class_name.clone();
                                     }
                                 }
                             });
@@ -482,6 +504,14 @@ impl BacktestingPanel {
     /// Render results section
     fn render_results(&mut self, ui: &mut Ui) {
         ui.heading("回测结果");
+
+        // Mock data warning banner
+        if self.using_mock_data {
+            ui.add_space(4.0);
+            ui.colored_label(egui::Color32::RED, "⚠️ 警告: 使用随机模拟数据回测，结果无参考价值！");
+            ui.label("请配置PostgreSQL数据库或加载CSV/Parquet文件以使用真实历史数据。");
+            ui.add_space(8.0);
+        }
 
         if let Some(ref stats) = self.results {
             Grid::new("backtest_results_grid")
@@ -780,6 +810,7 @@ impl BacktestingPanel {
 
         // Clone engine arc to pass to thread
         let engine_arc = self.engine.clone();
+        let mock_data_flag = self.using_mock_data_flag.clone();
 
         // Spawn thread
         thread::spawn(move || {
@@ -831,7 +862,12 @@ impl BacktestingPanel {
                 if let Err(_e) = loader.connect(db_url).await {
                     // If PostgreSQL fails, database feature might not be enabled
                     // Fall back to generating mock data
-                    eprintln!("Database connection failed, using mock data");
+                    tracing::warn!("数据库不可用，使用随机模拟数据 - 回测结果无参考价值");
+
+                    // Set mock data flag
+                    if let Ok(mut flag) = mock_data_flag.lock() {
+                        *flag = true;
+                    }
 
                     let mut bars = Vec::new();
                     let mut base_price = 40000.0;
@@ -885,18 +921,22 @@ impl BacktestingPanel {
                         .await
                     {
                         Ok(bars) => {
+                            // Real data loaded - ensure mock flag is false
+                            if let Ok(mut flag) = mock_data_flag.lock() {
+                                *flag = false;
+                            }
                             if bars.is_empty() {
-                                eprintln!(
+                                tracing::warn!(
                                     "No data found in database for {}.{}",
                                     symbol_only, exchange_str
                                 );
                             } else {
-                                eprintln!("Loaded {} bars from database", bars.len());
+                                tracing::info!("Loaded {} bars from database", bars.len());
                             }
                             engine.set_history_data(bars);
                         }
                         Err(e) => {
-                            eprintln!("Failed to load data from database: {}", e);
+                            tracing::error!("Failed to load data from database: {}", e);
                             return;
                         }
                     }
@@ -910,6 +950,12 @@ impl BacktestingPanel {
                     // Initialize Python interpreter if not already initialized
                     // This is required when running in a background thread
                     pyo3::Python::initialize();
+
+                    // Setup sys.path so the embedded interpreter can find
+                    // trade_engine module and strategy files
+                    if let Err(e) = crate::python::setup_embedded_python_path() {
+                        eprintln!("Failed to setup Python path: {}", e);
+                    }
 
                     match PythonStrategyAdapter::load_from_file(
                         &strategy_file,
@@ -965,6 +1011,10 @@ impl BacktestingPanel {
                         .enumerate()
                         .map(|(i, dr)| (i as f64, dr.net_pnl))
                         .collect();
+
+                    // Populate trade overlay from backtest trades
+                    let trades = engine.get_all_trades();
+                    self.trade_overlay = TradeOverlay::from_trades(&trades);
                 }
             }
         }
@@ -980,8 +1030,24 @@ impl BacktestingPanel {
     fn clear_results(&mut self) {
         self.results = None;
         self.daily_pnl.clear();
+        self.trade_overlay.clear();
         self.status_message = "就绪".to_string();
         self.progress = 0.0;
+    }
+
+    /// Get the trade overlay for chart visualization
+    pub fn get_trade_overlay(&self) -> &TradeOverlay {
+        &self.trade_overlay
+    }
+
+    /// Take the trade overlay, replacing it with an empty one
+    pub fn take_trade_overlay(&mut self) -> TradeOverlay {
+        std::mem::take(&mut self.trade_overlay)
+    }
+
+    /// Get the vt_symbol used for the backtest
+    pub fn get_vt_symbol(&self) -> &str {
+        &self.vt_symbol
     }
 
     /// Export results to CSV/JSON file

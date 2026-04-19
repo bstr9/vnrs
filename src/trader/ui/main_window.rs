@@ -324,10 +324,10 @@ impl MainWindow {
                 let cache = self.strategy_cache.clone();
                 let engine = strategy_engine.clone();
                 tokio::spawn(async move {
-                    let names = engine.get_all_strategy_names().await;
+                    let names = engine.get_all_strategy_names();
                     let mut data = Vec::new();
                     for name in names {
-                        if let Some(info) = engine.get_strategy_info(&name).await {
+                        if let Some(info) = engine.get_strategy_info(&name) {
                             let state_str = info.get("state").cloned().unwrap_or_default();
                             let state = match state_str.as_str() {
                                 "Inited" => StrategyState::Inited,
@@ -975,6 +975,8 @@ impl MainWindow {
             CentralTab::Backtesting => {
                 let ctx = ui.ctx().clone();
                 self.backtesting_panel.ui(&ctx, ui);
+                // Sync trade overlay to matching chart after backtest
+                self.sync_backtest_trade_overlay();
             }
         }
     }
@@ -1124,7 +1126,7 @@ impl MainWindow {
                 let se = se.clone();
                 let n = name.clone();
                 tokio::spawn(async move {
-                    match se.start_strategy(&n).await {
+                    match se.start_strategy(&n) {
                         Ok(_) => tracing::info!("策略 {} 启动成功", n),
                         Err(e) => tracing::error!("策略 {} 启动失败: {}", n, e),
                     }
@@ -1192,7 +1194,7 @@ impl MainWindow {
                                 let se = se.clone();
                                 let n = name.clone();
                                 tokio::spawn(async move {
-                                    match se.start_strategy(&n).await {
+                                    match se.start_strategy(&n) {
                                         Ok(_) => tracing::info!("策略 {} 启动成功", n),
                                         Err(e) => tracing::error!("策略 {} 启动失败: {}", n, e),
                                     }
@@ -1530,6 +1532,24 @@ impl MainWindow {
         }
     }
     
+    /// Sync trade overlay from backtesting panel to the matching chart widget.
+    ///
+    /// When a backtest completes and produces trades, the BacktestingPanel
+    /// populates its `trade_overlay`. This method transfers that overlay to
+    /// the chart widget for the same vt_symbol so trades are visible on the
+    /// K-line chart.
+    fn sync_backtest_trade_overlay(&mut self) {
+        let overlay = self.backtesting_panel.take_trade_overlay();
+        if overlay.markers.is_empty() && overlay.pairs.is_empty() {
+            return;
+        }
+        // Find the chart matching the backtest symbol
+        let vt_symbol = self.backtesting_panel.get_vt_symbol().to_string();
+        if let Some(chart) = self.charts.get_mut(&vt_symbol) {
+            chart.trade_overlay = overlay;
+        }
+    }
+
     /// Take pending connect action
     pub fn take_connect(&mut self) -> Option<(String, std::collections::HashMap<String, serde_json::Value>)> {
         self.pending_connect.take()
@@ -1538,29 +1558,21 @@ impl MainWindow {
     /// Take pending subscribe action
     pub fn take_subscribe(&mut self) -> Option<(crate::trader::SubscribeRequest, String)> {
         if let Some(req) = self.trading.take_subscribe() {
-            // Find the appropriate gateway for this exchange
-            let gateway_name = match req.exchange {
-                crate::trader::Exchange::Binance => {
-                    if self.gateway_names.contains(&"BINANCE_SPOT".to_string()) {
-                        "BINANCE_SPOT".to_string()
-                    } else {
-                        return None;
-                    }
-                }
-                crate::trader::Exchange::BinanceUsdm => {
-                    if self.gateway_names.contains(&"BINANCE_USDT".to_string()) {
-                        "BINANCE_USDT".to_string()
-                    } else {
-                        return None;
-                    }
-                }
-                crate::trader::Exchange::BinanceCoinm => {
-                    // Coin-M gateway not yet implemented
-                    return None;
-                }
-                _ => return None,
-            };
-            return Some((req, gateway_name));
+            // Find the appropriate gateway for this exchange using MainEngine's method
+            let gateway_name = self.main_engine
+                .as_ref()
+                .and_then(|me| me.find_gateway_name_for_exchange(req.exchange))
+                .or_else(|| {
+                    // Fallback: try to find any connected gateway
+                    self.gateway_names.first().cloned()
+                });
+            
+            if let Some(gw_name) = gateway_name {
+                return Some((req, gw_name));
+            } else {
+                tracing::warn!("No gateway found for exchange {:?}, available gateways: {:?}", 
+                    req.exchange, self.gateway_names);
+            }
         }
         None
     }

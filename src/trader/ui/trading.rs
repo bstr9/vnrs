@@ -282,7 +282,7 @@ impl TradingWidget {
         ui.set_min_width(280.0);
 
         // Order entry section
-        // Track popup state to render it outside the Grid (avoids clipping)
+        // Track popup state to render it outside the Group/Grid (avoids clipping)
         let mut popup_info: Option<(egui::Rect, Vec<ContractData>)> = None;
 
         ui.group(|ui| {
@@ -325,7 +325,11 @@ impl TradingWidget {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.symbol)
                             .id(symbol_id)
-                            .hint_text("输入合约代码..."),
+                            .hint_text(if self.contracts.is_empty() {
+                                "请先连接接口..."
+                            } else {
+                                "输入合约代码..."
+                            }),
                     );
 
                     // Focus symbol input if requested
@@ -348,8 +352,14 @@ impl TradingWidget {
                             .collect()
                     };
 
-                    // Save popup info to render AFTER the grid (avoids clipping by parent containers)
+                    // Show dropdown when text input has focus and there are matching contracts.
+                    // Use a flag to keep the popup open while interacting with it.
                     if response.has_focus() && !filtered_contracts.is_empty() {
+                        self.show_dropdown = true;
+                    }
+                    
+                    // Save popup info to render AFTER the group (avoids clipping by parent containers)
+                    if self.show_dropdown && !filtered_contracts.is_empty() {
                         popup_info = Some((
                             response.rect,
                             filtered_contracts.into_iter().cloned().collect(),
@@ -359,6 +369,12 @@ impl TradingWidget {
                     // Subscribe on Enter key
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         self.update_vt_symbol();
+                        self.show_dropdown = false;
+                    }
+
+                    // Escape to close dropdown
+                    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.show_dropdown = false;
                     }
 
                     ui.end_row();
@@ -454,82 +470,6 @@ impl TradingWidget {
                     ui.end_row();
                 });
 
-            // Render autocomplete popup AFTER the grid, outside its clip region
-            // This prevents the dropdown from being clipped by the Grid/Group containers
-            if let Some((widget_rect, filtered_contracts)) = popup_info {
-                let popup_id = egui::Id::new("contract_autocomplete");
-                let input_lower = self.symbol.to_lowercase();
-
-                egui::Area::new(popup_id)
-                    .pivot(egui::Align2::LEFT_TOP)
-                    .fixed_pos(widget_rect.left_bottom())
-                    .order(egui::Order::Foreground)
-                    .interactable(true)
-                    .show(ui.ctx(), |ui| {
-                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.set_max_width(220.0);
-                            ui.set_max_height(200.0);
-
-                            egui::ScrollArea::vertical()
-                                .max_height(180.0)
-                                .show(ui, |ui| {
-                                    for contract in &filtered_contracts {
-                                        let label = format!(
-                                            "{} ({})",
-                                            contract.symbol.to_uppercase(),
-                                            contract.name
-                                        );
-
-                                        // Highlight if exact match
-                                        let is_exact =
-                                            contract.symbol.to_lowercase() == input_lower;
-
-                                        if ui.selectable_label(is_exact, label).clicked() {
-                                            // User selected this contract
-                                            self.symbol = contract.symbol.clone();
-                                            self.name = contract.name.clone();
-                                            self.price_digits = get_digits(contract.pricetick);
-
-                                            // Find matching exchange index
-                                            if let Some(idx) = self
-                                                .exchanges
-                                                .iter()
-                                                .position(|e| *e == contract.exchange)
-                                            {
-                                                self.exchange_index = idx;
-                                            }
-
-                                            // Find matching gateway index
-                                            if let Some(idx) = self
-                                                .gateways
-                                                .iter()
-                                                .position(|g| g == &contract.gateway_name)
-                                            {
-                                                self.gateway_index = idx;
-                                            }
-
-                                            self.contract = Some(contract.clone());
-
-                                            // Update vt_symbol and request subscription
-                                            let new_vt_symbol = contract.vt_symbol();
-                                            if new_vt_symbol != self.vt_symbol {
-                                                self.vt_symbol = new_vt_symbol;
-                                                self.depth = MarketDepth::default();
-                                                self.price.clear();
-                                                self.volume.clear();
-
-                                                self.pending_subscribe = Some(SubscribeRequest {
-                                                    symbol: contract.symbol.clone(),
-                                                    exchange: contract.exchange,
-                                                });
-                                            }
-                                        }
-                                    }
-                                });
-                        });
-                    });
-            }
-
             ui.separator();
 
             // Buttons
@@ -541,7 +481,101 @@ impl TradingWidget {
                     self.pending_cancel_all = true;
                 }
             });
+
+            // Contract count indicator
+            if !self.contracts.is_empty() {
+                ui.label(
+                    RichText::new(format!("已加载 {} 个合约", self.contracts.len()))
+                        .small()
+                        .color(egui::Color32::GRAY),
+                );
+            }
         });
+
+        // Render autocomplete popup OUTSIDE the group closure to avoid clipping issues.
+        // The popup floats above all other UI using egui::Area with Foreground order.
+        if let Some((widget_rect, filtered_contracts)) = popup_info {
+            let area_id = egui::Id::new("contract_autocomplete_area");
+            let input_lower = self.symbol.to_lowercase();
+
+            let area_response = egui::Area::new(area_id)
+                .pivot(egui::Align2::LEFT_TOP)
+                .fixed_pos(widget_rect.left_bottom())
+                .order(egui::Order::Foreground)
+                .interactable(true)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_max_width(260.0);
+                        ui.set_max_height(200.0);
+
+                        egui::ScrollArea::vertical()
+                            .max_height(180.0)
+                            .show(ui, |ui| {
+                                for contract in &filtered_contracts {
+                                    let label = format!(
+                                        "{} ({})",
+                                        contract.symbol.to_uppercase(),
+                                        contract.name
+                                    );
+
+                                    // Highlight if exact match
+                                    let is_exact =
+                                        contract.symbol.to_lowercase() == input_lower;
+
+                                    if ui.selectable_label(is_exact, label).clicked() {
+                                        // User selected this contract
+                                        self.symbol = contract.symbol.clone();
+                                        self.name = contract.name.clone();
+                                        self.price_digits = get_digits(contract.pricetick);
+
+                                        // Find matching exchange index
+                                        if let Some(idx) = self
+                                            .exchanges
+                                            .iter()
+                                            .position(|e| *e == contract.exchange)
+                                        {
+                                            self.exchange_index = idx;
+                                        }
+
+                                        // Find matching gateway index
+                                        if let Some(idx) = self
+                                            .gateways
+                                            .iter()
+                                            .position(|g| g == &contract.gateway_name)
+                                        {
+                                            self.gateway_index = idx;
+                                        }
+
+                                        self.contract = Some(contract.clone());
+
+                                        // Update vt_symbol and request subscription
+                                        let new_vt_symbol = contract.vt_symbol();
+                                        if new_vt_symbol != self.vt_symbol {
+                                            self.vt_symbol = new_vt_symbol;
+                                            self.depth = MarketDepth::default();
+                                            self.price.clear();
+                                            self.volume.clear();
+
+                                            self.pending_subscribe = Some(SubscribeRequest {
+                                                symbol: contract.symbol.clone(),
+                                                exchange: contract.exchange,
+                                            });
+                                        }
+
+                                        // Close dropdown and refocus text input
+                                        self.show_dropdown = false;
+                                        self.focus_symbol_input = true;
+                                    }
+                                }
+                            });
+                    });
+                });
+
+            // If the user clicks outside the dropdown area, close it
+            if area_response.response.clicked_elsewhere() {
+                self.show_dropdown = false;
+            }
+        }
 
         ui.add_space(10.0);
 
