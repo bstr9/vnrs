@@ -55,7 +55,7 @@ impl BinanceUsdtGateway {
     pub fn new(gateway_name: &str) -> Self {
         Self {
             gateway_name: gateway_name.to_string(),
-            rest_client: Arc::new(BinanceRestClient::new()),
+            rest_client: Arc::new(BinanceRestClient::new().unwrap_or_default()),
             market_ws: Arc::new(BinanceWebSocketClient::new(gateway_name)),
             trade_ws: Arc::new(BinanceWebSocketClient::new(gateway_name)),
             event_sender: Arc::new(RwLock::new(None)),

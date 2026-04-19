@@ -79,7 +79,7 @@ impl BinanceDatafeed {
     /// Create a new BinanceDatafeed for Spot
     pub fn new_spot() -> Self {
         Self {
-            rest_client: crate::gateway::binance::BinanceRestClient::new(),
+            rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
             futures: false,
         }
     }
@@ -87,7 +87,7 @@ impl BinanceDatafeed {
     /// Create a new BinanceDatafeed for USDT-M Futures
     pub fn new_futures() -> Self {
         Self {
-            rest_client: crate::gateway::binance::BinanceRestClient::new(),
+            rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
             futures: true,
         }
     }

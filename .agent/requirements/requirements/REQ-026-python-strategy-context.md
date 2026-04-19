@@ -3,7 +3,7 @@ id: REQ-026
 title: "StrategyContext 暴露给 Python 策略（含数据查询方法）"
 status: active
 created_at: "2026-04-19T14:00:00"
-updated_at: "2026-04-20T10:00:00"
+updated_at: "2026-04-19T19:04:20"
 priority: P1
 relations:
   supersedes: []
@@ -26,6 +26,12 @@ versions:
     context: "需求整理合并：REQ-031(get_bars) 和 REQ-032(get_tick/get_bar) 是 REQ-026 的验收标准子项，合并以消除冗余。"
     reason: "合并 REQ-031、REQ-032 到验收标准"
     snapshot: "StrategyContext 暴露给 Python，含 get_tick/get_bar/get_bars/load_bar 全部数据查询方法"
+  - version: 3
+    date: "2026-04-19T19:04:20"
+    author: ai
+    context: "元数据自动同步"
+    reason: "自动补充反向关系: refined_by"
+    snapshot: "自动同步元数据"
 ---
 
 # StrategyContext 暴露给 Python 策略（含数据查询方法）

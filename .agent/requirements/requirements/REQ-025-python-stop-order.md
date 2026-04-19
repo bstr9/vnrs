@@ -3,7 +3,7 @@ id: REQ-025
 title: "Python 止损单完整功能（发送/回调/取消）"
 status: active
 created_at: "2026-04-19T12:00:00"
-updated_at: "2026-04-20T10:00:00"
+updated_at: "2026-04-19T19:04:20"
 priority: P2
 relations:
   supersedes: []
@@ -26,6 +26,12 @@ versions:
     context: "需求整理合并：REQ-028(on_stop_order 回调) 和 REQ-029(cancel_stop_order) 是止损单功能的配套部分，合并为一个完整需求。"
     reason: "合并 REQ-028、REQ-029，止损单发送/回调/取消是一个完整功能"
     snapshot: "Python 止损单完整功能：send_stop_order 发送、on_stop_order 触发回调、cancel_stop_order 取消"
+  - version: 3
+    date: "2026-04-19T19:04:20"
+    author: ai
+    context: "元数据自动同步"
+    reason: "自动补充反向关系: refined_by"
+    snapshot: "自动同步元数据"
 ---
 
 # Python 止损单完整功能（发送/回调/取消）
