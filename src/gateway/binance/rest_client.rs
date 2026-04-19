@@ -40,13 +40,13 @@ pub struct BinanceRestClient {
 
 impl BinanceRestClient {
     /// Create a new REST client
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, String> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-        Self {
+        Ok(Self {
             client: Arc::new(RwLock::new(client)),
             key: Arc::new(RwLock::new(String::new())),
             secret: Arc::new(RwLock::new(Vec::new())),
@@ -56,7 +56,7 @@ impl BinanceRestClient {
             time_offset: AtomicI64::new(0),
             recv_window: 5000,
             max_retries: 3,
-        }
+        })
     }
 
     /// Initialize the client with credentials and host
@@ -90,38 +90,44 @@ impl BinanceRestClient {
                         }
                         Err(e) => {
                             tracing::warn!("⚠️ 创建带代理的 HTTP 客户端失败: {}", e);
-                            Client::builder()
-                                .timeout(std::time::Duration::from_secs(30))
-                                .build()
-                                .expect("Failed to create HTTP client")
+                            Self::build_default_client()
                         }
                     }
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ 无效的代理配置 {}:{}: {}", proxy_host, proxy_port, e);
-                    Client::builder()
-                        .timeout(std::time::Duration::from_secs(30))
-                        .build()
-                        .expect("Failed to create HTTP client")
+                    Self::build_default_client()
                 }
             }
         } else {
-            Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client")
+            Self::build_default_client()
         };
         
         // Replace the client
         *self.client.write().await = new_client;
     }
 
+    /// Build a default HTTP client, logging an error if it fails (should not happen in practice)
+    fn build_default_client() -> Client {
+        Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|e| {
+                error!("Failed to create HTTP client: {}; using minimal fallback", e);
+                // A minimal client with no timeout — last resort to avoid panic
+                Client::new()
+            })
+    }
+
     /// Get current timestamp in milliseconds
     fn get_timestamp(&self) -> i64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as i64;
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or_else(|e| {
+                warn!("System time error (clock went backwards?): {}; using 0 as fallback", e);
+                0
+            });
 
         let offset = self.time_offset.load(Ordering::Relaxed);
         if offset > 0 {
@@ -166,8 +172,9 @@ impl BinanceRestClient {
     /// Generate signature for request
     async fn sign(&self, query: &str) -> String {
         let secret = self.secret.read().await;
+        // HMAC-SHA256 accepts keys of any size per RFC 2104 — this cannot fail
         let mut mac = HmacSha256::new_from_slice(&secret)
-            .expect("HMAC can take key of any size");
+            .expect("HMAC accepts keys of any size per RFC 2104");
         mac.update(query.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -226,19 +233,19 @@ impl BinanceRestClient {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded".parse().expect("static header value is always valid"),
+            reqwest::header::HeaderValue::from_static("application/x-www-form-urlencoded"),
         );
         headers.insert(
             reqwest::header::ACCEPT,
-            "application/json".parse().expect("static header value is always valid"),
+            reqwest::header::HeaderValue::from_static("application/json"),
         );
 
         if security == Security::Signed || security == Security::ApiKey {
             let key = self.key.read().await;
-            headers.insert(
-                "X-MBX-APIKEY",
-                key.parse().expect("API key should be valid header value"),
-            );
+            match key.parse() {
+                Ok(val) => { headers.insert("X-MBX-APIKEY", val); }
+                Err(e) => { warn!("Invalid API key encoding for header: {}", e); }
+            }
         }
 
         headers
@@ -350,6 +357,21 @@ impl BinanceRestClient {
 
 impl Default for BinanceRestClient {
     fn default() -> Self {
-        Self::new()
+        Self::new().unwrap_or_else(|e| {
+            error!("Failed to create default BinanceRestClient: {}", e);
+            // Fallback: create a minimal client that will be replaced by init()
+            let client = Client::new();
+            Self {
+                client: Arc::new(RwLock::new(client)),
+                key: Arc::new(RwLock::new(String::new())),
+                secret: Arc::new(RwLock::new(Vec::new())),
+                host: Arc::new(RwLock::new(String::new())),
+                proxy_host: Arc::new(RwLock::new(String::new())),
+                proxy_port: Arc::new(RwLock::new(0)),
+                time_offset: AtomicI64::new(0),
+                recv_window: 5000,
+                max_retries: 3,
+            }
+        })
     }
 }

@@ -36,7 +36,7 @@ async fn main() {
     println!();
 
     // Create and init REST client
-    let client = BinanceRestClient::new();
+    let client = BinanceRestClient::new().expect("Failed to create HTTP client");
     client.init(key, secret, SPOT_REST_HOST, proxy_host, proxy_port).await;
 
     // Test 1: Server time (no auth needed)

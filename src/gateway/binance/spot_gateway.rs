@@ -68,7 +68,7 @@ impl BinanceSpotGateway {
     pub fn new(gateway_name: &str) -> Self {
         Self {
             gateway_name: gateway_name.to_string(),
-            rest_client: Arc::new(BinanceRestClient::new()),
+            rest_client: Arc::new(BinanceRestClient::new().unwrap_or_default()),
             market_ws: Arc::new(BinanceWebSocketClient::new(gateway_name)),
             trade_ws: Arc::new(BinanceWebSocketClient::new(gateway_name)),
             event_sender: Arc::new(RwLock::new(None)),
@@ -309,11 +309,10 @@ impl BinanceSpotGateway {
         if let Some(orders) = data.as_array() {
             for d in orders {
                 let order_type_str = d["type"].as_str().unwrap_or("");
-                let order_type = ORDERTYPE_BINANCE2VT.get(order_type_str);
-                
-                if order_type.is_none() {
-                    continue;
-                }
+                let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                    Some(ot) => *ot,
+                    None => continue,
+                };
 
                 let status_str = d["status"].as_str().unwrap_or("");
                 let direction_str = d["side"].as_str().unwrap_or("");
@@ -322,7 +321,7 @@ impl BinanceSpotGateway {
                     symbol: d["symbol"].as_str().unwrap_or("").to_lowercase(),
                     exchange: Exchange::Binance,
                     orderid: d["clientOrderId"].as_str().unwrap_or("").to_string(),
-                    order_type: *order_type.expect("order_type verified non-None above"),
+                    order_type,
                     direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
                     offset: Offset::None,
                     price: d["price"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
@@ -490,11 +489,10 @@ impl BinanceSpotGateway {
                     }
                     "executionReport" => {
                         let order_type_str = event_data["o"].as_str().unwrap_or("");
-                        let order_type = ORDERTYPE_BINANCE2VT.get(order_type_str);
-
-                        if order_type.is_none() {
-                            return;
-                        }
+                        let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                            Some(ot) => *ot,
+                            None => return,
+                        };
 
                         let orderid = if event_data["C"].as_str().unwrap_or("").is_empty() {
                             event_data["c"].as_str().unwrap_or("").to_string()
@@ -509,7 +507,7 @@ impl BinanceSpotGateway {
                             symbol: event_data["s"].as_str().unwrap_or("").to_lowercase(),
                             exchange: Exchange::Binance,
                             orderid: orderid.clone(),
-                            order_type: *order_type.expect("order_type verified non-None above"),
+                            order_type,
                             direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
                             offset: Offset::None,
                             price: event_data["p"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
@@ -942,11 +940,10 @@ impl BaseGateway for BinanceSpotGateway {
                                     if let Some(orders_arr) = data.as_array() {
                                         for d in orders_arr {
                                             let order_type_str = d["type"].as_str().unwrap_or("");
-                                            let order_type = super::constants::ORDERTYPE_BINANCE2VT.get(order_type_str);
-
-                                            if order_type.is_none() {
-                                                continue;
-                                            }
+                                            let order_type = match super::constants::ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                                Some(ot) => *ot,
+                                                None => continue,
+                                            };
 
                                             let status_str = d["status"].as_str().unwrap_or("");
                                             let direction_str = d["side"].as_str().unwrap_or("");
@@ -955,7 +952,7 @@ impl BaseGateway for BinanceSpotGateway {
                                                 symbol: d["symbol"].as_str().unwrap_or("").to_lowercase(),
                                                 exchange: crate::trader::Exchange::Binance,
                                                 orderid: d["clientOrderId"].as_str().unwrap_or("").to_string(),
-                                                order_type: *order_type.expect("order_type verified non-None above"),
+                                                order_type,
                                                 direction: super::constants::DIRECTION_BINANCE2VT.get(direction_str).copied(),
                                                 offset: crate::trader::Offset::None,
                                                 price: d["price"].as_str().unwrap_or("0").parse().unwrap_or(0.0),

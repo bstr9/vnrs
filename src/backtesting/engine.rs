@@ -555,7 +555,8 @@ impl BacktestingEngine {
         };
 
         // 3. Create and initialize REST client
-        let rest_client = crate::gateway::binance::BinanceRestClient::new();
+        let rest_client = crate::gateway::binance::BinanceRestClient::new()
+            .map_err(|e| format!("Failed to create REST client: {}", e))?;
         rest_client.init(
             &config.key,
             &config.secret,
@@ -984,8 +985,9 @@ impl BacktestingEngine {
                 self.trades.insert(vt_tradeid.clone(), trade.clone());
                 
                 // Update position using apply_fill
-                self.position.apply_fill(&trade)
-                    .expect("Position apply_fill failed");
+                if let Err(e) = self.position.apply_fill(&trade) {
+                    tracing::error!("Position apply_fill failed: {}", e);
+                }
 
                 // Unfreeze close volume when fill occurs
                 if Self::is_close_offset(trade.offset) {
@@ -1114,8 +1116,9 @@ impl BacktestingEngine {
                 self.trades.insert(vt_tradeid.clone(), trade.clone());
                 
                 // Update position using apply_fill
-                self.position.apply_fill(&trade)
-                    .expect("Position apply_fill failed");
+                if let Err(e) = self.position.apply_fill(&trade) {
+                    tracing::error!("Position apply_fill failed: {}", e);
+                }
 
                 // Unfreeze close volume when fill occurs
                 if Self::is_close_offset(trade.offset) {
@@ -1192,8 +1195,9 @@ impl BacktestingEngine {
                 self.trades.insert(vt_tradeid.clone(), trade.clone());
                 
                 // Update position using apply_fill
-                self.position.apply_fill(&trade)
-                    .expect("Position apply_fill failed");
+                if let Err(e) = self.position.apply_fill(&trade) {
+                    tracing::error!("Position apply_fill failed: {}", e);
+                }
 
                 // Unfreeze close volume when fill occurs
                 if Self::is_close_offset(trade.offset) {
@@ -1301,8 +1305,9 @@ impl BacktestingEngine {
                 self.trades.insert(vt_tradeid.clone(), trade.clone());
                 
                 // Update position using apply_fill
-                self.position.apply_fill(&trade)
-                    .expect("Position apply_fill failed");
+                if let Err(e) = self.position.apply_fill(&trade) {
+                    tracing::error!("Position apply_fill failed: {}", e);
+                }
 
                 // Unfreeze close volume when fill occurs
                 if Self::is_close_offset(trade.offset) {
