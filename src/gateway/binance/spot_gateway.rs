@@ -374,6 +374,8 @@ impl BinanceSpotGateway {
                     datetime: Some(timestamp_to_datetime(d["time"].as_i64().unwrap_or(0))),
                     reference: String::new(),
                     gateway_name: self.gateway_name.clone(),
+                    post_only: false,
+                    reduce_only: false,
                     extra: None,
                 };
                 self.on_order(order).await;
@@ -560,6 +562,8 @@ impl BinanceSpotGateway {
                             datetime: Some(timestamp_to_datetime(event_data["O"].as_i64().unwrap_or(0))),
                             reference: String::new(),
                             gateway_name: gateway_name.clone(),
+                            post_only: false,
+                            reduce_only: false,
                             extra: None,
                         };
 
@@ -1006,6 +1010,8 @@ impl BaseGateway for BinanceSpotGateway {
                                                 datetime: Some(super::constants::timestamp_to_datetime(d["time"].as_i64().unwrap_or(0))),
                                                 reference: String::new(),
                                                 gateway_name: gateway_name.clone(),
+                                                post_only: false,
+                                                reduce_only: false,
                                                 extra: None,
                                             };
                                             orders.write().await.insert(order.orderid.clone(), order.clone());
@@ -1090,6 +1096,8 @@ impl BaseGateway for BinanceSpotGateway {
                                     datetime: Some(timestamp_to_datetime(data["time"].as_i64().unwrap_or(0))),
                                     reference: String::new(),
                                     gateway_name: gateway_name_checker.clone(),
+                                    post_only: false,
+                                    reduce_only: false,
                                     extra: None,
                                 };
 

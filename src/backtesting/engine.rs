@@ -1077,23 +1077,25 @@ impl BacktestingEngine {
 
             // Create a synthetic OrderData to pass to FillModel
             let order = OrderData {
-                gateway_name: "BACKTESTING".to_string(),
-                symbol: crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
-                    .map(|(s, _)| s)
-                    .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string()),
-                exchange: self.exchange,
-                orderid: stop_orderid.clone(),
-                order_type: stop_order.order_type,
-                direction: Some(stop_order.direction),
-                offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: stop_order.limit_price.unwrap_or(stop_order.price),
-                volume: stop_order.volume,
-                traded: 0.0,
-                status: Status::NotTraded,
-                datetime: Some(bar.datetime),
-                reference: String::new(),
-                extra: None,
-            };
+                        gateway_name: "BACKTESTING".to_string(),
+                        symbol: crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
+                            .map(|(s, _)| s)
+                            .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string()),
+                        exchange: self.exchange,
+                        orderid: stop_orderid.clone(),
+                        order_type: stop_order.order_type,
+                        direction: Some(stop_order.direction),
+                        offset: stop_order.offset.unwrap_or(Offset::Open),
+                        price: stop_order.limit_price.unwrap_or(stop_order.price),
+                        volume: stop_order.volume,
+                        traded: 0.0,
+                        status: Status::NotTraded,
+                        datetime: Some(bar.datetime),
+                        reference: String::new(),
+                        post_only: false,
+                        reduce_only: false,
+                        extra: None,
+                    };
 
             // Use appropriate fill simulation based on order type
             let fill_result = match stop_order.order_type {
@@ -1275,23 +1277,25 @@ impl BacktestingEngine {
 
             // Create a synthetic OrderData to pass to FillModel
             let order = OrderData {
-                gateway_name: "BACKTESTING".to_string(),
-                symbol: crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
-                    .map(|(s, _)| s)
-                    .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string()),
-                exchange: self.exchange,
-                orderid: stop_orderid.clone(),
-                order_type: stop_order.order_type,
-                direction: Some(stop_order.direction),
-                offset: stop_order.offset.unwrap_or(Offset::Open),
-                price: stop_order.limit_price.unwrap_or(stop_order.price),
-                volume: stop_order.volume,
-                traded: 0.0,
-                status: Status::NotTraded,
-                datetime: Some(tick.datetime),
-                reference: String::new(),
-                extra: None,
-            };
+                        gateway_name: "BACKTESTING".to_string(),
+                        symbol: crate::trader::utility::extract_vt_symbol(&stop_order.vt_symbol)
+                            .map(|(s, _)| s)
+                            .unwrap_or_else(|| stop_order.vt_symbol.split('.').next().unwrap_or("").to_string()),
+                        exchange: self.exchange,
+                        orderid: stop_orderid.clone(),
+                        order_type: stop_order.order_type,
+                        direction: Some(stop_order.direction),
+                        offset: stop_order.offset.unwrap_or(Offset::Open),
+                        price: stop_order.limit_price.unwrap_or(stop_order.price),
+                        volume: stop_order.volume,
+                        traded: 0.0,
+                        status: Status::NotTraded,
+                        datetime: Some(tick.datetime),
+                        reference: String::new(),
+                        post_only: false,
+                        reduce_only: false,
+                        extra: None,
+                    };
 
             // For tick data, use simulate_tick_fill for stop orders
             let fill_result = self.fill_model.simulate_tick_fill(&order, tick);
@@ -1391,21 +1395,23 @@ impl BacktestingEngine {
         let vt_orderid = format!("BACKTEST_{}", self.limit_order_count);
 
         let order = OrderData {
-            gateway_name: "BACKTESTING".to_string(),
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            orderid: vt_orderid.clone(),
-            order_type: req.order_type,
-            direction: Some(req.direction),
-            offset: req.offset,
-            price: req.price,
-            volume: req.volume,
-            traded: 0.0,
-            status: Status::NotTraded,
-            datetime: Some(self.clock.now()),
-            reference: req.reference.clone(),
-            extra: None,
-        };
+                    gateway_name: "BACKTESTING".to_string(),
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    orderid: vt_orderid.clone(),
+                    order_type: req.order_type,
+                    direction: Some(req.direction),
+                    offset: req.offset,
+                    price: req.price,
+                    volume: req.volume,
+                    traded: 0.0,
+                    status: Status::NotTraded,
+                    datetime: Some(self.clock.now()),
+                    reference: req.reference.clone(),
+                    post_only: false,
+                    reduce_only: false,
+                    extra: None,
+                };
 
         // Pre-trade risk check
         let active_order_count = self.active_limit_orders.len() + self.active_stop_orders.len();
@@ -1496,21 +1502,23 @@ impl BacktestingEngine {
 
         // Pre-trade risk check - create a synthetic OrderData for the check
         let order_for_check = OrderData {
-            gateway_name: "BACKTESTING".to_string(),
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            orderid: stop_orderid.clone(),
-            order_type: req.order_type,
-            direction: Some(req.direction),
-            offset: req.offset,
-            price: req.price,
-            volume: req.volume,
-            traded: 0.0,
-            status: Status::NotTraded,
-            datetime: Some(self.clock.now()),
-            reference: String::new(),
-            extra: None,
-        };
+                    gateway_name: "BACKTESTING".to_string(),
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    orderid: stop_orderid.clone(),
+                    order_type: req.order_type,
+                    direction: Some(req.direction),
+                    offset: req.offset,
+                    price: req.price,
+                    volume: req.volume,
+                    traded: 0.0,
+                    status: Status::NotTraded,
+                    datetime: Some(self.clock.now()),
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    extra: None,
+                };
         let active_order_count = self.active_limit_orders.len() + self.active_stop_orders.len();
         let risk_result = self.risk_engine.check_order(
             &order_for_check, &self.position, active_order_count, self.size,

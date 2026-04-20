@@ -1164,21 +1164,23 @@ mod tests {
         let db = MemoryDatabase::new();
         
         let order = OrderData {
-            gateway_name: "BINANCE_SPOT".to_string(),
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            orderid: "test_order_1".to_string(),
-            order_type: OrderType::Limit,
-            direction: Some(Direction::Long),
-            offset: Offset::None,
-            price: 50000.0,
-            volume: 0.01,
-            traded: 0.0,
-            status: Status::NotTraded,
-            datetime: Some(Utc::now()),
-            reference: String::new(),
-            extra: None,
-        };
+                    gateway_name: "BINANCE_SPOT".to_string(),
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    orderid: "test_order_1".to_string(),
+                    order_type: OrderType::Limit,
+                    direction: Some(Direction::Long),
+                    offset: Offset::None,
+                    price: 50000.0,
+                    volume: 0.01,
+                    traded: 0.0,
+                    status: Status::NotTraded,
+                    datetime: Some(Utc::now()),
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    extra: None,
+                };
         
         db.save_order_data(vec![order.clone()]).await.expect("save_order_data should succeed");
         
@@ -1262,21 +1264,23 @@ mod tests {
         let db = FileDatabase::new(temp_dir.clone());
         
         let order = OrderData {
-            gateway_name: "BINANCE_SPOT".to_string(),
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            orderid: "test_order_1".to_string(),
-            order_type: OrderType::Limit,
-            direction: Some(Direction::Long),
-            offset: Offset::None,
-            price: 50000.0,
-            volume: 0.01,
-            traded: 0.0,
-            status: Status::NotTraded,
-            datetime: Some(Utc::now()),
-            reference: String::new(),
-            extra: None,
-        };
+                    gateway_name: "BINANCE_SPOT".to_string(),
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    orderid: "test_order_1".to_string(),
+                    order_type: OrderType::Limit,
+                    direction: Some(Direction::Long),
+                    offset: Offset::None,
+                    price: 50000.0,
+                    volume: 0.01,
+                    traded: 0.0,
+                    status: Status::NotTraded,
+                    datetime: Some(Utc::now()),
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    extra: None,
+                };
         
         db.save_order_data(vec![order]).await.expect("save_order_data should succeed");
         

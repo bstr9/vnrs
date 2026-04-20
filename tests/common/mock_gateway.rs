@@ -212,21 +212,23 @@ impl BaseGateway for MockGateway {
             let orderid = self.generate_order_id();
             if let Some(sender) = self.event_sender.lock().unwrap().as_ref() {
                 let order = OrderData {
-                    gateway_name: self.name.clone(),
-                    symbol: req.symbol.clone(),
-                    exchange: req.exchange,
-                    orderid: orderid.clone(),
-                    order_type: req.order_type,
-                    direction: Some(direction),
-                    offset: req.offset,
-                    price: req.price,
-                    volume: req.volume,
-                    traded: 0.0,
-                    status: Status::NotTraded,
-                    datetime: Some(chrono::Utc::now()),
-                    reference: req.reference.clone(),
-                    extra: None,
-                };
+                            gateway_name: self.name.clone(),
+                            symbol: req.symbol.clone(),
+                            exchange: req.exchange,
+                            orderid: orderid.clone(),
+                            order_type: req.order_type,
+                            direction: Some(direction),
+                            offset: req.offset,
+                            price: req.price,
+                            volume: req.volume,
+                            traded: 0.0,
+                            status: Status::NotTraded,
+                            datetime: Some(chrono::Utc::now()),
+                            reference: req.reference.clone(),
+                            post_only: false,
+                            reduce_only: false,
+                            extra: None,
+                        };
                 sender.on_order(order);
             }
             return Ok(format!("{}.{}", self.name, orderid));

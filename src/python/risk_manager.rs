@@ -408,6 +408,8 @@ impl PyRiskManager {
             status: Status::NotTraded,
             datetime: None,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         };
 

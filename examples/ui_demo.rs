@@ -101,21 +101,23 @@ impl DemoApp {
         
         // Demo order data
         let order = OrderData {
-            gateway_name: "BINANCE".to_string(),
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            orderid: "12345".to_string(),
-            order_type: OrderType::Limit,
-            direction: Some(Direction::Long),
-            offset: Offset::Open,
-            price: 43200.0,
-            volume: 0.5,
-            traded: 0.2,
-            status: Status::PartTraded,
-            datetime: Some(Utc::now()),
-            reference: "Demo".to_string(),
-            extra: None,
-        };
+                    gateway_name: "BINANCE".to_string(),
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    orderid: "12345".to_string(),
+                    order_type: OrderType::Limit,
+                    direction: Some(Direction::Long),
+                    offset: Offset::Open,
+                    price: 43200.0,
+                    volume: 0.5,
+                    traded: 0.2,
+                    status: Status::PartTraded,
+                    datetime: Some(Utc::now()),
+                    reference: "Demo".to_string(),
+                    post_only: false,
+                    reduce_only: false,
+                    extra: None,
+                };
         self.main_window.order_monitor.update(&order);
         self.main_window.active_order_monitor.update(&order);
         

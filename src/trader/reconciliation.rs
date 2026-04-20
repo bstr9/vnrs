@@ -785,21 +785,23 @@ mod tests {
         // Add an active order to OmsEngine
         use crate::trader::constant::OrderType;
         let order = OrderData {
-            gateway_name: "BINANCE_SPOT".to_string(),
-            symbol: "btcusdt".to_string(),
-            exchange: Exchange::Binance,
-            orderid: "order_new".to_string(),
-            order_type: OrderType::Limit,
-            direction: Some(Direction::Long),
-            offset: crate::trader::constant::Offset::None,
-            price: 50000.0,
-            volume: 1.0,
-            traded: 0.0,
-            status: Status::NotTraded,
-            datetime: Some(Utc::now()),
-            reference: String::new(),
-            extra: None,
-        };
+                    gateway_name: "BINANCE_SPOT".to_string(),
+                    symbol: "btcusdt".to_string(),
+                    exchange: Exchange::Binance,
+                    orderid: "order_new".to_string(),
+                    order_type: OrderType::Limit,
+                    direction: Some(Direction::Long),
+                    offset: crate::trader::constant::Offset::None,
+                    price: 50000.0,
+                    volume: 1.0,
+                    traded: 0.0,
+                    status: Status::NotTraded,
+                    datetime: Some(Utc::now()),
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    extra: None,
+                };
         engine.oms().process_order(order);
 
         let drifts = recon.detect_order_drift("BINANCE_SPOT");

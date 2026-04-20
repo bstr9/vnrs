@@ -749,21 +749,23 @@ mod tests {
 
         // Add a close order (Short direction with Close offset)
         let order = OrderData {
-            gateway_name: "test".to_string(),
-            symbol: "IF2312".to_string(),
-            exchange: Exchange::Cffex,
-            orderid: "ORDER_1".to_string(),
-            order_type: OrderType::Limit,
-            direction: Some(Direction::Short),
-            offset: Offset::Close,
-            price: 4000.0,
-            volume: 3.0,
-            traded: 0.0,
-            status: Status::NotTraded,
-            datetime: None,
-            reference: String::new(),
-            extra: None,
-        };
+                    gateway_name: "test".to_string(),
+                    symbol: "IF2312".to_string(),
+                    exchange: Exchange::Cffex,
+                    orderid: "ORDER_1".to_string(),
+                    order_type: OrderType::Limit,
+                    direction: Some(Direction::Short),
+                    offset: Offset::Close,
+                    price: 4000.0,
+                    volume: 3.0,
+                    traded: 0.0,
+                    status: Status::NotTraded,
+                    datetime: None,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    extra: None,
+                };
 
         holding.update_order(&order);
 

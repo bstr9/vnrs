@@ -405,6 +405,8 @@ pub fn py_to_order(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::
         volume: get_optional::<f64>(py_dict, "volume").unwrap_or(0.0),
         traded: get_optional::<f64>(py_dict, "traded").unwrap_or(0.0),
         reference: String::new(),
+        post_only: false,
+        reduce_only: false,
         extra: None,
     })
 }

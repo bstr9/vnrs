@@ -430,6 +430,8 @@ impl InstrumentMatchingEngine {
             status: Status::NotTraded,
             datetime: Some(clock.now()),
             reference: req.reference,
+            post_only: false,
+            reduce_only: false,
             extra: None,
         };
 
@@ -504,6 +506,8 @@ impl InstrumentMatchingEngine {
                 status: Status::Cancelled,
                 datetime: Some(stop_order.datetime),
                 reference: stop_order.strategy_name,
+                post_only: false,
+                reduce_only: false,
                 extra: None,
             })
         } else {
@@ -660,6 +664,8 @@ impl InstrumentMatchingEngine {
                 status: Status::NotTraded,
                 datetime: Some(bar.datetime),
                 reference: String::new(),
+                post_only: false,
+                reduce_only: false,
                 extra: None,
             };
 
@@ -804,6 +810,8 @@ impl InstrumentMatchingEngine {
                 status: Status::NotTraded,
                 datetime: Some(tick.datetime),
                 reference: String::new(),
+                post_only: false,
+                reduce_only: false,
                 extra: None,
             };
 
@@ -976,6 +984,8 @@ impl SimulatedExchange {
             status: Status::NotTraded,
             datetime: None,
             reference: req.reference.clone(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         };
 

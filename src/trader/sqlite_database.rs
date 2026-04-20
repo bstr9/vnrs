@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use std::sync::{Arc, Mutex};
 
-use super::constant::{Exchange, Interval};
+use super::constant::{Direction, Exchange, Interval, Offset, OrderType, Status};
 use super::database::{BaseDatabase, BarOverview, TickOverview, EventRecord};
 use super::object::{BarData, TickData, OrderData, TradeData, PositionData};
 
@@ -56,6 +56,204 @@ impl SqliteDatabase {
     /// Get the database path
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// Parse an exchange string (from Debug format) back to Exchange enum
+    fn parse_exchange(s: &str) -> Exchange {
+        match s {
+            "Cffex" => Exchange::Cffex,
+            "Shfe" => Exchange::Shfe,
+            "Czce" => Exchange::Czce,
+            "Dce" => Exchange::Dce,
+            "Ine" => Exchange::Ine,
+            "Gfex" => Exchange::Gfex,
+            "Sse" => Exchange::Sse,
+            "Szse" => Exchange::Szse,
+            "Bse" => Exchange::Bse,
+            "Shhk" => Exchange::Shhk,
+            "Szhk" => Exchange::Szhk,
+            "Sge" => Exchange::Sge,
+            "Wxe" => Exchange::Wxe,
+            "Cfets" => Exchange::Cfets,
+            "Xbond" => Exchange::Xbond,
+            "Smart" => Exchange::Smart,
+            "Nyse" => Exchange::Nyse,
+            "Nasdaq" => Exchange::Nasdaq,
+            "Arca" => Exchange::Arca,
+            "Edgea" => Exchange::Edgea,
+            "Island" => Exchange::Island,
+            "Bats" => Exchange::Bats,
+            "Iex" => Exchange::Iex,
+            "Amex" => Exchange::Amex,
+            "Tse" => Exchange::Tse,
+            "Nymex" => Exchange::Nymex,
+            "Comex" => Exchange::Comex,
+            "Globex" => Exchange::Globex,
+            "Idealpro" => Exchange::Idealpro,
+            "Cme" => Exchange::Cme,
+            "Ice" => Exchange::Ice,
+            "Sehk" => Exchange::Sehk,
+            "Hkfe" => Exchange::Hkfe,
+            "Sgx" => Exchange::Sgx,
+            "Cbot" => Exchange::Cbot,
+            "Cboe" => Exchange::Cboe,
+            "Cfe" => Exchange::Cfe,
+            "Dme" => Exchange::Dme,
+            "Eurex" => Exchange::Eurex,
+            "Apex" => Exchange::Apex,
+            "Lme" => Exchange::Lme,
+            "Bmd" => Exchange::Bmd,
+            "Tocom" => Exchange::Tocom,
+            "Eunx" => Exchange::Eunx,
+            "Krx" => Exchange::Krx,
+            "Otc" => Exchange::Otc,
+            "Ibkrats" => Exchange::Ibkrats,
+            "Binance" => Exchange::Binance,
+            "BinanceUsdm" => Exchange::BinanceUsdm,
+            "BinanceCoinm" => Exchange::BinanceCoinm,
+            "Okx" => Exchange::Okx,
+            "Bybit" => Exchange::Bybit,
+            "Local" => Exchange::Local,
+            _ => Exchange::Global,
+        }
+    }
+
+    /// Parse a direction string (from Debug format) back to Direction enum
+    fn parse_direction(s: &str) -> Option<Direction> {
+        match s {
+            "Long" => Some(Direction::Long),
+            "Short" => Some(Direction::Short),
+            "Net" => Some(Direction::Net),
+            _ => None,
+        }
+    }
+
+    /// Parse an offset string (from Debug format) back to Offset enum
+    fn parse_offset(s: &str) -> Offset {
+        match s {
+            "None" => Offset::None,
+            "Open" => Offset::Open,
+            "Close" => Offset::Close,
+            "CloseToday" => Offset::CloseToday,
+            "CloseYesterday" => Offset::CloseYesterday,
+            _ => Offset::None,
+        }
+    }
+
+    /// Parse an order type string (from Debug format) back to OrderType enum
+    fn parse_order_type(s: &str) -> OrderType {
+        match s {
+            "Limit" => OrderType::Limit,
+            "Market" => OrderType::Market,
+            "Stop" => OrderType::Stop,
+            "StopLimit" => OrderType::StopLimit,
+            "Fak" => OrderType::Fak,
+            "Fok" => OrderType::Fok,
+            "Rfq" => OrderType::Rfq,
+            "Etf" => OrderType::Etf,
+            _ => OrderType::Limit,
+        }
+    }
+
+    /// Parse a status string (from Debug format) back to Status enum
+    fn parse_status(s: &str) -> Status {
+        match s {
+            "Submitting" => Status::Submitting,
+            "NotTraded" => Status::NotTraded,
+            "PartTraded" => Status::PartTraded,
+            "AllTraded" => Status::AllTraded,
+            "Cancelled" => Status::Cancelled,
+            "Rejected" => Status::Rejected,
+            _ => Status::Submitting,
+        }
+    }
+
+    /// Convert a database row to OrderData
+    fn row_to_order(row: &rusqlite::Row<'_>) -> rusqlite::Result<OrderData> {
+        let exchange_str: String = row.get(2)?;
+        let direction_str: String = row.get(3)?;
+        let order_type_str: String = row.get(4)?;
+        let offset_str: String = row.get(5)?;
+        let status_str: String = row.get(9)?;
+        let datetime_str: String = row.get(10)?;
+        let post_only_val: i32 = row.get(13)?;
+        let reduce_only_val: i32 = row.get(14)?;
+
+        let datetime = if datetime_str.is_empty() {
+            None
+        } else {
+            DateTime::parse_from_rfc3339(&datetime_str)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        };
+
+        Ok(OrderData {
+            orderid: row.get(0)?,
+            symbol: row.get(1)?,
+            exchange: Self::parse_exchange(&exchange_str),
+            direction: Self::parse_direction(&direction_str),
+            order_type: Self::parse_order_type(&order_type_str),
+            offset: Self::parse_offset(&offset_str),
+            price: row.get(6)?,
+            volume: row.get(7)?,
+            traded: row.get(8)?,
+            status: Self::parse_status(&status_str),
+            datetime,
+            reference: row.get(11)?,
+            gateway_name: row.get(12)?,
+            post_only: post_only_val != 0,
+            reduce_only: reduce_only_val != 0,
+            extra: None,
+        })
+    }
+
+    /// Convert a database row to TradeData
+    fn row_to_trade(row: &rusqlite::Row<'_>) -> rusqlite::Result<TradeData> {
+        let exchange_str: String = row.get(3)?;
+        let direction_str: String = row.get(4)?;
+        let offset_str: String = row.get(5)?;
+        let datetime_str: String = row.get(8)?;
+
+        let datetime = if datetime_str.is_empty() {
+            None
+        } else {
+            DateTime::parse_from_rfc3339(&datetime_str)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        };
+
+        Ok(TradeData {
+            tradeid: row.get(0)?,
+            orderid: row.get(1)?,
+            symbol: row.get(2)?,
+            exchange: Self::parse_exchange(&exchange_str),
+            direction: Self::parse_direction(&direction_str),
+            offset: Self::parse_offset(&offset_str),
+            price: row.get(6)?,
+            volume: row.get(7)?,
+            datetime,
+            gateway_name: row.get(9)?,
+            extra: None,
+        })
+    }
+
+    /// Convert a database row to PositionData
+    fn row_to_position(row: &rusqlite::Row<'_>) -> rusqlite::Result<PositionData> {
+        let exchange_str: String = row.get(1)?;
+        let direction_str: String = row.get(2)?;
+
+        Ok(PositionData {
+            symbol: row.get(0)?,
+            exchange: Self::parse_exchange(&exchange_str),
+            direction: Self::parse_direction(&direction_str).unwrap_or(Direction::Net),
+            volume: row.get(3)?,
+            frozen: row.get(4)?,
+            price: row.get(5)?,
+            pnl: row.get(6)?,
+            yd_volume: row.get(7)?,
+            gateway_name: row.get(8)?,
+            extra: None,
+        })
     }
 
     fn create_tables(conn: &Connection) -> Result<(), String> {
@@ -192,6 +390,10 @@ impl SqliteDatabase {
             "#,
             [],
         ).map_err(|e| format!("Failed to create dbeventdata table: {}", e))?;
+
+        // Add post_only and reduce_only columns if missing (migration for existing databases)
+        let _ = conn.execute("ALTER TABLE dborderdata ADD COLUMN post_only INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE dborderdata ADD COLUMN reduce_only INTEGER NOT NULL DEFAULT 0", []);
 
         Ok(())
     }
@@ -636,17 +838,134 @@ impl BaseDatabase for SqliteDatabase {
         }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 
-    async fn save_order_data(&self, _orders: Vec<OrderData>) -> Result<bool, String> {
-        // Simplified implementation - orders are more complex to serialize
-        Ok(true)
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String> {
+        if orders.is_empty() {
+            return Ok(true);
+        }
+
+        let conn = self.conn.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let mut conn = conn.lock()
+                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+
+            let tx = conn.transaction()
+                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+            for order in orders {
+                let exchange_str = format!("{:?}", order.exchange);
+                let direction_str = order.direction.map(|d| format!("{:?}", d)).unwrap_or_default();
+                let order_type_str = format!("{:?}", order.order_type);
+                let offset_str = format!("{:?}", order.offset);
+                let status_str = format!("{:?}", order.status);
+                let datetime_str = order.datetime.map(|dt| dt.to_rfc3339()).unwrap_or_default();
+
+                tx.execute(
+                    "INSERT OR REPLACE INTO dborderdata (orderid, symbol, exchange, direction, order_type, offset, price, volume, traded, status, datetime, reference, gateway_name, post_only, reduce_only) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                    params![
+                        order.orderid,
+                        order.symbol,
+                        exchange_str,
+                        direction_str,
+                        order_type_str,
+                        offset_str,
+                        order.price,
+                        order.volume,
+                        order.traded,
+                        status_str,
+                        datetime_str,
+                        order.reference,
+                        order.gateway_name,
+                        order.post_only as i32,
+                        order.reduce_only as i32,
+                    ],
+                ).map_err(|e| format!("Failed to insert order: {}", e))?;
+            }
+
+            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            Ok(true)
+        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 
-    async fn save_trade_data(&self, _trades: Vec<TradeData>) -> Result<bool, String> {
-        Ok(true)
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String> {
+        if trades.is_empty() {
+            return Ok(true);
+        }
+
+        let conn = self.conn.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let mut conn = conn.lock()
+                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+
+            let tx = conn.transaction()
+                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+            for trade in trades {
+                let exchange_str = format!("{:?}", trade.exchange);
+                let direction_str = trade.direction.map(|d| format!("{:?}", d)).unwrap_or_default();
+                let offset_str = format!("{:?}", trade.offset);
+                let datetime_str = trade.datetime.map(|dt| dt.to_rfc3339()).unwrap_or_default();
+
+                tx.execute(
+                    "INSERT OR REPLACE INTO dbtradedata (tradeid, orderid, symbol, exchange, direction, offset, price, volume, datetime, gateway_name) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                    params![
+                        trade.tradeid,
+                        trade.orderid,
+                        trade.symbol,
+                        exchange_str,
+                        direction_str,
+                        offset_str,
+                        trade.price,
+                        trade.volume,
+                        datetime_str,
+                        trade.gateway_name,
+                    ],
+                ).map_err(|e| format!("Failed to insert trade: {}", e))?;
+            }
+
+            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            Ok(true)
+        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 
-    async fn save_position_data(&self, _positions: Vec<PositionData>) -> Result<bool, String> {
-        Ok(true)
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String> {
+        if positions.is_empty() {
+            return Ok(true);
+        }
+
+        let conn = self.conn.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let mut conn = conn.lock()
+                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+
+            let tx = conn.transaction()
+                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+            for position in positions {
+                let exchange_str = format!("{:?}", position.exchange);
+                let direction_str = format!("{:?}", position.direction);
+
+                tx.execute(
+                    "INSERT OR REPLACE INTO dbpositiondata (symbol, exchange, direction, volume, frozen, price, pnl, yd_volume, gateway_name) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    params![
+                        position.symbol,
+                        exchange_str,
+                        direction_str,
+                        position.volume,
+                        position.frozen,
+                        position.price,
+                        position.pnl,
+                        position.yd_volume,
+                        position.gateway_name,
+                    ],
+                ).map_err(|e| format!("Failed to insert position: {}", e))?;
+            }
+
+            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            Ok(true)
+        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 
     async fn save_event(&self, event: EventRecord) -> Result<bool, String> {
@@ -674,16 +993,109 @@ impl BaseDatabase for SqliteDatabase {
         }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 
-    async fn load_orders(&self, _gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
-        Ok(Vec::new())
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
+        let conn = self.conn.clone();
+        let gateway_filter = gateway_name.map(|g| g.to_string());
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock()
+                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+
+            let sql = if gateway_filter.is_some() {
+                "SELECT orderid, symbol, exchange, direction, order_type, offset, price, volume, traded, status, datetime, reference, gateway_name, post_only, reduce_only FROM dborderdata WHERE gateway_name = ?1"
+            } else {
+                "SELECT orderid, symbol, exchange, direction, order_type, offset, price, volume, traded, status, datetime, reference, gateway_name, post_only, reduce_only FROM dborderdata"
+            };
+
+            let mut stmt = conn.prepare(sql)
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+            let orders = if let Some(gw) = &gateway_filter {
+                stmt.query_map(params![gw], |row| {
+                    Self::row_to_order(row)
+                }).map_err(|e| format!("Failed to query orders: {}", e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to collect orders: {}", e))?
+            } else {
+                stmt.query_map([], |row| {
+                    Self::row_to_order(row)
+                }).map_err(|e| format!("Failed to query orders: {}", e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to collect orders: {}", e))?
+            };
+
+            Ok(orders)
+        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 
-    async fn load_trades(&self, _gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
-        Ok(Vec::new())
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
+        let conn = self.conn.clone();
+        let gateway_filter = gateway_name.map(|g| g.to_string());
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock()
+                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+
+            let sql = if gateway_filter.is_some() {
+                "SELECT tradeid, orderid, symbol, exchange, direction, offset, price, volume, datetime, gateway_name FROM dbtradedata WHERE gateway_name = ?1"
+            } else {
+                "SELECT tradeid, orderid, symbol, exchange, direction, offset, price, volume, datetime, gateway_name FROM dbtradedata"
+            };
+
+            let mut stmt = conn.prepare(sql)
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+            let trades = if let Some(gw) = &gateway_filter {
+                stmt.query_map(params![gw], |row| {
+                    Self::row_to_trade(row)
+                }).map_err(|e| format!("Failed to query trades: {}", e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to collect trades: {}", e))?
+            } else {
+                stmt.query_map([], |row| {
+                    Self::row_to_trade(row)
+                }).map_err(|e| format!("Failed to query trades: {}", e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to collect trades: {}", e))?
+            };
+
+            Ok(trades)
+        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 
-    async fn load_positions(&self, _gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
-        Ok(Vec::new())
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
+        let conn = self.conn.clone();
+        let gateway_filter = gateway_name.map(|g| g.to_string());
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock()
+                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+
+            let sql = if gateway_filter.is_some() {
+                "SELECT symbol, exchange, direction, volume, frozen, price, pnl, yd_volume, gateway_name FROM dbpositiondata WHERE gateway_name = ?1"
+            } else {
+                "SELECT symbol, exchange, direction, volume, frozen, price, pnl, yd_volume, gateway_name FROM dbpositiondata"
+            };
+
+            let mut stmt = conn.prepare(sql)
+                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+            let positions = if let Some(gw) = &gateway_filter {
+                stmt.query_map(params![gw], |row| {
+                    Self::row_to_position(row)
+                }).map_err(|e| format!("Failed to query positions: {}", e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to collect positions: {}", e))?
+            } else {
+                stmt.query_map([], |row| {
+                    Self::row_to_position(row)
+                }).map_err(|e| format!("Failed to query positions: {}", e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to collect positions: {}", e))?
+            };
+
+            Ok(positions)
+        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
     }
 }
 
@@ -853,5 +1265,264 @@ mod tests {
         assert_eq!(loaded.len(), 1); // Only one bar due to dedup
         // The second bar should have replaced the first (INSERT OR REPLACE)
         assert_eq!(loaded[0].open_price, 0.12);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_save_and_load_order_data() {
+        let db = SqliteDatabase::new_in_memory().unwrap();
+
+        let now = Utc::now();
+        let order = OrderData {
+            gateway_name: "BINANCE".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "ORD001".to_string(),
+            order_type: OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            traded: 0.5,
+            status: Status::PartTraded,
+            datetime: Some(now),
+            reference: "test_ref".to_string(),
+            post_only: false,
+            reduce_only: false,
+            extra: None,
+        };
+
+        db.save_order_data(vec![order.clone()]).await.unwrap();
+
+        let loaded = db.load_orders(None).await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].orderid, "ORD001");
+        assert_eq!(loaded[0].symbol, "BTCUSDT");
+        assert_eq!(loaded[0].exchange, Exchange::Binance);
+        assert_eq!(loaded[0].direction, Some(Direction::Long));
+        assert_eq!(loaded[0].order_type, OrderType::Limit);
+        assert_eq!(loaded[0].offset, Offset::Open);
+        assert_eq!(loaded[0].price, 50000.0);
+        assert_eq!(loaded[0].volume, 1.0);
+        assert_eq!(loaded[0].traded, 0.5);
+        assert_eq!(loaded[0].status, Status::PartTraded);
+        assert_eq!(loaded[0].reference, "test_ref");
+        assert_eq!(loaded[0].gateway_name, "BINANCE");
+        assert!(loaded[0].datetime.is_some());
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_save_and_load_trade_data() {
+        let db = SqliteDatabase::new_in_memory().unwrap();
+
+        let now = Utc::now();
+        let trade = TradeData {
+            gateway_name: "BINANCE".to_string(),
+            symbol: "ETHUSDT".to_string(),
+            exchange: Exchange::BinanceUsdm,
+            orderid: "ORD002".to_string(),
+            tradeid: "TRD001".to_string(),
+            direction: Some(Direction::Short),
+            offset: Offset::Close,
+            price: 3000.0,
+            volume: 2.0,
+            datetime: Some(now),
+            extra: None,
+        };
+
+        db.save_trade_data(vec![trade.clone()]).await.unwrap();
+
+        let loaded = db.load_trades(None).await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].tradeid, "TRD001");
+        assert_eq!(loaded[0].orderid, "ORD002");
+        assert_eq!(loaded[0].symbol, "ETHUSDT");
+        assert_eq!(loaded[0].exchange, Exchange::BinanceUsdm);
+        assert_eq!(loaded[0].direction, Some(Direction::Short));
+        assert_eq!(loaded[0].offset, Offset::Close);
+        assert_eq!(loaded[0].price, 3000.0);
+        assert_eq!(loaded[0].volume, 2.0);
+        assert_eq!(loaded[0].gateway_name, "BINANCE");
+        assert!(loaded[0].datetime.is_some());
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_save_and_load_position_data() {
+        let db = SqliteDatabase::new_in_memory().unwrap();
+
+        let position = PositionData {
+            gateway_name: "BINANCE".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            volume: 10.0,
+            frozen: 2.0,
+            price: 49000.0,
+            pnl: 1000.0,
+            yd_volume: 8.0,
+            extra: None,
+        };
+
+        db.save_position_data(vec![position.clone()]).await.unwrap();
+
+        let loaded = db.load_positions(None).await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].symbol, "BTCUSDT");
+        assert_eq!(loaded[0].exchange, Exchange::Binance);
+        assert_eq!(loaded[0].direction, Direction::Long);
+        assert_eq!(loaded[0].volume, 10.0);
+        assert_eq!(loaded[0].frozen, 2.0);
+        assert_eq!(loaded[0].price, 49000.0);
+        assert_eq!(loaded[0].pnl, 1000.0);
+        assert_eq!(loaded[0].yd_volume, 8.0);
+        assert_eq!(loaded[0].gateway_name, "BINANCE");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_save_order_data_with_post_only_reduce_only() {
+        let db = SqliteDatabase::new_in_memory().unwrap();
+
+        let order = OrderData {
+            gateway_name: "BINANCE".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "ORD_POST".to_string(),
+            order_type: OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            traded: 0.0,
+            status: Status::NotTraded,
+            datetime: None,
+            reference: String::new(),
+            post_only: true,
+            reduce_only: true,
+            extra: None,
+        };
+
+        db.save_order_data(vec![order.clone()]).await.unwrap();
+
+        let loaded = db.load_orders(None).await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].post_only);
+        assert!(loaded[0].reduce_only);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_load_orders_with_gateway_filter() {
+        let db = SqliteDatabase::new_in_memory().unwrap();
+
+        let order1 = OrderData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "ORD_GW1".to_string(),
+            order_type: OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            traded: 0.0,
+            status: Status::NotTraded,
+            datetime: None,
+            reference: String::new(),
+            post_only: false,
+            reduce_only: false,
+            extra: None,
+        };
+
+        let order2 = OrderData {
+            gateway_name: "BINANCE_USDM".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::BinanceUsdm,
+            orderid: "ORD_GW2".to_string(),
+            order_type: OrderType::Market,
+            direction: Some(Direction::Short),
+            offset: Offset::Close,
+            price: 50100.0,
+            volume: 2.0,
+            traded: 2.0,
+            status: Status::AllTraded,
+            datetime: None,
+            reference: String::new(),
+            post_only: false,
+            reduce_only: true,
+            extra: None,
+        };
+
+        db.save_order_data(vec![order1, order2]).await.unwrap();
+
+        // Load all
+        let all = db.load_orders(None).await.unwrap();
+        assert_eq!(all.len(), 2);
+
+        // Load filtered
+        let filtered = db.load_orders(Some("BINANCE_SPOT")).await.unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].orderid, "ORD_GW1");
+
+        let filtered2 = db.load_orders(Some("BINANCE_USDM")).await.unwrap();
+        assert_eq!(filtered2.len(), 1);
+        assert_eq!(filtered2[0].orderid, "ORD_GW2");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_save_order_data_upsert() {
+        let db = SqliteDatabase::new_in_memory().unwrap();
+
+        let order_v1 = OrderData {
+            gateway_name: "BINANCE".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "ORD_UPSERT".to_string(),
+            order_type: OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 50000.0,
+            volume: 1.0,
+            traded: 0.0,
+            status: Status::NotTraded,
+            datetime: None,
+            reference: String::new(),
+            post_only: false,
+            reduce_only: false,
+            extra: None,
+        };
+
+        db.save_order_data(vec![order_v1]).await.unwrap();
+
+        let order_v2 = OrderData {
+            gateway_name: "BINANCE".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            orderid: "ORD_UPSERT".to_string(),
+            order_type: OrderType::Limit,
+            direction: Some(Direction::Long),
+            offset: Offset::Open,
+            price: 51000.0, // Updated price
+            volume: 1.0,
+            traded: 1.0, // Updated traded
+            status: Status::AllTraded, // Updated status
+            datetime: None,
+            reference: String::new(),
+            post_only: false,
+            reduce_only: false,
+            extra: None,
+        };
+
+        db.save_order_data(vec![order_v2]).await.unwrap();
+
+        let loaded = db.load_orders(None).await.unwrap();
+        // Should be exactly 1 (upserted, not duplicated)
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].price, 51000.0);
+        assert_eq!(loaded[0].traded, 1.0);
+        assert_eq!(loaded[0].status, Status::AllTraded);
     }
 }

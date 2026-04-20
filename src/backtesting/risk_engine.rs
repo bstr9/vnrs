@@ -621,6 +621,8 @@ mod tests {
             status: crate::trader::Status::NotTraded,
             datetime: None,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         };
 
@@ -658,6 +660,8 @@ mod tests {
             status: crate::trader::Status::NotTraded,
             datetime: None,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         };
 
@@ -686,6 +690,8 @@ mod tests {
             status: crate::trader::Status::NotTraded,
             datetime: None,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         };
 

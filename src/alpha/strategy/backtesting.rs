@@ -511,6 +511,8 @@ impl BacktestingEngine {
             status: Status::NotTraded,
             datetime: self.datetime,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         };
 

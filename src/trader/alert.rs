@@ -591,6 +591,8 @@ mod tests {
             datetime: Some(Utc::now()),
             gateway_name: "BINANCE_SPOT".to_string(),
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         }
     }

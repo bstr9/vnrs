@@ -366,6 +366,12 @@ pub struct OrderData {
     pub status: Status,
     pub datetime: Option<DateTime<Utc>>,
     pub reference: String,
+    /// Post-Only: Order will only be added to the order book as a maker order.
+    #[serde(default)]
+    pub post_only: bool,
+    /// Reduce-Only: Order can only reduce an existing position, not open a new one.
+    #[serde(default)]
+    pub reduce_only: bool,
 
     #[serde(skip)]
     pub extra: Option<HashMap<String, String>>,
@@ -393,6 +399,8 @@ impl OrderData {
             status: Status::Submitting,
             datetime: None,
             reference: String::new(),
+            post_only: false,
+            reduce_only: false,
             extra: None,
         }
     }
@@ -908,6 +916,8 @@ impl OrderRequest {
         order.price = self.price;
         order.volume = self.volume;
         order.reference = self.reference.clone();
+        order.post_only = self.post_only;
+        order.reduce_only = self.reduce_only;
         order
     }
 }
