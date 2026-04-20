@@ -38,4 +38,4 @@ versions:
 ## 验收标准
 - [x] `rest_client.rs` HTTP 客户端构造返回 `Result`，失败由调用方处理
 - [x] `spot_gateway.rs` 订单类型解析使用安全降级（如 `OrderType::Unknown`）
-- [x] `backtesting/engine.rs` position fill 失败返回错误而非 panic
+- [x] `backtesting/engine.rs` position fill 失败使用 if let Err 错误处理而非 panic

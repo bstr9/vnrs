@@ -15,3 +15,9 @@ build/
 .vscode/
 *.swp
 *.swo
+
+# Logs
+logs/
+
+# AI agent files
+.sisyphus/
