@@ -184,7 +184,7 @@ impl PythonEngine {
             if let Some(strategy_obj) = self.strategies.get(strategy_name) {
                 let tick_py = data_converter::tick_to_py(py, tick)?;
                 // Call on_tick via Python method dispatch
-                strategy_obj.call_method1(py, "on_tick", (tick_py,))?;
+                strategy_obj.call_method1(py, "on_tick", (tick_py.into_any(),))?;
             }
         }
 

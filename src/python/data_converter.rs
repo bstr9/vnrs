@@ -226,47 +226,10 @@ pub fn arrow_to_bars(df: &DataFrame) -> Result<Vec<BarData>, Box<dyn std::error:
     Ok(bars)
 }
 
-/// Convert Rust TickData to Python
-pub fn tick_to_py<'py>(py: Python<'py>, tick: &TickData) -> PyResult<Bound<'py, PyDict>> {
-    let dict = PyDict::new(py);
-    dict.set_item("symbol", &tick.symbol)?;
-    dict.set_item("exchange", format!("{:?}", tick.exchange))?;
-    dict.set_item("datetime", tick.datetime.to_rfc3339())?;
-    dict.set_item("name", &tick.name)?;
-    dict.set_item("volume", tick.volume)?;
-    dict.set_item("turnover", tick.turnover)?;
-    dict.set_item("open_interest", tick.open_interest)?;
-    dict.set_item("last_price", tick.last_price)?;
-    dict.set_item("last_volume", tick.last_volume)?;
-    dict.set_item("limit_up", tick.limit_up)?;
-    dict.set_item("limit_down", tick.limit_down)?;
-    dict.set_item("open_price", tick.open_price)?;
-    dict.set_item("high_price", tick.high_price)?;
-    dict.set_item("low_price", tick.low_price)?;
-    dict.set_item("pre_close", tick.pre_close)?;
-    dict.set_item("bid_price_1", tick.bid_price_1)?;
-    dict.set_item("bid_price_2", tick.bid_price_2)?;
-    dict.set_item("bid_price_3", tick.bid_price_3)?;
-    dict.set_item("bid_price_4", tick.bid_price_4)?;
-    dict.set_item("bid_price_5", tick.bid_price_5)?;
-    dict.set_item("ask_price_1", tick.ask_price_1)?;
-    dict.set_item("ask_price_2", tick.ask_price_2)?;
-    dict.set_item("ask_price_3", tick.ask_price_3)?;
-    dict.set_item("ask_price_4", tick.ask_price_4)?;
-    dict.set_item("ask_price_5", tick.ask_price_5)?;
-    dict.set_item("bid_volume_1", tick.bid_volume_1)?;
-    dict.set_item("bid_volume_2", tick.bid_volume_2)?;
-    dict.set_item("bid_volume_3", tick.bid_volume_3)?;
-    dict.set_item("bid_volume_4", tick.bid_volume_4)?;
-    dict.set_item("bid_volume_5", tick.bid_volume_5)?;
-    dict.set_item("ask_volume_1", tick.ask_volume_1)?;
-    dict.set_item("ask_volume_2", tick.ask_volume_2)?;
-    dict.set_item("ask_volume_3", tick.ask_volume_3)?;
-    dict.set_item("ask_volume_4", tick.ask_volume_4)?;
-    dict.set_item("ask_volume_5", tick.ask_volume_5)?;
-    dict.set_item("gateway_name", &tick.gateway_name)?;
-
-    Ok(dict)
+/// Convert Rust TickData to Python PyTickData
+pub fn tick_to_py(py: Python, tick: &TickData) -> PyResult<Py<crate::python::data_types::PyTickData>> {
+    let py_tick = crate::python::data_types::PyTickData::from_rust(tick);
+    Py::new(py, py_tick)
 }
 
 /// Parse direction string into Direction enum

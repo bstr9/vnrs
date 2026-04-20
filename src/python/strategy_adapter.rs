@@ -178,6 +178,7 @@ impl PythonStrategyAdapter {
     }
 
     /// Call Python method with error handling
+    #[allow(dead_code)]
     fn call_py_method_with_dict(
         &self,
         method_name: &str,
@@ -286,19 +287,14 @@ impl StrategyTemplate for PythonStrategyAdapter {
 
     fn on_tick(&mut self, tick: &TickData, _context: &StrategyContext) {
         Python::attach(|py| {
-            let tick_dict = PyDict::new(py);
-            let _ = tick_dict.set_item("symbol", &tick.symbol);
-            let _ = tick_dict.set_item("exchange", format!("{:?}", tick.exchange));
-            let _ = tick_dict.set_item("datetime", tick.datetime.to_string());
-            let _ = tick_dict.set_item("last_price", tick.last_price);
-            let _ = tick_dict.set_item("volume", tick.volume);
-            let _ = tick_dict.set_item("bid_price_1", tick.bid_price_1);
-            let _ = tick_dict.set_item("ask_price_1", tick.ask_price_1);
-            let _ = tick_dict.set_item("bid_volume_1", tick.bid_volume_1);
-            let _ = tick_dict.set_item("ask_volume_1", tick.ask_volume_1);
-
-            if let Err(e) = self.call_py_method_with_dict("on_tick", py, &tick_dict) {
-                warn!("策略 {} on_tick 错误: {}", self.strategy_name, e);
+            let py_tick = crate::python::data_types::PyTickData::from_rust(tick);
+            match Py::new(py, py_tick) {
+                Ok(py_tick_obj) => {
+                    if let Err(e) = self.call_py_method1("on_tick", py, py_tick_obj.into_any()) {
+                        warn!("策略 {} on_tick 错误: {}", self.strategy_name, e);
+                    }
+                }
+                Err(e) => error!("策略 {} 创建 PyTickData 失败: {}", self.strategy_name, e),
             }
         });
     }
@@ -334,45 +330,28 @@ impl StrategyTemplate for PythonStrategyAdapter {
 
     fn on_order(&mut self, order: &OrderData) {
         Python::attach(|py| {
-            let order_dict = PyDict::new(py);
-            let _ = order_dict.set_item("orderid", &order.orderid);
-            let _ = order_dict.set_item("symbol", &order.symbol);
-            let _ = order_dict.set_item("exchange", format!("{:?}", order.exchange));
-            let _ = order_dict.set_item("direction", format!("{:?}", order.direction));
-            let _ = order_dict.set_item("offset", format!("{:?}", order.offset));
-            let _ = order_dict.set_item("price", order.price);
-            let _ = order_dict.set_item("volume", order.volume);
-            let _ = order_dict.set_item("traded", order.traded);
-            let _ = order_dict.set_item("status", format!("{:?}", order.status));
-            let _ = order_dict.set_item(
-                "datetime",
-                order.datetime.map(|dt| dt.to_string()).unwrap_or_default(),
-            );
-
-            if let Err(e) = self.call_py_method_with_dict("on_order", py, &order_dict) {
-                warn!("策略 {} on_order 错误: {}", self.strategy_name, e);
+            let py_order = crate::python::data_types::PyOrderData::from_rust(order);
+            match Py::new(py, py_order) {
+                Ok(py_order_obj) => {
+                    if let Err(e) = self.call_py_method1("on_order", py, py_order_obj.into_any()) {
+                        warn!("策略 {} on_order 错误: {}", self.strategy_name, e);
+                    }
+                }
+                Err(e) => error!("策略 {} 创建 PyOrderData 失败: {}", self.strategy_name, e),
             }
         });
     }
 
     fn on_trade(&mut self, trade: &TradeData) {
         Python::attach(|py| {
-            let trade_dict = PyDict::new(py);
-            let _ = trade_dict.set_item("tradeid", &trade.tradeid);
-            let _ = trade_dict.set_item("orderid", &trade.orderid);
-            let _ = trade_dict.set_item("symbol", &trade.symbol);
-            let _ = trade_dict.set_item("exchange", format!("{:?}", trade.exchange));
-            let _ = trade_dict.set_item("direction", format!("{:?}", trade.direction));
-            let _ = trade_dict.set_item("offset", format!("{:?}", trade.offset));
-            let _ = trade_dict.set_item("price", trade.price);
-            let _ = trade_dict.set_item("volume", trade.volume);
-            let _ = trade_dict.set_item(
-                "datetime",
-                trade.datetime.map(|dt| dt.to_string()).unwrap_or_default(),
-            );
-
-            if let Err(e) = self.call_py_method_with_dict("on_trade", py, &trade_dict) {
-                warn!("策略 {} on_trade 错误: {}", self.strategy_name, e);
+            let py_trade = crate::python::data_types::PyTradeData::from_rust(trade);
+            match Py::new(py, py_trade) {
+                Ok(py_trade_obj) => {
+                    if let Err(e) = self.call_py_method1("on_trade", py, py_trade_obj.into_any()) {
+                        warn!("策略 {} on_trade 错误: {}", self.strategy_name, e);
+                    }
+                }
+                Err(e) => error!("策略 {} 创建 PyTradeData 失败: {}", self.strategy_name, e),
             }
         });
     }

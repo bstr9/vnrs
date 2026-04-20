@@ -149,6 +149,9 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register backtesting module
     crate::python::backtesting_bindings::register_backtesting_module(m)?;
 
+    // Register data types module
+    crate::python::data_types::register_data_types_module(m)?;
+
     // Register portfolio facade module
     crate::python::portfolio::register_portfolio_module(m)?;
 

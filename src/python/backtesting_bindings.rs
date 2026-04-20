@@ -542,31 +542,11 @@ impl PyBacktestingEngine {
         let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
         let ticks = engine.get_history_ticks(&vt_symbol, days);
 
-        // Convert each TickData to a Python dict (no PyTickData struct exists yet)
+        // Convert each TickData to a PyTickData object
         ticks.into_iter()
             .map(|tick| {
-                let dict = PyDict::new(py);
-                dict.set_item("gateway_name", &tick.gateway_name)?;
-                dict.set_item("symbol", &tick.symbol)?;
-                dict.set_item("exchange", tick.exchange.value())?;
-                dict.set_item("datetime", tick.datetime.to_rfc3339())?;
-                dict.set_item("name", &tick.name)?;
-                dict.set_item("volume", tick.volume)?;
-                dict.set_item("turnover", tick.turnover)?;
-                dict.set_item("open_interest", tick.open_interest)?;
-                dict.set_item("last_price", tick.last_price)?;
-                dict.set_item("last_volume", tick.last_volume)?;
-                dict.set_item("limit_up", tick.limit_up)?;
-                dict.set_item("limit_down", tick.limit_down)?;
-                dict.set_item("open_price", tick.open_price)?;
-                dict.set_item("high_price", tick.high_price)?;
-                dict.set_item("low_price", tick.low_price)?;
-                dict.set_item("pre_close", tick.pre_close)?;
-                dict.set_item("bid_price_1", tick.bid_price_1)?;
-                dict.set_item("ask_price_1", tick.ask_price_1)?;
-                dict.set_item("bid_volume_1", tick.bid_volume_1)?;
-                dict.set_item("ask_volume_1", tick.ask_volume_1)?;
-                Ok(dict.unbind().into_any())
+                let py_tick = crate::python::data_types::PyTickData::from_rust(&tick);
+                Py::new(py, py_tick).map(|p| p.into_any())
             })
             .collect()
     }
@@ -611,6 +591,20 @@ pub struct PyBarData {
 #[pymethods]
 impl PyBarData {
     #[new]
+    #[pyo3(signature = (
+        gateway_name,
+        symbol,
+        exchange,
+        datetime,
+        interval,
+        open_price,
+        high_price,
+        low_price,
+        close_price,
+        volume,
+        turnover=0.0,
+        open_interest=0.0
+    ))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         gateway_name: String,

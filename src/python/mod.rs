@@ -27,6 +27,8 @@ pub mod message_bus;
 pub mod risk_manager;
 #[cfg(feature = "python")]
 pub mod sync_bar_bindings;
+#[cfg(feature = "python")]
+pub mod data_types;
 
 #[cfg(feature = "python")]
 pub use strategy::{Strategy, PendingOrder};
@@ -53,6 +55,8 @@ pub use risk_manager::{PyRiskManager, PyRiskConfig, PyRiskCheckResult};
 pub use bindings::StrategyEngineHandle;
 #[cfg(feature = "python")]
 pub use sync_bar_bindings::{PySyncBarGenerator, PySynchronizedBars};
+#[cfg(feature = "python")]
+pub use data_types::{PyTickData, PyOrderData, PyTradeData};
 
 /// Setup Python sys.path for embedded interpreter.
 ///

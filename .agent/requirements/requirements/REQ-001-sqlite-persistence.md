@@ -1,7 +1,8 @@
 ---
 id: REQ-001
 title: "SQLite 持久化完善（订单/成交/仓位）"
-status: active
+status: completed
+completed_at: "2026-04-21T00:00:00"
 created_at: "2026-04-19T00:00:00"
 updated_at: "2026-04-19T00:00:00"
 priority: P0
