@@ -509,4 +509,137 @@ mod tests {
         assert_eq!(Interval::Minute.value(), "1m");
         assert_eq!(Interval::Hour.value(), "1h");
     }
+
+    #[test]
+    fn test_direction_exhaustive_display() {
+        assert_eq!(format!("{}", Direction::Long), "多");
+        assert_eq!(format!("{}", Direction::Short), "空");
+        assert_eq!(format!("{}", Direction::Net), "净");
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_direction_serde_roundtrip() {
+        for dir in [Direction::Long, Direction::Short, Direction::Net] {
+            let json = serde_json::to_string(&dir).unwrap();
+            let parsed: Direction = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, dir);
+        }
+    }
+
+    #[test]
+    fn test_offset_exhaustive_display() {
+        assert_eq!(format!("{}", Offset::None), "");
+        assert_eq!(format!("{}", Offset::Open), "开");
+        assert_eq!(format!("{}", Offset::Close), "平");
+        assert_eq!(format!("{}", Offset::CloseToday), "平今");
+        assert_eq!(format!("{}", Offset::CloseYesterday), "平昨");
+    }
+
+    #[test]
+    fn test_offset_default() {
+        assert_eq!(Offset::default(), Offset::None);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_offset_serde_roundtrip() {
+        for off in [
+            Offset::None,
+            Offset::Open,
+            Offset::Close,
+            Offset::CloseToday,
+            Offset::CloseYesterday,
+        ] {
+            let json = serde_json::to_string(&off).unwrap();
+            let parsed: Offset = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, off);
+        }
+    }
+
+    #[test]
+    fn test_status_exhaustive_display() {
+        assert_eq!(format!("{}", Status::Submitting), "提交中");
+        assert_eq!(format!("{}", Status::NotTraded), "未成交");
+        assert_eq!(format!("{}", Status::PartTraded), "部分成交");
+        assert_eq!(format!("{}", Status::AllTraded), "全部成交");
+        assert_eq!(format!("{}", Status::Cancelled), "已撤销");
+        assert_eq!(format!("{}", Status::Rejected), "拒单");
+    }
+
+    #[test]
+    fn test_status_default() {
+        assert_eq!(Status::default(), Status::Submitting);
+    }
+
+    #[test]
+    fn test_status_is_active() {
+        use crate::trader::object::is_active_status;
+        assert!(is_active_status(Status::Submitting));
+        assert!(is_active_status(Status::NotTraded));
+        assert!(is_active_status(Status::PartTraded));
+        assert!(!is_active_status(Status::AllTraded));
+        assert!(!is_active_status(Status::Cancelled));
+        assert!(!is_active_status(Status::Rejected));
+    }
+
+    #[test]
+    fn test_order_type_exhaustive_display() {
+        assert_eq!(format!("{}", OrderType::Limit), "限价");
+        assert_eq!(format!("{}", OrderType::Market), "市价");
+        assert_eq!(format!("{}", OrderType::Stop), "止损市价");
+        assert_eq!(format!("{}", OrderType::StopLimit), "止损限价");
+        assert_eq!(format!("{}", OrderType::Fak), "FAK");
+        assert_eq!(format!("{}", OrderType::Fok), "FOK");
+        assert_eq!(format!("{}", OrderType::Rfq), "询价");
+        assert_eq!(format!("{}", OrderType::Etf), "ETF");
+    }
+
+    #[test]
+    fn test_order_type_default() {
+        assert_eq!(OrderType::default(), OrderType::Limit);
+    }
+
+    #[test]
+    fn test_exchange_key_values() {
+        assert_eq!(Exchange::Binance.value(), "BINANCE");
+        assert_eq!(Exchange::BinanceUsdm.value(), "BINANCE_USDM");
+        assert_eq!(Exchange::Okx.value(), "OKX");
+        assert_eq!(Exchange::Bybit.value(), "BYBIT");
+    }
+
+    #[test]
+    fn test_exchange_display_delegates_to_value() {
+        assert_eq!(format!("{}", Exchange::Binance), "BINANCE");
+        assert_eq!(format!("{}", Exchange::Okx), "OKX");
+    }
+
+    #[test]
+    fn test_interval_exhaustive_values() {
+        assert_eq!(Interval::Second.value(), "1s");
+        assert_eq!(Interval::Minute.value(), "1m");
+        assert_eq!(Interval::Minute5.value(), "5m");
+        assert_eq!(Interval::Minute15.value(), "15m");
+        assert_eq!(Interval::Minute30.value(), "30m");
+        assert_eq!(Interval::Hour.value(), "1h");
+        assert_eq!(Interval::Hour4.value(), "4h");
+        assert_eq!(Interval::Daily.value(), "d");
+        assert_eq!(Interval::Weekly.value(), "w");
+        assert_eq!(Interval::Tick.value(), "tick");
+    }
+
+    #[test]
+    fn test_interval_display_name() {
+        assert_eq!(Interval::Second.display_name(), "1秒");
+        assert_eq!(Interval::Minute.display_name(), "1分钟");
+        assert_eq!(Interval::Daily.display_name(), "1日");
+    }
+
+    #[test]
+    fn test_interval_all() {
+        let all = Interval::all();
+        assert_eq!(all.len(), 9);
+        assert_eq!(all[0], Interval::Second);
+        assert_eq!(all[8], Interval::Weekly);
+    }
 }

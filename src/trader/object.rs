@@ -1058,4 +1058,291 @@ mod tests {
         account.frozen = 2000.0;
         assert_eq!(account.available(), 8000.0);
     }
+
+    // --- TickData tests ---
+
+    #[test]
+    fn test_tick_data_new_initializes_zeros() {
+        let tick = TickData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Utc::now(),
+        );
+        assert_eq!(tick.volume, 0.0);
+        assert_eq!(tick.last_price, 0.0);
+        assert_eq!(tick.bid_price_1, 0.0);
+        assert_eq!(tick.ask_price_1, 0.0);
+        assert_eq!(tick.bid_volume_1, 0.0);
+        assert_eq!(tick.ask_volume_1, 0.0);
+        assert_eq!(tick.bid_price_5, 0.0);
+        assert_eq!(tick.ask_volume_5, 0.0);
+        assert!(tick.localtime.is_none());
+        assert!(tick.extra.is_none());
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_tick_data_serde_roundtrip() {
+        let tick = TickData::new(
+            "gw".to_string(),
+            "ETHUSDT".to_string(),
+            Exchange::Okx,
+            Utc::now(),
+        );
+        let json = serde_json::to_string(&tick).unwrap();
+        let parsed: TickData = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.gateway_name, tick.gateway_name);
+        assert_eq!(parsed.symbol, tick.symbol);
+        assert_eq!(parsed.exchange, tick.exchange);
+        // extra is #[serde(skip)] so it will be None after roundtrip
+        assert!(parsed.extra.is_none());
+    }
+
+    #[test]
+    fn test_tick_data_clone_equal() {
+        let tick = TickData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Utc::now(),
+        );
+        let cloned = tick.clone();
+        assert_eq!(cloned.symbol, tick.symbol);
+        assert_eq!(cloned.exchange, tick.exchange);
+        assert_eq!(cloned.last_price, tick.last_price);
+        assert_eq!(cloned.bid_price_1, tick.bid_price_1);
+    }
+
+    // --- BarData tests ---
+
+    #[test]
+    fn test_bar_data_vt_symbol() {
+        let bar = BarData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::BinanceUsdm,
+            Utc::now(),
+        );
+        assert_eq!(bar.vt_symbol(), "BTCUSDT.BINANCE_USDM");
+    }
+
+    #[test]
+    fn test_bar_data_new_initializes_ohlcv() {
+        let bar = BarData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Utc::now(),
+        );
+        assert_eq!(bar.open_price, 0.0);
+        assert_eq!(bar.high_price, 0.0);
+        assert_eq!(bar.low_price, 0.0);
+        assert_eq!(bar.close_price, 0.0);
+        assert_eq!(bar.volume, 0.0);
+        assert!(bar.interval.is_none());
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_bar_data_serde_roundtrip() {
+        let bar = BarData::new(
+            "gw".to_string(),
+            "ETHUSDT".to_string(),
+            Exchange::Bybit,
+            Utc::now(),
+        );
+        let json = serde_json::to_string(&bar).unwrap();
+        let parsed: BarData = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.symbol, bar.symbol);
+        assert_eq!(parsed.exchange, bar.exchange);
+        assert_eq!(parsed.volume, bar.volume);
+    }
+
+    // --- OrderData tests ---
+
+    #[test]
+    fn test_order_data_vt_orderid() {
+        let order = OrderData::new(
+            "binance".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            "ORD123".to_string(),
+        );
+        assert_eq!(order.vt_orderid(), "binance.ORD123");
+    }
+
+    #[test]
+    fn test_order_data_new_defaults() {
+        let order = OrderData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            "1".to_string(),
+        );
+        assert_eq!(order.status, Status::Submitting);
+        assert_eq!(order.order_type, OrderType::Limit);
+        assert_eq!(order.offset, Offset::None);
+        assert!(order.direction.is_none());
+        assert_eq!(order.price, 0.0);
+        assert_eq!(order.volume, 0.0);
+        assert_eq!(order.traded, 0.0);
+    }
+
+    #[test]
+    fn test_order_data_is_active_all_statuses() {
+        let mut order = OrderData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            "1".to_string(),
+        );
+        for (status, expected) in [
+            (Status::Submitting, true),
+            (Status::NotTraded, true),
+            (Status::PartTraded, true),
+            (Status::AllTraded, false),
+            (Status::Cancelled, false),
+            (Status::Rejected, false),
+        ] {
+            order.status = status;
+            assert_eq!(order.is_active(), expected, "is_active mismatch for {status:?}");
+        }
+    }
+
+    #[test]
+    fn test_order_data_create_cancel_request() {
+        let order = OrderData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            "ORD999".to_string(),
+        );
+        let cancel = order.create_cancel_request();
+        assert_eq!(cancel.orderid, "ORD999");
+        assert_eq!(cancel.symbol, "BTCUSDT");
+        assert_eq!(cancel.exchange, Exchange::Binance);
+    }
+
+    #[test]
+    fn test_order_request_create_order_data() {
+        let req = OrderRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: OrderType::Market,
+            volume: 1.5,
+            price: 42000.0,
+            offset: Offset::Open,
+            reference: "test_ref".to_string(),
+            post_only: false,
+            reduce_only: false,
+        };
+        let order = req.create_order_data("OID1".to_string(), "binance".to_string());
+        assert_eq!(order.gateway_name, "binance");
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.exchange, Exchange::Binance);
+        assert_eq!(order.orderid, "OID1");
+        assert_eq!(order.direction, Some(Direction::Long));
+        assert_eq!(order.order_type, OrderType::Market);
+        assert_eq!(order.price, 42000.0);
+        assert_eq!(order.volume, 1.5);
+        assert_eq!(order.offset, Offset::Open);
+        assert_eq!(order.reference, "test_ref");
+        // Default status from OrderData::new
+        assert_eq!(order.status, Status::Submitting);
+    }
+
+    // --- TradeData tests ---
+
+    #[test]
+    fn test_trade_data_vt_tradeid() {
+        let trade = TradeData::new(
+            "binance".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            "ORD1".to_string(),
+            "TRD42".to_string(),
+        );
+        assert_eq!(trade.vt_tradeid(), "binance.TRD42");
+    }
+
+    // --- PositionData tests ---
+
+    #[test]
+    fn test_position_data_vt_positionid() {
+        let pos = PositionData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Long,
+        );
+        assert_eq!(pos.vt_positionid(), "gw.BTCUSDT.BINANCE.多");
+    }
+
+    #[test]
+    fn test_position_data_directions() {
+        let pos_long = PositionData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Long,
+        );
+        assert!(pos_long.vt_positionid().ends_with("多"));
+
+        let pos_short = PositionData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Short,
+        );
+        assert!(pos_short.vt_positionid().ends_with("空"));
+
+        let pos_net = PositionData::new(
+            "gw".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Direction::Net,
+        );
+        assert!(pos_net.vt_positionid().ends_with("净"));
+    }
+
+    // --- AccountData tests ---
+
+    #[test]
+    fn test_account_data_vt_accountid() {
+        let account = AccountData::new("gw".to_string(), "SPOT".to_string());
+        assert_eq!(account.vt_accountid(), "gw.SPOT");
+    }
+
+    #[test]
+    fn test_account_data_available_zero() {
+        let account = AccountData::new("gw".to_string(), "acc1".to_string());
+        assert_eq!(account.available(), 0.0);
+    }
+
+    #[test]
+    fn test_account_data_available_negative() {
+        let mut account = AccountData::new("gw".to_string(), "acc1".to_string());
+        account.balance = 100.0;
+        account.frozen = 200.0;
+        assert_eq!(account.available(), -100.0);
+    }
+
+    // --- SubscribeRequest / CancelRequest tests ---
+
+    #[test]
+    fn test_subscribe_request_vt_symbol() {
+        let req = SubscribeRequest::new("BTCUSDT".to_string(), Exchange::Binance);
+        assert_eq!(req.vt_symbol(), "BTCUSDT.BINANCE");
+    }
+
+    #[test]
+    fn test_cancel_request_new() {
+        let req = CancelRequest::new("OID1".to_string(), "BTCUSDT".to_string(), Exchange::Okx);
+        assert_eq!(req.orderid, "OID1");
+        assert_eq!(req.symbol, "BTCUSDT");
+        assert_eq!(req.exchange, Exchange::Okx);
+        assert_eq!(req.vt_symbol(), "BTCUSDT.OKX");
+    }
 }

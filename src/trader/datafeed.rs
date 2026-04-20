@@ -263,4 +263,58 @@ mod tests {
         assert_eq!(futures.klines_endpoint(), "/fapi/v1/klines");
         assert_eq!(futures.exchange(), Exchange::BinanceUsdm);
     }
+
+    #[test]
+    fn test_empty_datafeed_default() {
+        let datafeed1 = EmptyDatafeed::new();
+        let datafeed2 = EmptyDatafeed::default();
+        // Both should construct without panic
+        drop(datafeed1);
+        drop(datafeed2);
+    }
+
+    #[tokio::test]
+    async fn test_empty_datafeed_query_tick_history() {
+        let datafeed = EmptyDatafeed::new();
+        let req = HistoryRequest::new(
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Utc::now(),
+        );
+        let result = datafeed.query_tick_history(req).await;
+        assert!(result.is_err());
+        assert!(result.expect_err("should be error").contains("没有正确配置数据服务"));
+    }
+
+    #[test]
+    fn test_default_output_function() {
+        // default_output should not panic
+        default_output("test message");
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_init() {
+        let spot = BinanceDatafeed::new_spot();
+        let result = spot.init().await;
+        assert!(result.is_ok());
+        assert!(result.expect("init should succeed"));
+
+        let futures = BinanceDatafeed::new_futures();
+        let result = futures.init().await;
+        assert!(result.is_ok());
+        assert!(result.expect("init should succeed"));
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_query_tick_history_unsupported() {
+        let datafeed = BinanceDatafeed::new_spot();
+        let req = HistoryRequest::new(
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Utc::now(),
+        );
+        let result = datafeed.query_tick_history(req).await;
+        assert!(result.is_err());
+        assert!(result.expect_err("should be error").contains("不支持Tick"));
+    }
 }

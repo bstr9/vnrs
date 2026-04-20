@@ -968,4 +968,206 @@ mod tests {
         // Stop at 100, but market gapped to 95, should fill at worse price
         assert!(result.fill_price >= 100.0);
     }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_best_price_fill_model_sell_direction() {
+        let model = BestPriceFillModel::new(0.1);
+        let order = create_order(Direction::Short, 100.0, 10.0);
+        let bar = create_bar(98.0, 102.0, 97.0, 99.0, 1000.0);
+
+        let result = model.simulate_limit_fill(&order, &bar);
+        assert!(result.filled);
+        // Sell limit order: price <= bar.high means it can fill
+        // Fill price should be order price - slippage for short
+        assert!((result.fill_price - 99.9).abs() < 0.01); // 100.0 - 0.1
+        assert_eq!(result.liquidity_side, LiquiditySide::Maker);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_best_price_fill_model_with_slippage_buy() {
+        let model = BestPriceFillModel::new(0.5);
+        let order = create_order(Direction::Long, 100.0, 10.0);
+        let bar = create_bar(99.0, 102.0, 98.0, 101.0, 1000.0);
+
+        let result = model.simulate_limit_fill(&order, &bar);
+        assert!(result.filled);
+        // Buy with slippage: fill price should be higher than order price
+        assert!(result.fill_price > order.price);
+        assert!((result.fill_price - 100.5).abs() < 0.01);
+        assert!((result.slippage - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_ideal_fill_model_buy() {
+        let model = IdealFillModel::new();
+        let order = create_order(Direction::Long, 100.0, 10.0);
+        let bar = create_bar(99.0, 102.0, 98.0, 101.0, 1000.0);
+
+        let result = model.simulate_limit_fill(&order, &bar);
+        assert!(result.filled);
+        // Ideal fill: fills at order price with zero slippage
+        assert!((result.fill_price - 100.0).abs() < 0.01);
+        assert!((result.slippage - 0.0).abs() < 0.01);
+        assert_eq!(result.fill_qty, 10.0);
+        assert_eq!(result.liquidity_side, LiquiditySide::Maker);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_ideal_fill_model_sell() {
+        let model = IdealFillModel::new();
+        let order = create_order(Direction::Short, 100.0, 10.0);
+        let bar = create_bar(98.0, 102.0, 97.0, 99.0, 1000.0);
+
+        let result = model.simulate_limit_fill(&order, &bar);
+        assert!(result.filled);
+        // Ideal fill: fills at order price with zero slippage
+        assert!((result.fill_price - 100.0).abs() < 0.01);
+        assert!((result.slippage - 0.0).abs() < 0.01);
+        assert_eq!(result.fill_qty, 10.0);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_ideal_fill_model_market_order() {
+        let model = IdealFillModel::new();
+        let order = create_order(Direction::Long, 0.0, 10.0);
+        let bar = create_bar(99.0, 102.0, 98.0, 101.0, 1000.0);
+
+        let result = model.simulate_market_fill(&order, &bar);
+        assert!(result.filled);
+        // Market order fills at close price
+        assert!((result.fill_price - bar.close_price).abs() < 0.01);
+        assert!((result.slippage - 0.0).abs() < 0.01);
+        assert_eq!(result.liquidity_side, LiquiditySide::Taker);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_two_tier_fill_model_partial_fill() {
+        // prob_large < 1.0 should produce partial fill
+        let model = TwoTierFillModel::new(0.1, 0.2, 100.0, 1.0, 0.8);
+        let large_order = create_order(Direction::Long, 100.0, 200.0);
+        let bar = create_bar(101.0, 102.0, 99.0, 101.5, 1000.0);
+
+        let result = model.simulate_limit_fill(&large_order, &bar);
+        assert!(result.filled);
+        // Partial fill because prob < 1.0
+        assert!((result.prob_fill - 0.8).abs() < 0.01);
+        assert_eq!(result.fill_qty, 200.0);
+        assert_eq!(result.liquidity_side, LiquiditySide::Maker);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_size_aware_fill_model_small_volume_ratio() {
+        let model = SizeAwareFillModel::new(0.1, 1.0, 0.5, 0.5);
+
+        // Order is 1% of bar volume - low impact
+        let order = create_order(Direction::Long, 100.0, 10.0);
+        let bar = create_bar(101.0, 102.0, 99.0, 101.5, 1000.0);
+        let result = model.simulate_limit_fill(&order, &bar);
+
+        assert!(result.filled);
+        // Impact = 0.1 + 0.5 * (10/1000) = 0.105
+        assert!((result.slippage - 0.105).abs() < 0.01);
+        // Fill percentage should be high
+        assert!(result.fill_qty > 9.0);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_probabilistic_fill_model_structure() {
+        let model = ProbabilisticFillModel::new(0.2, 0.9, 0.5);
+        let order = create_order(Direction::Long, 100.0, 10.0);
+        let bar = create_bar(101.0, 102.0, 99.0, 101.5, 1000.0);
+
+        let result = model.simulate_limit_fill(&order, &bar);
+        assert!(result.filled);
+        // Check fill result structure
+        assert_eq!(result.fill_qty, 10.0);
+        assert!((result.prob_fill - 0.9).abs() < 0.01);
+        assert!((result.slippage - 0.2).abs() < 0.01);
+        assert_eq!(result.liquidity_side, LiquiditySide::Maker);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_probabilistic_fill_model_market_order() {
+        let model = ProbabilisticFillModel::new(0.2, 0.9, 0.5);
+        let order = create_order(Direction::Short, 0.0, 10.0);
+        let bar = create_bar(99.0, 102.0, 98.0, 101.0, 1000.0);
+
+        let result = model.simulate_market_fill(&order, &bar);
+        assert!(result.filled);
+        // Market order should fill at bar.low - slippage for short
+        assert!((result.fill_price - (bar.low_price - 0.2)).abs() < 0.01);
+        assert_eq!(result.liquidity_side, LiquiditySide::Taker);
+        assert!((result.prob_fill - 1.0).abs() < 0.01); // Full fill for market orders
+    }
+
+    #[test]
+    fn test_fill_result_no_fill() {
+        let result = FillResult::no_fill();
+        assert!(!result.filled);
+        assert!((result.fill_price - 0.0).abs() < 0.01);
+        assert!((result.fill_qty - 0.0).abs() < 0.01);
+        assert!((result.slippage - 0.0).abs() < 0.01);
+        assert_eq!(result.liquidity_side, LiquiditySide::NoLiquidity);
+        assert!((result.prob_fill - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_fill_result_full_fill() {
+        let result = FillResult::full_fill(100.0, 10.0, 0.5, LiquiditySide::Maker);
+        assert!(result.filled);
+        assert!((result.fill_price - 100.0).abs() < 0.01);
+        assert!((result.fill_qty - 10.0).abs() < 0.01);
+        assert!((result.slippage - 0.5).abs() < 0.01);
+        assert_eq!(result.liquidity_side, LiquiditySide::Maker);
+        assert!((result.prob_fill - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_fill_result_partial_fill() {
+        let result = FillResult::partial_fill(100.0, 5.0, 0.3, LiquiditySide::Taker, 0.5);
+        assert!(result.filled);
+        assert!((result.fill_price - 100.0).abs() < 0.01);
+        assert!((result.fill_qty - 5.0).abs() < 0.01);
+        assert!((result.slippage - 0.3).abs() < 0.01);
+        assert_eq!(result.liquidity_side, LiquiditySide::Taker);
+        assert!((result.prob_fill - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_liquidity_side_variants() {
+        // Test that LiquiditySide variants are distinct
+        assert_ne!(LiquiditySide::NoLiquidity, LiquiditySide::Maker);
+        assert_ne!(LiquiditySide::Maker, LiquiditySide::Taker);
+        assert_ne!(LiquiditySide::Taker, LiquiditySide::NoLiquidity);
+
+        // Test Copy and Clone
+        let side = LiquiditySide::Maker;
+        let side_copy = side;
+        assert_eq!(side, side_copy);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_best_price_fill_model_market_order_buy() {
+        let model = BestPriceFillModel::new(0.2);
+        let order = create_order(Direction::Long, 0.0, 10.0);
+        let bar = create_bar(100.0, 105.0, 98.0, 103.0, 1000.0);
+
+        let result = model.simulate_market_fill(&order, &bar);
+        assert!(result.filled);
+        // Market buy: fills at high + slippage
+        assert!((result.fill_price - (bar.high_price + 0.2)).abs() < 0.01);
+        assert_eq!(result.liquidity_side, LiquiditySide::Taker);
+    }
 }

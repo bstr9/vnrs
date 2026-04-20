@@ -238,3 +238,58 @@ impl DatabaseLoader {
         Err("数据库功能未启用".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trader::constant::{Exchange, Interval};
+    use chrono::Utc;
+
+    #[test]
+    fn test_database_loader_new() {
+        let loader = DatabaseLoader::new();
+        // Should construct without panic; no pool field without database feature
+        drop(loader);
+    }
+
+    #[test]
+    fn test_database_loader_default() {
+        let loader = DatabaseLoader::default();
+        drop(loader);
+    }
+
+    #[tokio::test]
+    async fn test_database_loader_connect_without_feature() {
+        let mut loader = DatabaseLoader::new();
+        let result = loader.connect("postgresql://invalid:5432/test").await;
+        assert!(result.is_err());
+        assert!(result.expect_err("should be error").contains("数据库功能未启用"));
+    }
+
+    #[tokio::test]
+    async fn test_database_loader_load_bar_data_without_feature() {
+        let loader = DatabaseLoader::new();
+        let result = loader.load_bar_data(
+            "BTCUSDT",
+            Exchange::Binance,
+            Interval::Minute,
+            Utc::now(),
+            Utc::now(),
+        ).await;
+        assert!(result.is_err());
+        assert!(result.expect_err("should be error").contains("数据库功能未启用"));
+    }
+
+    #[tokio::test]
+    async fn test_database_loader_load_tick_data_without_feature() {
+        let loader = DatabaseLoader::new();
+        let result = loader.load_tick_data(
+            "BTCUSDT",
+            Exchange::Binance,
+            Utc::now(),
+            Utc::now(),
+        ).await;
+        assert!(result.is_err());
+        assert!(result.expect_err("should be error").contains("数据库功能未启用"));
+    }
+}

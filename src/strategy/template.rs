@@ -644,3 +644,236 @@ pub trait TargetPosTemplate: StrategyTemplate {
         0.001 // Default minimum
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trader::database::MemoryDatabase;
+
+    fn create_test_base_strategy() -> BaseStrategy {
+        let mut setting = StrategySetting::new();
+        setting.insert("param1".to_string(), serde_json::Value::from("value1"));
+        BaseStrategy::new(
+            "TestStrategy".to_string(),
+            vec!["BTCUSDT.BINANCE".to_string()],
+            StrategyType::Futures,
+            setting,
+        )
+    }
+
+    fn create_test_tick(_vt_symbol: &str) -> TickData {
+        let mut tick = TickData::new(
+            "TEST".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            chrono::Utc::now(),
+        );
+        tick.bid_price_1 = 50000.0;
+        tick.ask_price_1 = 50001.0;
+        tick.last_price = 50000.5;
+        tick.volume = 1000.0;
+        tick
+    }
+
+    fn create_test_bar() -> BarData {
+        let mut bar = BarData::new(
+            "TEST".to_string(),
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            chrono::Utc::now(),
+        );
+        bar.interval = Some(Interval::Minute);
+        bar.open_price = 50000.0;
+        bar.high_price = 50100.0;
+        bar.low_price = 49900.0;
+        bar.close_price = 50050.0;
+        bar.volume = 1000.0;
+        bar
+    }
+
+    #[test]
+    fn test_strategy_context_new() {
+        let ctx = StrategyContext::new();
+        // Caches should be empty
+        assert!(ctx.get_tick("BTCUSDT.BINANCE").is_none());
+        assert!(ctx.get_bar("BTCUSDT.BINANCE").is_none());
+    }
+
+    #[test]
+    fn test_strategy_context_get_tick_missing() {
+        let ctx = StrategyContext::new();
+        assert!(ctx.get_tick("NONEXISTENT").is_none());
+    }
+
+    #[test]
+    fn test_strategy_context_get_bar_missing() {
+        let ctx = StrategyContext::new();
+        assert!(ctx.get_bar("NONEXISTENT").is_none());
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_strategy_context_tick_caching() {
+        let ctx = StrategyContext::new();
+        let tick = create_test_tick("BTCUSDT.BINANCE");
+        let vt_symbol = tick.vt_symbol();
+
+        ctx.update_tick(tick);
+
+        let retrieved = ctx.get_tick(&vt_symbol);
+        assert!(retrieved.is_some());
+        let t = retrieved.unwrap();
+        assert!((t.bid_price_1 - 50000.0).abs() < 0.01);
+        assert!((t.ask_price_1 - 50001.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_strategy_context_bar_caching() {
+        let ctx = StrategyContext::new();
+        let bar = create_test_bar();
+        let vt_symbol = bar.vt_symbol();
+
+        ctx.update_bar(bar);
+
+        let retrieved = ctx.get_bar(&vt_symbol);
+        assert!(retrieved.is_some());
+        let b = retrieved.unwrap();
+        assert!((b.close_price - 50050.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_base_strategy_buy() {
+        let strategy = create_test_base_strategy();
+        strategy.buy("BTCUSDT.BINANCE", 50000.0, 1.0, false);
+
+        let orders = strategy.drain_pending_orders();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].direction, Direction::Long);
+        assert_eq!(orders[0].offset, Offset::Open);
+        assert!((orders[0].price - 50000.0).abs() < 0.01);
+        assert!((orders[0].volume - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_base_strategy_sell() {
+        let strategy = create_test_base_strategy();
+        strategy.sell("BTCUSDT.BINANCE", 49000.0, 1.0, false);
+
+        let orders = strategy.drain_pending_orders();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].direction, Direction::Short);
+        assert_eq!(orders[0].offset, Offset::Close); // Futures strategy
+        assert!((orders[0].price - 49000.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_base_strategy_short() {
+        let strategy = create_test_base_strategy();
+        strategy.short("BTCUSDT.BINANCE", 50000.0, 2.0, false);
+
+        let orders = strategy.drain_pending_orders();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].direction, Direction::Short);
+        assert_eq!(orders[0].offset, Offset::Open);
+        assert!((orders[0].volume - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_base_strategy_cover() {
+        let strategy = create_test_base_strategy();
+        strategy.cover("BTCUSDT.BINANCE", 51000.0, 1.0, false);
+
+        let orders = strategy.drain_pending_orders();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].direction, Direction::Long);
+        assert_eq!(orders[0].offset, Offset::Close); // Not locked
+        assert!((orders[0].price - 51000.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_base_strategy_cancel_order() {
+        let strategy = create_test_base_strategy();
+
+        // Add an active order ID first
+        strategy
+            .active_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push("ORDER_123".to_string());
+
+        strategy.cancel_order("ORDER_123");
+
+        let cancellations = strategy.drain_pending_cancellations();
+        assert_eq!(cancellations.len(), 1);
+        match &cancellations[0] {
+            CancelRequestType::Order(id) => assert_eq!(id, "ORDER_123"),
+            CancelRequestType::StopOrder(_) => panic!("Expected Order cancellation"),
+        }
+
+        // Active order should be removed
+        let orderids = strategy
+            .active_orderids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(!orderids.contains(&"ORDER_123".to_string()));
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_base_strategy_send_stop_order() {
+        let strategy = create_test_base_strategy();
+        let stop_id = strategy.send_stop_order(
+            "BTCUSDT.BINANCE",
+            49000.0,
+            1.0,
+            Direction::Short,
+            Some(Offset::Close),
+        );
+
+        assert!(!stop_id.is_empty());
+
+        let stop_orders = strategy.drain_pending_stop_orders();
+        assert_eq!(stop_orders.len(), 1);
+        assert!((stop_orders[0].price - 49000.0).abs() < 0.01);
+        assert_eq!(stop_orders[0].direction, Direction::Short);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_base_strategy_set_get_target() {
+        let strategy = create_test_base_strategy();
+
+        // Initially no target
+        let targets = strategy.targets.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(targets.get("BTCUSDT.BINANCE").is_none());
+        drop(targets);
+
+        // Set target via targets field
+        strategy
+            .targets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert("BTCUSDT.BINANCE".to_string(), 5.0);
+
+        // Retrieve target
+        let targets = strategy.targets.lock().unwrap_or_else(|e| e.into_inner());
+        let target = targets.get("BTCUSDT.BINANCE");
+        assert!(target.is_some());
+        assert!((target.unwrap() - 5.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_strategy_context_with_database() {
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+        let ctx = StrategyContext::with_database(db);
+
+        // Should be able to create context with database
+        assert!(ctx.get_tick("BTCUSDT.BINANCE").is_none());
+        assert!(ctx.get_bar("BTCUSDT.BINANCE").is_none());
+    }
+}

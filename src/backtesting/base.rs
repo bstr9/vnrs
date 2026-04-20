@@ -275,3 +275,174 @@ impl Default for BacktestingStatistics {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trader::{Direction, TradeData};
+    use chrono::NaiveDate;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_backtesting_mode_serialize_deserialize() {
+        let bar_mode = BacktestingMode::Bar;
+        let json = serde_json::to_string(&bar_mode).unwrap();
+        let deserialized: BacktestingMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(bar_mode, deserialized);
+
+        let tick_mode = BacktestingMode::Tick;
+        let json = serde_json::to_string(&tick_mode).unwrap();
+        let deserialized: BacktestingMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(tick_mode, deserialized);
+    }
+
+    #[test]
+    fn test_backtesting_mode_equality() {
+        assert_eq!(BacktestingMode::Bar, BacktestingMode::Bar);
+        assert_eq!(BacktestingMode::Tick, BacktestingMode::Tick);
+        assert_ne!(BacktestingMode::Bar, BacktestingMode::Tick);
+    }
+
+    #[test]
+    fn test_daily_result_new_defaults() {
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let result = DailyResult::new(date, 100.0);
+
+        assert_eq!(result.date, date);
+        assert!((result.close_price - 100.0).abs() < f64::EPSILON);
+        assert!((result.pre_close - 0.0).abs() < f64::EPSILON);
+        assert!(result.trades.is_empty());
+        assert_eq!(result.trade_count, 0);
+        assert!((result.start_pos - 0.0).abs() < f64::EPSILON);
+        assert!((result.end_pos - 0.0).abs() < f64::EPSILON);
+        assert!((result.turnover - 0.0).abs() < f64::EPSILON);
+        assert!((result.commission - 0.0).abs() < f64::EPSILON);
+        assert!((result.slippage - 0.0).abs() < f64::EPSILON);
+        assert!((result.trading_pnl - 0.0).abs() < f64::EPSILON);
+        assert!((result.holding_pnl - 0.0).abs() < f64::EPSILON);
+        assert!((result.total_pnl - 0.0).abs() < f64::EPSILON);
+        assert!((result.net_pnl - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_daily_result_calculate_pnl_no_trades() {
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let mut result = DailyResult::new(date, 105.0);
+        result.pre_close = 100.0;
+        result.start_pos = 10.0;
+        result.end_pos = 10.0;
+
+        result.calculate_pnl(1.0, 0.001, 0.1);
+
+        // holding_pnl = start_pos * (close - pre_close) * size = 10 * (105 - 100) * 1 = 50
+        assert!((result.holding_pnl - 50.0).abs() < 1e-10);
+        assert!((result.trading_pnl - 0.0).abs() < f64::EPSILON);
+        assert!((result.total_pnl - 50.0).abs() < 1e-10);
+        assert!((result.net_pnl - 50.0).abs() < 1e-10);
+        assert!((result.commission - 0.0).abs() < f64::EPSILON);
+        assert!((result.slippage - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_daily_result_calculate_pnl_with_trades() {
+        let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let mut result = DailyResult::new(date, 105.0);
+        result.pre_close = 100.0;
+        result.start_pos = 10.0;
+        result.end_pos = 5.0;
+
+        // Add a short trade: selling 5 units at price 103
+        let trade = TradeData {
+            gateway_name: "TEST".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: crate::trader::Exchange::Binance,
+            orderid: "1".to_string(),
+            tradeid: "1".to_string(),
+            direction: Some(Direction::Short),
+            offset: crate::trader::Offset::Open,
+            price: 103.0,
+            volume: 5.0,
+            datetime: None,
+            extra: None,
+        };
+        result.trades.push(trade);
+        result.trade_count = 1;
+
+        result.calculate_pnl(1.0, 0.001, 0.1);
+
+        // trade_value = 103.0 * 5.0 * 1.0 = 515.0
+        // Short direction: trading_pnl += trade_value => trading_pnl = 515.0
+        let trade_value = 103.0 * 5.0 * 1.0;
+        assert!((result.trading_pnl - trade_value).abs() < 1e-10);
+        // holding_pnl = 10 * (105 - 100) * 1 = 50
+        assert!((result.holding_pnl - 50.0).abs() < 1e-10);
+        // commission = trade_value * 0.001
+        assert!((result.commission - trade_value * 0.001).abs() < 1e-10);
+        // slippage = 5.0 * 1.0 * 0.1 = 0.5
+        assert!((result.slippage - 0.5).abs() < 1e-10);
+        // total_pnl = trading_pnl + holding_pnl
+        assert!((result.total_pnl - (trade_value + 50.0)).abs() < 1e-10);
+        // net_pnl = total_pnl - commission - slippage
+        let expected_net = trade_value + 50.0 - trade_value * 0.001 - 0.5;
+        assert!((result.net_pnl - expected_net).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_backtesting_result_new_defaults() {
+        let result = BacktestingResult::new(100000.0);
+
+        assert!((result.start_capital - 100000.0).abs() < f64::EPSILON);
+        assert!((result.end_capital - 100000.0).abs() < f64::EPSILON);
+        assert!((result.total_return - 0.0).abs() < f64::EPSILON);
+        assert!((result.annual_return - 0.0).abs() < f64::EPSILON);
+        assert!((result.max_drawdown - 0.0).abs() < f64::EPSILON);
+        assert!((result.max_drawdown_percent - 0.0).abs() < f64::EPSILON);
+        assert!((result.sharpe_ratio - 0.0).abs() < f64::EPSILON);
+        assert_eq!(result.total_trade_count, 0);
+        assert_eq!(result.total_days, 0);
+        assert!(result.daily_results.is_empty());
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_backtesting_result_with_daily_results() {
+        let mut result = BacktestingResult::new(50000.0);
+        let date1 = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2024, 1, 16).unwrap();
+
+        let daily1 = DailyResult::new(date1, 100.0);
+        let daily2 = DailyResult::new(date2, 102.0);
+
+        result.daily_results.insert(date1, daily1);
+        result.daily_results.insert(date2, daily2);
+
+        assert_eq!(result.daily_results.len(), 2);
+        assert!(result.daily_results.contains_key(&date1));
+        assert!(result.daily_results.contains_key(&date2));
+        assert!((result.daily_results[&date2].close_price - 102.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_backtesting_statistics_default() {
+        let stats = BacktestingStatistics::default();
+
+        assert!(stats.start_date.is_empty());
+        assert!(stats.end_date.is_empty());
+        assert_eq!(stats.total_days, 0);
+        assert_eq!(stats.profit_days, 0);
+        assert_eq!(stats.loss_days, 0);
+        assert!((stats.end_balance - 0.0).abs() < f64::EPSILON);
+        assert!((stats.max_drawdown - 0.0).abs() < f64::EPSILON);
+        assert!((stats.total_net_pnl - 0.0).abs() < f64::EPSILON);
+        assert!((stats.sharpe_ratio - 0.0).abs() < f64::EPSILON);
+        assert!((stats.win_rate - 0.0).abs() < f64::EPSILON);
+        assert!((stats.profit_factor - 0.0).abs() < f64::EPSILON);
+        assert!((stats.sortino_ratio - 0.0).abs() < f64::EPSILON);
+        assert!((stats.calmar_ratio - 0.0).abs() < f64::EPSILON);
+        assert_eq!(stats.max_consecutive_wins, 0);
+        assert_eq!(stats.max_consecutive_losses, 0);
+        assert_eq!(stats.total_trade_count, 0);
+    }
+}
