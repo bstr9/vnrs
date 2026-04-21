@@ -37,8 +37,8 @@ versions:
 
 ## 验收标准
 
-- [ ] `OrderType` 枚举添加 `Gtd` 变体
-- [ ] `OrderRequest` 添加 `expire_time: Option<DateTime<Utc>>` 字段
+- [x] `OrderType` 枚举添加 `Gtd` 变体
+- [x] `OrderRequest` 添加 `expire_time: Option<DateTime<Utc>>` 字段
 - [ ] Spot 网关：`timeInForce=GTD` + `goodTillDate=<timestamp>`
 - [ ] Futures 网关：`timeInForce=GTD` + `goodTillDate=<timestamp>`
 - [ ] 反向映射：Binance 返回的 GTD 订单正确映射回 `OrderType::Gtd`

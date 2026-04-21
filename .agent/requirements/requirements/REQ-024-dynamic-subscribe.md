@@ -29,11 +29,11 @@ versions:
 
 ## 验收标准
 
-- [ ] Python `Strategy` 添加 `subscribe(symbol, frequency?)` 方法
-- [ ] Python `Strategy` 添加 `unsubscribe(symbol)` 方法
+- [x] Python `Strategy` 添加 `subscribe(symbol, frequency?)` 方法
+- [x] Python `Strategy` 添加 `unsubscribe(symbol)` 方法
 - [ ] 调用 subscribe 后，网关发送对应的 WebSocket 订阅请求
 - [ ] 调用 unsubscribe 后，网关发送对应的 WebSocket 退订请求
-- [ ] 回测模式下 subscribe/unsubscribe 操作为 no-op（数据已预加载）
+- [x] 回测模式下 subscribe/unsubscribe 操作为 no-op（数据已预加载）
 - [ ] 与 OmsEngine 事件系统集成
 
 ## 影响范围
