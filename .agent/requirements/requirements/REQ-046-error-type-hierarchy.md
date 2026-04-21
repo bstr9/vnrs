@@ -10,8 +10,12 @@ cluster: Infrastructure
 relations:
   depends_on: [REQ-004]
   related_to: [REQ-044, REQ-045]
-versions:
-  - version: 1
+  - version: 2
+    date: "2026-04-22T12:00:00"
+    author: ai
+    context: "需求审查：3/5 验收标准已完成。thiserror 已引入、核心错误枚举已定义、渐进式迁移策略已确立。但 BaseGateway trait 和 BaseDatabase trait 的返回类型仍为 Result<T, String>。保持 active 但标注部分完成。"
+    reason: "部分完成，trait 返回类型迁移未开始"
+    snapshot: "thiserror 错误枚举已定义，但 BaseGateway/BaseDatabase trait 仍使用 Result<T, String>"
     date: "2026-04-20T16:00:00"
     author: ai
     context: "代码审查发现全代码库 149 处 Result<T, String>，仅 rpc/common.rs 有 1 个 ConnectionError 枚举"

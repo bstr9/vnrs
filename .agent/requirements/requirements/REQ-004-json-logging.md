@@ -1,7 +1,7 @@
 ---
 id: REQ-004
 title: "结构化 JSON 日志"
-status: completed
+status: active
 created_at: "2026-04-19T00:00:00"
 updated_at: "2026-04-19T00:00:00"
 priority: P1
@@ -19,6 +19,12 @@ versions:
     context: "plans.md 特性对比发现 tesser 已实现 JSON 结构化日志，vnrs 当前 logger.rs 使用纯文本 tracing_subscriber::fmt::layer()，无 .json() 层。日志分析和告警系统需要结构化格式。"
     reason: "日志分析和告警需要结构化格式"
     snapshot: "支持 JSON 结构化日志格式，通过环境变量或配置切换"
+  - version: 2
+    date: "2026-04-22T12:00:00"
+    author: ai
+    context: "需求审查发现 status=completed 但 0/5 验收标准已勾选。init_logger_with_json() 函数已存在，但无 VNRS_LOG_FORMAT 环境变量支持，默认仍为纯文本。状态回退为 active。"
+    reason: "JSON 日志函数存在但环境变量控制和默认格式未实现，回退为 active"
+    snapshot: "init_logger_with_json() 存在但缺 VNRS_LOG_FORMAT 环境变量支持和默认纯文本兼容"
 ---
 
 # 结构化 JSON 日志

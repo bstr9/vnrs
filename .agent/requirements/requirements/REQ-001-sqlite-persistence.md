@@ -1,7 +1,7 @@
 ---
 id: REQ-001
 title: "SQLite 持久化完善（订单/成交/仓位）"
-status: completed
+status: active
 completed_at: "2026-04-21T00:00:00"
 created_at: "2026-04-19T00:00:00"
 updated_at: "2026-04-19T00:00:00"
@@ -21,6 +21,12 @@ versions:
     context: "代码审查发现 sqlite_database.rs 中 save_order_data/save_trade_data/save_position_data 是 stub，仅返回 Ok(true) 不持久化；load_orders/load_trades/load_positions 返回空 vec。MainEngine::new_with_sqlite() 创建了数据库连接但实际无法恢复状态。"
     reason: "崩溃恢复功能形同虚设，这是当前最阻塞的问题"
     snapshot: "SQLite 订单/成交/仓位数据的持久化写入和读取，使崩溃恢复真正可用"
+  - version: 2
+    date: "2026-04-22T12:00:00"
+    author: ai
+    context: "需求审查发现 status=completed 但 0/11 验收标准已勾选。save_order_data/save_trade_data/save_position_data 可能仍是 stub，load_* 方法仍返回空 vec。状态回退为 active。"
+    reason: "需求状态与实际实现不符，回退为 active"
+    snapshot: "SQLite 持久化写入/读取方法可能仍为 stub，需要实际验证和实现"
 ---
 
 # SQLite 持久化完善（订单/成交/仓位）

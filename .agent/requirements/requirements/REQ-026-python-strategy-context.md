@@ -11,7 +11,6 @@ relations:
   conflicts_with: []
   refines: []
   merged_from: [REQ-031, REQ-032]
-  refined_by: [REQ-031, REQ-032]
   depends_on: [REQ-020]
   cluster: Python-API
 versions:

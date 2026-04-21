@@ -1,7 +1,7 @@
 ---
 id: REQ-030
 title: "Python 策略参数管理（parameters/variables）"
-status: completed
+status: active
 created_at: "2026-04-19T14:00:00"
 updated_at: "2026-04-19T14:00:00"
 priority: P2
@@ -19,6 +19,12 @@ versions:
     context: "代码分析发现 Rust StrategyTemplate 有 parameters() 和 variables() 方法（template.rs:254-258），用于策略参数管理。vnpy 的 CtaTemplate 也有 parameters/variables 概念（用于 UI 显示策略参数）。Python 策略当前通过 setting dict 设置参数，但无标准化的参数/变量接口。"
     reason: "策略需要标准化的参数管理接口，支持 UI 展示、持久化、动态调整"
     snapshot: "Python Strategy 添加 parameters/variables 属性和 get_parameter/set_parameter 方法，支持策略参数的标准化管理"
+  - version: 2
+    date: "2026-04-22T12:00:00"
+    author: ai
+    context: "需求审查发现 status=completed 但 0/6 验收标准已勾选。parameters/variables 属性在 Python Strategy 中未找到。状态回退为 active。"
+    reason: "参数管理功能未实现，回退为 active"
+    snapshot: "Python Strategy 缺少 parameters/variables 属性和 get_parameter/set_parameter 方法"
 ---
 
 # Python 策略参数管理（parameters/variables）

@@ -1,7 +1,7 @@
 ---
 id: REQ-025
 title: "Python 止损单完整功能（发送/回调/取消）"
-status: completed
+status: active
 created_at: "2026-04-19T12:00:00"
 updated_at: "2026-04-19T19:04:20"
 priority: P2
@@ -10,7 +10,6 @@ relations:
   conflicts_with: []
   refines: []
   merged_from: [REQ-028, REQ-029]
-  refined_by: [REQ-028, REQ-029]
   related_to: [REQ-017, REQ-021]
   cluster: Python-API
 versions:
@@ -32,6 +31,12 @@ versions:
     context: "元数据自动同步"
     reason: "自动补充反向关系: refined_by"
     snapshot: "自动同步元数据"
+  - version: 4
+    date: "2026-04-22T12:00:00"
+    author: ai
+    context: "需求审查发现 status=completed 但 0/14 验收标准已勾选。send_stop_order/cancel_stop_order/on_stop_order 方法在 Python Strategy 中未找到。状态回退为 active。"
+    reason: "止损单完整功能未实现，回退为 active"
+    snapshot: "Python 止损单发送/回调/取消方法均未实现，仅 Rust 端 BaseStrategy 有相关功能"
 ---
 
 # Python 止损单完整功能（发送/回调/取消）
