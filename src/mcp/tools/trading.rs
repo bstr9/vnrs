@@ -167,6 +167,12 @@ pub struct SetLeverageParams {
     pub gateway_name: String,
 }
 
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct GetOrderStatusParams {
+    /// 订单 ID（vt_orderid 格式，如 binance_spot.12345）
+    pub order_id: String,
+}
+
 // ---- 辅助函数 ----
 
 /// 将字符串解析为 Exchange 枚举
@@ -837,6 +843,37 @@ impl TradingMcpServer {
                 "Gateway {} not found",
                 params.gateway_name
             ))]))
+        }
+    }
+
+    #[tool(description = "Get the current status of an order by its vt_orderid")]
+    fn get_order_status(
+        &self,
+        Parameters(params): Parameters<GetOrderStatusParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.engine.get_order(&params.order_id) {
+            Some(order) => {
+                let result = serde_json::json!({
+                    "vt_orderid": order.vt_orderid(),
+                    "symbol": order.vt_symbol(),
+                    "direction": format!("{:?}", order.direction),
+                    "order_type": format!("{:?}", order.order_type),
+                    "offset": format!("{}", order.offset),
+                    "price": order.price,
+                    "volume": order.volume,
+                    "traded": order.traded,
+                    "status": format!("{:?}", order.status),
+                    "reference": order.reference,
+                    "datetime": order.datetime.map(|d| d.to_rfc3339()).unwrap_or_default(),
+                });
+                let text = serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|_| "Order status".to_string());
+                Ok(CallToolResult::success(vec![Content::text(text)]))
+            }
+            None => Ok(CallToolResult::success(vec![Content::text(format!(
+                "Order not found: {}",
+                params.order_id
+            ))])),
         }
     }
 }

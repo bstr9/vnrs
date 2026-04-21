@@ -43,6 +43,15 @@ pub mod backtesting;
 #[cfg(feature = "model-registry")]
 pub mod model;
 
+#[cfg(feature = "shadow")]
+pub mod shadow;
+
+#[cfg(feature = "agent")]
+pub mod agent;
+
+#[cfg(feature = "rl")]
+pub mod rl;
+
 #[cfg(feature = "signal")]
 pub mod signal;
 
@@ -65,6 +74,8 @@ pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode
 pub use signal::{SignalBus, Signal, SignalDirection, SignalStrength, SubscriberId, Subscription};
 #[cfg(feature = "model-registry")]
 pub use model::{ModelRegistry, ModelServer, ZmqModelServer, ModelEntry, ModelMetrics, ModelStage, Prediction, HealthStatus};
+#[cfg(feature = "shadow")]
+pub use shadow::{ShadowEngine, ShadowModel, ShadowStage, ShadowPrediction, PredictionComparison, ShadowMetrics, PromotionPolicy, PromotionDecision, ComparisonStore, RollingMetrics, ConfidenceDistribution};
 #[cfg(feature = "python")]
 pub use python::{Strategy, PythonEngine, PythonEngineBridge, StrategyEngineHandle};
 pub use trader::{

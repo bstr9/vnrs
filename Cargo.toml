@@ -125,6 +125,9 @@ signal = []
 feature-store = ["dep:dashmap"]
 prometheus = ["dep:prometheus", "dep:hyper", "dep:hyper-util", "dep:http-body-util"]
 model-registry = []
+shadow = []
+agent = ["feature-store"]
+rl = []
 
 [lib]
 name = "trade_engine"

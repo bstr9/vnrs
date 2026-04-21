@@ -4,6 +4,7 @@
 //! 包括 UI 命令（MCP→UI）和 UI 状态共享（UI→MCP）。
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 
 /// MCP 传输模式配置
@@ -93,6 +94,13 @@ impl McpTransport {
 pub struct McpConfig {
     /// 传输模式
     pub transport: McpTransport,
+    /// 只读模式：禁用所有写操作工具（send_order, cancel_order, set_stop_loss 等）
+    #[serde(default)]
+    pub read_only: bool,
+    /// 允许的工具模块（空 = 全部允许）
+    /// 可选值："trading", "ui", "market", "account", "strategy", "risk", "backtest"
+    #[serde(default)]
+    pub allowed_modules: HashSet<String>,
 }
 
 impl McpConfig {
@@ -105,6 +113,8 @@ impl McpConfig {
     pub fn stdio() -> Self {
         Self {
             transport: McpTransport::Stdio,
+            read_only: false,
+            allowed_modules: HashSet::new(),
         }
     }
 
@@ -112,13 +122,58 @@ impl McpConfig {
     pub fn http(port: u16) -> Self {
         Self {
             transport: McpTransport::http(port),
+            read_only: false,
+            allowed_modules: HashSet::new(),
         }
+    }
+
+    /// 创建只读模式配置
+    pub fn read_only() -> Self {
+        Self {
+            transport: McpTransport::Stdio,
+            read_only: true,
+            allowed_modules: HashSet::new(),
+        }
+    }
+
+    /// 设置只读模式
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+
+    /// 设置允许的工具模块
+    pub fn with_allowed_modules(mut self, modules: HashSet<String>) -> Self {
+        self.allowed_modules = modules;
+        self
+    }
+
+    /// 检查某个模块是否被允许
+    pub fn is_module_allowed(&self, module: &str) -> bool {
+        self.allowed_modules.is_empty() || self.allowed_modules.contains(module)
+    }
+
+    /// 检查当前配置是否为只读模式
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
     }
 
     /// 从环境变量读取配置
     pub fn from_env() -> Self {
+        let read_only = std::env::var("MCP_READ_ONLY")
+            .ok()
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+
+        let allowed_modules = std::env::var("MCP_ALLOWED_MODULES")
+            .ok()
+            .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+
         Self {
             transport: McpTransport::from_env(),
+            read_only,
+            allowed_modules,
         }
     }
 }
