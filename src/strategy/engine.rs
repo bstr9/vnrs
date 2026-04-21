@@ -272,6 +272,18 @@ impl StrategyEngine {
     }
 
     /// Process bar event and dispatch to subscribed strategies
+    ///
+    /// Integration point for SignalBus (feature = "signal"):
+    /// Strategies can access cached AI signals during on_bar by holding a
+    /// reference to a `SignalBus` and calling `get_latest(topic)`.
+    /// Example:
+    /// ```rust,ignore
+    /// if let Some(signal) = signal_bus.get_latest("sentiment.btc") {
+    ///     if signal.is_directional() && signal.is_stronger_than(0.7) {
+    ///         // Combine AI signal with traditional indicators
+    ///     }
+    /// }
+    /// ```
     fn process_bar_event(&self, bar: &BarData) {
         let vt_symbol = bar.vt_symbol();
         let strategy_names: Vec<String> = self.symbol_strategy_map.read().unwrap_or_else(|e| e.into_inner())

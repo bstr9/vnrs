@@ -19,7 +19,7 @@ use trade_engine::rpc::server::RpcServer;
 #[cfg(feature = "gui")]
 use trade_engine::trader::ui::MainWindow;
 #[cfg(feature = "gui")]
-use trade_engine::mcp::{TradingMcpServer, UICommand};
+use trade_engine::mcp::{TradingMcpServer, UICommand, McpConfig, McpTransport};
 
 /// Application state holding all trading components
 struct TradeEngineApp {
@@ -405,7 +405,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Check for MCP mode via environment variable
     #[cfg(feature = "gui")]
     if std::env::var("MCP_MODE").is_ok() {
-        // Run in MCP stdio mode (for Claude Desktop)
+        // Read MCP configuration from environment
+        let mcp_config = McpConfig::from_env();
+        
+        // Run in MCP mode (stdio or http)
         let event_engine = Arc::new(EventEngine::new(10));
         let db = Arc::new(FileDatabase::with_default_dir());
         let main_engine = MainEngine::new_with_database(db);
@@ -435,20 +438,53 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Clone main_engine before moving into MCP server for graceful shutdown
         let main_engine_for_shutdown = main_engine.clone();
         let (mcp_server, _) = TradingMcpServer::new(main_engine);
-        runtime.block_on(async {
-            tokio::select! {
-                result = mcp_server.serve_stdio() => {
-                    if let Err(e) = result {
-                        tracing::error!("MCP Server error: {}", e);
+        
+        match &mcp_config.transport {
+            McpTransport::Stdio => {
+                info!("📡 MCP Server starting in STDIO mode...");
+                runtime.block_on(async {
+                    tokio::select! {
+                        result = mcp_server.serve_stdio() => {
+                            if let Err(e) = result {
+                                tracing::error!("MCP Server error: {}", e);
+                            }
+                        }
+                        _ = tokio::signal::ctrl_c() => {
+                            tracing::info!("Received Ctrl+C, shutting down gracefully...");
+                            main_engine_for_shutdown.close().await;
+                            tracing::info!("Engine closed, exiting.");
+                        }
                     }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("Received Ctrl+C, shutting down gracefully...");
-                    main_engine_for_shutdown.close().await;
-                    tracing::info!("Engine closed, exiting.");
-                }
+                });
             }
-        });
+            McpTransport::Http { port, host } => {
+                let host_str = host.as_deref().unwrap_or("127.0.0.1");
+                let addr_str = format!("{}:{}", host_str, port);
+                let addr: std::net::SocketAddr = match addr_str.parse() {
+                    Ok(a) => a,
+                    Err(e) => {
+                        tracing::error!("Invalid MCP HTTP address '{}': {}", addr_str, e);
+                        return Err(format!("Invalid MCP HTTP address: {}", e).into());
+                    }
+                };
+                info!("🌐 MCP Server starting in HTTP/SSE mode on http://{}", addr);
+                info!("   MCP endpoint: http://{}/mcp", addr);
+                runtime.block_on(async {
+                    tokio::select! {
+                        result = mcp_server.serve_http(addr) => {
+                            if let Err(e) = result {
+                                tracing::error!("MCP HTTP Server error: {}", e);
+                            }
+                        }
+                        _ = tokio::signal::ctrl_c() => {
+                            tracing::info!("Received Ctrl+C, shutting down gracefully...");
+                            main_engine_for_shutdown.close().await;
+                            tracing::info!("Engine closed, exiting.");
+                        }
+                    }
+                });
+            }
+        }
         return Ok(());
     }
     

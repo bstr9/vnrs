@@ -1,9 +1,9 @@
 ---
 id: REQ-015
 title: "确定性重放 (Deterministic Replay)"
-status: active
+status: completed
 created_at: "2026-04-19T00:00:00"
-updated_at: "2026-04-19T00:00:00"
+updated_at: "2026-04-22T00:00:00"
 priority: P2
 relations:
   supersedes: []

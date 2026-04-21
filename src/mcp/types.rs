@@ -1,10 +1,127 @@
-//! MCP 类型定义：UICommand 枚举、UIState 状态、通道类型
+//! MCP 类型定义：UICommand 枚举、UIState 状态、通道类型、McpConfig 配置
 //!
 //! 定义 MCP Server 与 UI 线程之间的通信协议，
 //! 包括 UI 命令（MCP→UI）和 UI 状态共享（UI→MCP）。
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
+
+/// MCP 传输模式配置
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum McpTransport {
+    /// STDIO 模式（适用于 Claude Desktop 等本地 MCP 客户端）
+    #[default]
+    Stdio,
+    /// HTTP/SSE 模式（适用于远程 Web 客户端）
+    Http {
+        /// 监听端口
+        port: u16,
+        /// 监听地址（默认 127.0.0.1）
+        host: Option<String>,
+    },
+}
+
+impl McpTransport {
+    /// 创建默认的 STDIO 配置
+    pub fn stdio() -> Self {
+        Self::Stdio
+    }
+
+    /// 创建 HTTP 配置
+    pub fn http(port: u16) -> Self {
+        Self::Http {
+            port,
+            host: None,
+        }
+    }
+
+    /// 创建 HTTP 配置（带自定义 host）
+    pub fn http_with_host(port: u16, host: impl Into<String>) -> Self {
+        Self::Http {
+            port,
+            host: Some(host.into()),
+        }
+    }
+
+    /// 从环境变量解析传输模式
+    ///
+    /// 支持的环境变量：
+    /// - `MCP_MODE=stdio` → STDIO 模式
+    /// - `MCP_MODE=http` → HTTP 模式（默认端口 3000）
+    /// - `MCP_MODE=http:8080` → HTTP 模式（端口 8080）
+    /// - `MCP_MODE=http:0.0.0.0:8080` → HTTP 模式（绑定所有接口，端口 8080）
+    pub fn from_env() -> Self {
+        std::env::var("MCP_MODE")
+            .ok()
+            .map(|v| Self::parse(&v))
+            .unwrap_or_default()
+    }
+
+    /// 解析配置字符串
+    pub fn parse(s: &str) -> Self {
+        let parts: Vec<&str> = s.split(':').collect();
+        match parts.first().map(|s| s.to_lowercase()).as_deref() {
+            Some("stdio") => Self::Stdio,
+            Some("http") => {
+                // Format: http[:port] or http[:host:port]
+                // When 3 parts: http:host:port (host may contain dots)
+                // When 2 parts: http:port
+                if parts.len() >= 3 {
+                    // http:host:port
+                    let host = parts[1].to_string();
+                    let port = parts
+                        .get(2)
+                        .and_then(|p| p.parse::<u16>().ok())
+                        .unwrap_or(3000);
+                    Self::Http { port, host: Some(host) }
+                } else {
+                    // http or http:port
+                    let port = parts
+                        .get(1)
+                        .and_then(|p| p.parse::<u16>().ok())
+                        .unwrap_or(3000);
+                    Self::Http { port, host: None }
+                }
+            }
+            _ => Self::Stdio,
+        }
+    }
+}
+
+/// MCP Server 配置
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// 传输模式
+    pub transport: McpTransport,
+}
+
+impl McpConfig {
+    /// 创建默认配置（STDIO 模式）
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 创建 STDIO 模式配置
+    pub fn stdio() -> Self {
+        Self {
+            transport: McpTransport::Stdio,
+        }
+    }
+
+    /// 创建 HTTP 模式配置
+    pub fn http(port: u16) -> Self {
+        Self {
+            transport: McpTransport::http(port),
+        }
+    }
+
+    /// 从环境变量读取配置
+    pub fn from_env() -> Self {
+        Self {
+            transport: McpTransport::from_env(),
+        }
+    }
+}
 
 /// UI 命令，由 MCP Server 发送给 UI 线程执行
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,3 +195,47 @@ pub type UICommandSender = mpsc::UnboundedSender<UICommand>;
 
 /// MCP→UI 命令通道接收端类型
 pub type UICommandReceiver = mpsc::UnboundedReceiver<UICommand>;
+
+// ---- Sampling 配置 ----
+
+/// MCP Sampling 配置参数
+///
+/// 控制 Server 向 Client 发起 LLM Sampling 请求时的默认行为，
+/// 包括 max_tokens、temperature 和模型偏好。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SamplingConfig {
+    /// 最大生成 token 数（默认 1024）
+    pub max_tokens: u32,
+    /// 温度参数，0.0~1.0（默认 0.7）
+    pub temperature: f32,
+    /// 首选模型名称（可选）
+    #[serde(default)]
+    pub model_preference: Option<String>,
+}
+
+impl Default for SamplingConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens: 1024,
+            temperature: 0.7,
+            model_preference: None,
+        }
+    }
+}
+
+/// Sampling 请求审计日志记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SamplingAuditEntry {
+    /// 请求时间戳（ISO 8601）
+    pub timestamp: String,
+    /// 发起请求的工具名称
+    pub tool_name: String,
+    /// 输入消息数量
+    pub message_count: usize,
+    /// 使用的 max_tokens
+    pub max_tokens: u32,
+    /// 使用的 temperature
+    pub temperature: Option<f32>,
+    /// 使用的 system_prompt（截断到前 100 字符）
+    pub system_prompt_preview: Option<String>,
+}

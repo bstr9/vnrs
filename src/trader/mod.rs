@@ -56,6 +56,9 @@ pub mod session;
 #[cfg(feature = "sqlite")]
 pub mod sqlite_database;
 
+#[cfg(feature = "lmdb")]
+pub mod lmdb_database;
+
 #[cfg(feature = "alpha")]
 pub mod parquet_database;
 
@@ -80,6 +83,8 @@ pub use converter::{OffsetConverter, PositionHolding};
 pub use database::{BarOverview, BaseDatabase, EventRecord, FileDatabase, MemoryDatabase, TickOverview};
 #[cfg(feature = "sqlite")]
 pub use sqlite_database::SqliteDatabase;
+#[cfg(feature = "lmdb")]
+pub use lmdb_database::LmdbDatabase;
 #[cfg(feature = "alpha")]
 pub use parquet_database::ParquetDatabase;
 pub use data_download::{DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult};

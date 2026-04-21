@@ -14,6 +14,7 @@ use serde::Deserialize;
 use std::sync::{Arc, RwLock};
 
 use super::super::types::{UICommand, UICommandSender, UIState};
+use super::super::server::TradingMcpServer;
 
 // ---- 参数结构体 ----
 
@@ -63,15 +64,16 @@ fn default_level() -> String {
     "info".to_string()
 }
 
-// ---- UITools ----
+// ---- UITools (data holder, no longer has #[tool_router]) ----
 
-/// 前端 UI 操作 MCP Tool 集合
+/// 前端 UI 操作数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
 #[allow(dead_code)]
 pub struct UITools {
     ui_sender: UICommandSender,
     ui_state: Arc<RwLock<UIState>>,
 }
 
+#[allow(dead_code)]
 impl UITools {
     /// 创建 UITools 实例
     pub fn new(ui_sender: UICommandSender, ui_state: Arc<RwLock<UIState>>) -> Self {
@@ -82,8 +84,10 @@ impl UITools {
     }
 }
 
-#[tool_router]
-impl UITools {
+// ---- TradingMcpServer tool router for UI tools ----
+
+#[tool_router(router = ui_router, vis = "pub")]
+impl TradingMcpServer {
     #[tool(description = "Switch to a different trading symbol on the chart")]
     async fn switch_symbol(
         &self,

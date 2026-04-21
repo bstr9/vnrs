@@ -31,11 +31,20 @@ pub mod error;
 pub mod event;
 pub mod trader;
 pub mod rpc;
+#[cfg(feature = "feature-store")]
+pub mod feature;
+
 #[cfg(feature = "alpha")]
 pub mod alpha;
 pub mod gateway;
 pub mod strategy;
 pub mod backtesting;
+
+#[cfg(feature = "model-registry")]
+pub mod model;
+
+#[cfg(feature = "signal")]
+pub mod signal;
 
 #[cfg(feature = "gui")]
 pub mod chart;
@@ -52,6 +61,10 @@ pub use rpc::{client::RpcClient as RpcClient, server::RpcServer as RpcServer};
 pub use alpha::{AlphaLab, AlphaDataset, AlphaModel, AlphaStrategy, Segment, logger as alpha_logger, AlphaBarData};
 pub use strategy::{StrategyEngine, StrategyTemplate, StrategyContext, StrategyType, StrategyState, StrategySetting, StrategyRiskConfig, VolatilityStrategy};
 pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode, DailyResult, BacktestingResult};
+#[cfg(feature = "signal")]
+pub use signal::{SignalBus, Signal, SignalDirection, SignalStrength, SubscriberId, Subscription};
+#[cfg(feature = "model-registry")]
+pub use model::{ModelRegistry, ModelServer, ZmqModelServer, ModelEntry, ModelMetrics, ModelStage, Prediction, HealthStatus};
 #[cfg(feature = "python")]
 pub use python::{Strategy, PythonEngine, PythonEngineBridge, StrategyEngineHandle};
 pub use trader::{
