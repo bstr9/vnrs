@@ -225,10 +225,10 @@ impl DataRecorder {
         });
         
         entry.count += 1;
-        if entry.start.is_none() || tick.datetime < entry.start.unwrap() {
+        if entry.start.is_none() || tick.datetime < entry.start.unwrap_or_default() {
             entry.start = Some(tick.datetime);
         }
-        if entry.end.is_none() || tick.datetime > entry.end.unwrap() {
+        if entry.end.is_none() || tick.datetime > entry.end.unwrap_or_default() {
             entry.end = Some(tick.datetime);
         }
     }
@@ -250,10 +250,10 @@ impl DataRecorder {
         });
         
         entry.count += 1;
-        if entry.start.is_none() || bar.datetime < entry.start.unwrap() {
+        if entry.start.is_none() || bar.datetime < entry.start.unwrap_or_default() {
             entry.start = Some(bar.datetime);
         }
-        if entry.end.is_none() || bar.datetime > entry.end.unwrap() {
+        if entry.end.is_none() || bar.datetime > entry.end.unwrap_or_default() {
             entry.end = Some(bar.datetime);
         }
     }

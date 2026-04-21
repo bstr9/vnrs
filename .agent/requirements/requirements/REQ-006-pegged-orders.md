@@ -1,7 +1,7 @@
 ---
 id: REQ-006
 title: "Pegged 订单支持"
-status: active
+status: completed
 created_at: "2026-04-19T00:00:00"
 updated_at: "2026-04-19T00:00:00"
 priority: P2
