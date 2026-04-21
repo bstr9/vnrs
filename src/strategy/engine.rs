@@ -652,6 +652,7 @@ impl StrategyEngine {
     /// strategy's context exists, allowing Python code to read the same
     /// live data that the StrategyEngine updates.
     #[cfg(feature = "python")]
+    #[allow(clippy::type_complexity)]
     pub fn get_context_caches(
         &self,
         strategy_name: &str,
@@ -701,7 +702,7 @@ impl StrategyEngine {
         // Update symbol-strategy mapping
         let mut map = self.symbol_strategy_map.write().unwrap_or_else(|e| e.into_inner());
         map.entry(vt_symbol.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(strategy_name.to_string());
     }
 
@@ -740,7 +741,7 @@ impl StrategyEngine {
         // Update symbol-strategy mapping
         let mut map = self.symbol_strategy_map.write().unwrap_or_else(|e| e.into_inner());
         map.entry(vt_symbol.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(strategy_name.to_string());
 
         tracing::info!("Strategy {} subscribed to {}", strategy_name, vt_symbol);
@@ -1107,9 +1108,13 @@ impl StrategyEngine {
         interval: Interval,
         days: i64,
     ) -> Result<usize, String> {
-        let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
-        let context = contexts.get(strategy_name)
-            .ok_or_else(|| format!("Context not found for strategy {}", strategy_name))?;
+        // Validate context exists (drop lock before await)
+        {
+            let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+            if !contexts.contains_key(strategy_name) {
+                return Err(format!("Context not found for strategy {}", strategy_name));
+            }
+        }
 
         let parts: Vec<&str> = vt_symbol.split('.').collect();
         if parts.len() != 2 {
@@ -1129,8 +1134,11 @@ impl StrategyEngine {
             match db.load_bar_data(&symbol, exchange, interval, start, end).await {
                 Ok(bars) if !bars.is_empty() => {
                     let count = bars.len();
-                    for bar in &bars {
-                        context.update_bar(bar.clone());
+                    let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+                    if let Some(context) = contexts.get(strategy_name) {
+                        for bar in &bars {
+                            context.update_bar(bar.clone());
+                        }
                     }
                     tracing::info!(
                         "load_bars: {} bars from database for {} ({:?}, {}d)",
@@ -1158,8 +1166,13 @@ impl StrategyEngine {
             match self.main_engine.query_history(req, &gw_name).await {
                 Ok(bars) => {
                     let count = bars.len();
-                    for bar in &bars {
-                        context.update_bar(bar.clone());
+                    {
+                        let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+                        if let Some(context) = contexts.get(strategy_name) {
+                            for bar in &bars {
+                                context.update_bar(bar.clone());
+                            }
+                        }
                     }
 
                     // Cache to database for future loads

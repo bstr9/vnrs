@@ -1075,13 +1075,13 @@ impl PyDepthData {
         // asks: sorted ascending by price (BTreeMap default)
         let ask_prices: Vec<f64> = depth
             .asks
-            .iter()
-            .map(|(price, _)| price.to_f64().unwrap_or(0.0))
+            .keys()
+            .map(|price| price.to_f64().unwrap_or(0.0))
             .collect();
         let ask_volumes: Vec<f64> = depth
             .asks
-            .iter()
-            .map(|(_, vol)| vol.to_f64().unwrap_or(0.0))
+            .values()
+            .map(|vol| vol.to_f64().unwrap_or(0.0))
             .collect();
 
         Self {

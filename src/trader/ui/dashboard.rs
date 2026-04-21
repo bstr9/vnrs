@@ -108,19 +108,15 @@ pub struct RiskStatus {
     pub liquidation_prices: Vec<(String, f64)>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum RiskLevel {
+    #[default]
     Safe,    // < 50%
     Normal,  // 50-70%
     Warning, // 70-85%
     Danger,  // > 85%
 }
 
-impl Default for RiskLevel {
-    fn default() -> Self {
-        RiskLevel::Safe
-    }
-}
 
 #[derive(Default, Clone)]
 pub struct PositionSummary {
@@ -139,17 +135,12 @@ pub struct StrategySummary {
     pub today_pnl: f64,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum StrategyStateDisplay {
     Running,
     Inited,
+    #[default]
     Stopped,
-}
-
-impl Default for StrategyStateDisplay {
-    fn default() -> Self {
-        StrategyStateDisplay::Stopped
-    }
 }
 
 #[derive(Default, Clone)]
@@ -517,7 +508,7 @@ impl DashboardPanel {
 
                 // Available / Margin bar
                 let total = self.account_summary.total_balance.max(1.0);
-                let available_ratio = (self.account_summary.available / total).min(1.0).max(0.0);
+                let available_ratio = (self.account_summary.available / total).clamp(0.0, 1.0);
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("可用").size(11.0).color(COLOR_TEXT_SECONDARY));
@@ -797,7 +788,7 @@ impl DashboardPanel {
                 );
 
                 // Current ratio bar
-                let ratio_clamped = ratio.min(1.0).max(0.0);
+                let ratio_clamped = ratio.clamp(0.0, 1.0);
                 let ratio_width = bar_width * ratio_clamped as f32;
                 if ratio_width > 0.0 {
                     let ratio_rect =
@@ -1147,7 +1138,7 @@ impl DashboardPanel {
                 let filtered_curve: Vec<&PnlPoint> = self
                     .pnl_curve
                     .iter()
-                    .filter(|p| cutoff.map_or(true, |c| p.time >= c))
+                    .filter(|p| cutoff.is_none_or(|c| p.time >= c))
                     .collect();
 
                 if filtered_curve.len() >= 2 {

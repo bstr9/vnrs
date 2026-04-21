@@ -6311,6 +6311,7 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
+ "crc32fast",
  "dirs",
  "eframe",
  "egui",

@@ -74,7 +74,7 @@ impl TestClock {
     /// Advance time by a duration.
     pub fn advance(&self, duration: Duration) {
         let mut time = self.time.write().unwrap_or_else(|e| e.into_inner());
-        *time = *time + duration;
+        *time += duration;
     }
 
     /// Set the time directly.

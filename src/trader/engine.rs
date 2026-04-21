@@ -1320,7 +1320,7 @@ impl MainEngine {
             .filter(|o| {
                 let o_vt_symbol = format!("{}.{}", o.symbol, o.exchange.value());
                 o_vt_symbol == vt_symbol
-                    && o.direction.map_or(false, |d| d != req.direction)
+                    && o.direction.is_some_and(|d| d != req.direction)
                     && o.is_active()
             })
             .collect();

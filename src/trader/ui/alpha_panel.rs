@@ -499,7 +499,7 @@ impl AlphaPanel {
                 if self.factor_state.analysis_result.is_some() {
                     ui.colored_label(
                         Color32::GREEN,
-                        &self.factor_state.analysis_result.as_ref().map_or_else(
+                        self.factor_state.analysis_result.as_ref().map_or_else(
                             || "".to_string(),
                             |r| r.factor_name.clone(),
                         ),

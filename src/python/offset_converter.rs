@@ -150,6 +150,7 @@ impl PyOffsetConverter {
     /// conversion using live contract data without duplicating state.
     pub fn from_main_engine(main_engine: &Arc<MainEngine>) -> PyResult<Self> {
         let oms = main_engine.oms().clone();
+        #[allow(clippy::type_complexity)]
         let get_contract: Box<dyn Fn(&str) -> Option<ContractData> + Send + Sync> =
             Box::new(move |vt_symbol: &str| oms.get_contract(vt_symbol));
 
@@ -173,6 +174,7 @@ impl PyOffsetConverter {
             Arc::new(Mutex::new(HashMap::new()));
 
         let contracts_clone = contracts.clone();
+        #[allow(clippy::type_complexity)]
         let get_contract: Box<dyn Fn(&str) -> Option<ContractData> + Send + Sync> =
             Box::new(move |vt_symbol: &str| {
                 contracts_clone

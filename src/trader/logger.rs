@@ -41,7 +41,7 @@ pub fn level_to_string(level: i32) -> &'static str {
 
 /// Check if JSON log format is enabled via the `VNRS_LOG_FORMAT` environment variable.
 fn is_json_format() -> bool {
-    std::env::var("VNRS_LOG_FORMAT").map_or(false, |v| v.eq_ignore_ascii_case("json"))
+    std::env::var("VNRS_LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"))
 }
 
 /// Initialize the logger with optional JSON format.

@@ -350,7 +350,7 @@ impl AdvancedOrdersPanel {
                         for order in &self.stop_orders_cache {
                             body.row(18.0, |mut row| {
                                 row.col(|ui| { ui.label(format!("{}", order.id)); });
-                                row.col(|ui| { ui.label(&order.vt_symbol()); });
+                                row.col(|ui| { ui.label(order.vt_symbol()); });
                                 row.col(|ui| {
                                     let color = if order.direction == Direction::Long {
                                         COLOR_LONG
@@ -372,10 +372,10 @@ impl AdvancedOrdersPanel {
                                     ui.colored_label(color, text);
                                 });
                                 row.col(|ui| {
-                                    if order.is_active() {
-                                        if ui.button("撤").clicked() {
+                                    if order.is_active()
+                                        && ui.button("撤").clicked()
+                                    {
                                             self.pending_cancel_stop = Some(order.id);
-                                        }
                                     }
                                 });
                             });
@@ -559,7 +559,7 @@ impl AdvancedOrdersPanel {
                         for order in &self.emul_orders_cache {
                             body.row(18.0, |mut row| {
                                 row.col(|ui| { ui.label(format!("{}", order.id)); });
-                                row.col(|ui| { ui.label(&order.vt_symbol()); });
+                                row.col(|ui| { ui.label(order.vt_symbol()); });
                                 row.col(|ui| {
                                     let label = emul_type_label(&order.order_type);
                                     ui.label(label);
@@ -597,10 +597,10 @@ impl AdvancedOrdersPanel {
                                     ui.colored_label(color, text);
                                 });
                                 row.col(|ui| {
-                                    if order.is_active() {
-                                        if ui.button("撤").clicked() {
+                                    if order.is_active()
+                                        && ui.button("撤").clicked()
+                                    {
                                             self.pending_cancel_emul = Some(order.id);
-                                        }
                                     }
                                 });
                             });

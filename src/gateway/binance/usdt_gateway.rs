@@ -792,7 +792,7 @@ impl BaseGateway for BinanceUsdtGateway {
                         warn!("{}: event_sender为空，跳过tick数据发送", gateway_name);
                     }
                     // Emit depth event from tick's 5-level book
-                    let depth = DepthData::from_tick(&tick);
+                    let depth = DepthData::from_tick(tick);
                     if !depth.bids.is_empty() || !depth.asks.is_empty() {
                         if let Some(sender) = event_sender.read().await.as_ref() {
                             sender.on_depth(depth);

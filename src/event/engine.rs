@@ -3,10 +3,13 @@
 //! but implemented in Rust with thread-safe event handling.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc as sync_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+use super::journal::EventJournal;
 
 /// Timer event type constant
 pub const EVENT_TIMER: &str = "eTimer";
@@ -52,6 +55,8 @@ pub struct EventEngine {
     processing_handle: Option<thread::JoinHandle<()>>,
     /// Timer interval in seconds
     interval: u64,
+    /// Optional event journal for deterministic replay
+    journal: Arc<Mutex<Option<EventJournal>>>,
 }
 
 impl EventEngine {
@@ -68,6 +73,7 @@ impl EventEngine {
             timer_handle: None,
             processing_handle: None,
             interval,
+            journal: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -155,14 +161,57 @@ impl EventEngine {
         }
     }
 
-    /// Put an event into the queue
+    /// Put an event into the queue.
+    /// If journaling is enabled, the event is recorded before dispatch.
     pub fn put(&self, event: Event) {
+        // Journal the event BEFORE it enters the processing pipeline
+        if let Ok(mut journal_guard) = self.journal.lock() {
+            if let Some(ref mut journal) = *journal_guard {
+                let _ = journal.append(&event);
+            }
+        }
+
         let _ = self.sender.send(event);
     }
 
     /// Get a clone of the sender to allow external event posting
     pub fn sender(&self) -> sync_mpsc::Sender<Event> {
         self.sender.clone()
+    }
+
+    /// Enable event journaling to the specified path.
+    ///
+    /// All subsequent events passed through `put()` will be recorded
+    /// to the journal file before being dispatched to handlers.
+    pub fn enable_journal(&mut self, path: PathBuf) -> Result<(), String> {
+        let journal = EventJournal::open(path)?;
+        let mut journal_guard = self
+            .journal
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *journal_guard = Some(journal);
+        Ok(())
+    }
+
+    /// Disable event journaling if currently active.
+    pub fn disable_journal(&mut self) {
+        let mut journal_guard = self
+            .journal
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *journal_guard = None;
+    }
+
+    /// Replay events from a journal file into this engine.
+    ///
+    /// Events are replayed in strict timestamp-then-sequence order.
+    /// Returns the number of events replayed.
+    ///
+    /// Note: The engine should be started before calling this method
+    /// so that replayed events are actually processed by handlers.
+    pub fn replay_from_journal(&mut self, path: PathBuf) -> Result<usize, String> {
+        let journal = EventJournal::open(path)?;
+        journal.replay(self)
     }
 
     /// Register a handler for a specific event type
@@ -445,5 +494,82 @@ mod tests {
         let sender = engine.sender();
         let event = Event::new("test_event".to_string(), None);
         let _ = sender.send(event);
+    }
+
+    #[test]
+    fn test_enable_journal() {
+        let dir = std::env::temp_dir().join("vnrs_journal_tests");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test_enable_journal.bin");
+        let _ = std::fs::remove_file(&path);
+
+        let mut engine = EventEngine::new(1);
+        let result = engine.enable_journal(path.clone());
+        assert!(result.is_ok());
+
+        engine.put(Event::new("journal_test".to_string(), None));
+
+        // Verify the journal file has content
+        let data = std::fs::read(&path).unwrap();
+        assert!(!data.is_empty(), "Journal file should have data after put()");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_replay_from_journal() {
+        let dir = std::env::temp_dir().join("vnrs_journal_tests");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test_replay_from_journal.bin");
+        let _ = std::fs::remove_file(&path);
+
+        // Phase 1: Write events to journal
+        {
+            let mut engine = EventEngine::new(1);
+            engine
+                .enable_journal(path.clone())
+                .unwrap();
+            engine.put(Event::new("evt_a".to_string(), None));
+            engine.put(Event::new("evt_b".to_string(), None));
+            engine.put(Event::new("evt_c".to_string(), None));
+        }
+
+        // Phase 2: Replay into a new engine
+        let mut engine = EventEngine::new(1);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = Arc::clone(&counter);
+        engine.register(
+            "evt_a",
+            Arc::new(move |_| {
+                c.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        let c2 = Arc::clone(&counter);
+        engine.register(
+            "evt_b",
+            Arc::new(move |_| {
+                c2.fetch_add(10, Ordering::SeqCst);
+            }),
+        );
+        let c3 = Arc::clone(&counter);
+        engine.register(
+            "evt_c",
+            Arc::new(move |_| {
+                c3.fetch_add(100, Ordering::SeqCst);
+            }),
+        );
+
+        engine.start();
+
+        let count = engine.replay_from_journal(path.clone()).unwrap();
+        assert_eq!(count, 3);
+
+        std::thread::sleep(Duration::from_millis(200));
+        engine.stop();
+
+        // 1 (evt_a) + 10 (evt_b) + 100 (evt_c) = 111
+        assert_eq!(counter.load(Ordering::SeqCst), 111);
+
+        let _ = std::fs::remove_file(&path);
     }
 }

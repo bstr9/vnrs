@@ -90,7 +90,7 @@ pub struct DataRecorder {
 /// Internal events for the recorder
 #[allow(dead_code)]
 pub enum RecorderEvent {
-    Tick(TickData),
+    Tick(Box<TickData>),
     Bar(BarData),
     Flush,
     Stop,
@@ -231,6 +231,9 @@ impl DataRecorder {
         if entry.end.is_none() || tick.datetime > entry.end.unwrap_or_default() {
             entry.end = Some(tick.datetime);
         }
+        if entry.end.is_none() || tick.datetime > entry.end.unwrap_or_default() {
+            entry.end = Some(tick.datetime);
+        }
     }
 
     /// Update bar recording status
@@ -252,6 +255,9 @@ impl DataRecorder {
         entry.count += 1;
         if entry.start.is_none() || bar.datetime < entry.start.unwrap_or_default() {
             entry.start = Some(bar.datetime);
+        }
+        if entry.end.is_none() || bar.datetime > entry.end.unwrap_or_default() {
+            entry.end = Some(bar.datetime);
         }
         if entry.end.is_none() || bar.datetime > entry.end.unwrap_or_default() {
             entry.end = Some(bar.datetime);
@@ -398,7 +404,7 @@ impl BaseEngine for DataRecorder {
         // The async event loop will pick them up and call on_tick/on_bar
         match event {
             GatewayEvent::Tick(tick) => {
-                let _ = self.event_tx.send(RecorderEvent::Tick(tick.clone()));
+                let _ = self.event_tx.send(RecorderEvent::Tick(Box::new(tick.clone())));
             }
             GatewayEvent::Bar(bar) => {
                 let _ = self.event_tx.send(RecorderEvent::Bar(bar.clone()));

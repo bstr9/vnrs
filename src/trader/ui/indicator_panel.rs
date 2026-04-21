@@ -94,8 +94,7 @@ impl Default for IndicatorConfigEntry {
 impl IndicatorConfigEntry {
     /// Create a new config entry for a specific indicator type with defaults
     pub fn new(indicator_type: IndicatorType) -> Self {
-        let mut config = Self::default();
-        config.indicator_type = indicator_type;
+        let mut config = Self { indicator_type, ..Self::default() };
         config.apply_type_defaults();
         config
     }

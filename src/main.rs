@@ -490,9 +490,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(5555);
         
-        let mut server_config = trade_engine::rpc::server::ServerConfig::default();
-        server_config.rep_address = format!("tcp://*:{}", rpc_port);
-        server_config.pub_address = format!("tcp://*:{}", rpc_port + 1);
+        let server_config = trade_engine::rpc::server::ServerConfig {
+            rep_address: format!("tcp://*:{}", rpc_port),
+            pub_address: format!("tcp://*:{}", rpc_port + 1),
+            ..Default::default()
+        };
         
         let rpc_server = Arc::new(RpcServer::with_config(server_config));
         

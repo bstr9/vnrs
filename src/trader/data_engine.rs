@@ -243,7 +243,7 @@ impl DataEngine {
             let mut subscriptions = self.subscriptions.write().unwrap_or_else(|e| e.into_inner());
             subscriptions
                 .entry(key.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(subscriber.to_string());
         }
 

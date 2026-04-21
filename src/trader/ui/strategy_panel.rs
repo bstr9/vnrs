@@ -156,8 +156,6 @@ impl StrategyPanel {
                 let mut rows: Vec<&StrategyRow> = self.strategies.iter().collect();
                 self.sort_rows(&mut rows);
 
-                let selection_bg = selection_bg;
-
                 for row in &rows {
                     let is_selected = self.selected.as_deref() == Some(&row.name);
                     body.row(18.0, |mut table_row| {

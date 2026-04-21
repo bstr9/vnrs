@@ -385,6 +385,7 @@ impl Strategy {
     ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None
     ///     order_type: "stop" (market) or "stop_limit" (limit)
     #[pyo3(signature = (vt_symbol, direction, price, volume, stop_price, offset=None, order_type="stop"))]
+    #[allow(clippy::too_many_arguments)]
     fn send_stop_order(
         &self,
         vt_symbol: &str,

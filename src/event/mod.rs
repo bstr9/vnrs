@@ -2,5 +2,7 @@
 //! Based on the VeighNa framework's event system.
 
 mod engine;
+mod journal;
 
 pub use engine::{Event, EventEngine, EVENT_TIMER};
+pub use journal::{EntryOrd, EventJournal, JournalEntry};

@@ -187,6 +187,7 @@ fn append_backtest_log(
 // ============================================================================
 
 /// Build a strategy setting HashMap from individual parameters.
+#[allow(clippy::too_many_arguments)]
 fn make_setting(
     atr_length: usize,
     boll_length: usize,

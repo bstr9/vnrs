@@ -35,6 +35,9 @@ ta = "0.5"
 # Error handling
 thiserror = "2"
 
+# CRC32 checksums
+crc32fast = "1.4"
+
 # Utilities
 dirs = "6.0.0"
 rayon = "1.8"

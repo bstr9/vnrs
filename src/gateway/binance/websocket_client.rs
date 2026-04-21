@@ -242,6 +242,7 @@ impl InnerProxy {
 }
 
 /// WebSocket client for Binance
+#[allow(clippy::type_complexity)]
 pub struct BinanceWebSocketClient {
     /// WebSocket URL
     url: Arc<RwLock<String>>,
@@ -746,6 +747,7 @@ impl Default for BinanceWebSocketClient {
 /// manager.enable_auto_reconnect().await;
 /// // Now if the WebSocket disconnects unexpectedly, it will auto-reconnect
 /// ```
+#[allow(clippy::type_complexity)]
 pub struct ConnectionManager {
     /// The WebSocket client being managed
     ws: Arc<BinanceWebSocketClient>,
@@ -908,7 +910,7 @@ mod tests {
 
     #[test]
     fn test_calculate_backoff_delay_increasing() {
-        let d1 = BinanceWebSocketClient::calculate_backoff_delay(1);
+        let _d1 = BinanceWebSocketClient::calculate_backoff_delay(1);
         let d2 = BinanceWebSocketClient::calculate_backoff_delay(3);
         // d2 should generally be longer than d1 (ignoring jitter edge cases)
         // Just check d2 is at least 2 seconds (2^3=8s base, minus max jitter)

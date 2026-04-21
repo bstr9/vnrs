@@ -238,8 +238,8 @@ pub fn calculate_statistics(
         let variance: f64 = negative_returns
             .iter()
             .map(|r| {
-                let diff = r * r;  // Square of negative returns
-                diff
+                // Square of negative returns
+                r * r
             })
             .sum::<f64>()
             / negative_returns.len() as f64;

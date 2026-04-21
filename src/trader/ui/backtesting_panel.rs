@@ -15,9 +15,9 @@ use crate::backtesting::{
 use crate::chart::TradeOverlay;
 use crate::trader::{Exchange, Interval};
 
-/// Fill model type selector for the UI
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FillModelType {
+    #[default]
     BestPrice,
     Ideal,
     TwoTier,
@@ -66,12 +66,6 @@ impl FillModelType {
             FillModelType::SizeAware => "取决于成交量占比",
             FillModelType::Probabilistic => "按设定概率",
         }
-    }
-}
-
-impl Default for FillModelType {
-    fn default() -> Self {
-        FillModelType::BestPrice
     }
 }
 
@@ -1165,7 +1159,7 @@ impl BacktestingPanel {
                         dd_painter.text(
                             Pos2::new(chart_rect.left(), chart_rect.top()),
                             egui::Align2::LEFT_TOP,
-                            format!("0.00%"),
+                            "0.00%".to_string(),
                             egui::FontId::proportional(10.0),
                             Color32::from_rgb(160, 160, 160),
                         );

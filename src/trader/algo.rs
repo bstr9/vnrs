@@ -266,6 +266,7 @@ impl AlgoEngine {
     }
 
     /// Start a TWAP algo order
+    #[allow(clippy::too_many_arguments)]
     pub fn start_twap(
         &self,
         symbol: &str,
@@ -321,6 +322,7 @@ impl AlgoEngine {
     }
 
     /// Start a VWAP algo order
+    #[allow(clippy::too_many_arguments)]
     pub fn start_vwap(
         &self,
         symbol: &str,

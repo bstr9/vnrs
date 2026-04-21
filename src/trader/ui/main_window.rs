@@ -340,14 +340,14 @@ impl MainWindow {
             
             // Refresh advanced orders panel data
             self.advanced_orders_panel.refresh_data(
-                Some(&*engine.stop_order_engine()),
-                Some(&*engine.order_emulator()),
+                Some(engine.stop_order_engine()),
+                Some(engine.order_emulator()),
             );
         }
         
         // Update dashboard panel data (separate borrow scope - clone Arc to avoid borrow conflict)
         if let Some(engine_arc) = self.main_engine.clone() {
-            self.update_dashboard_data(&*engine_arc);
+            self.update_dashboard_data(&engine_arc);
         }
         
         // Sync alert history from backend ToastManager
@@ -560,12 +560,12 @@ impl MainWindow {
         // Count today's trades for win/loss statistics
         let today_start = NaiveDateTime::new(
             Utc::now().date_naive(),
-            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+            NaiveTime::from_hms_opt(0, 0, 0).unwrap_or_default(),
         );
         let today_start_utc = Utc.from_utc_datetime(&today_start);
         let all_trades = engine.get_all_trades();
         let today_trades: Vec<_> = all_trades.iter()
-            .filter(|t| t.datetime.map_or(false, |dt| dt >= today_start_utc))
+            .filter(|t| t.datetime.is_some_and(|dt| dt >= today_start_utc))
             .collect();
         let trade_count = today_trades.len();
         dlog!(
@@ -1874,7 +1874,7 @@ impl MainWindow {
     fn apply_indicators_to_charts(&mut self, configs: &[super::indicator_panel::IndicatorConfigEntry]) {
         use crate::chart::*;
         
-        for (_vt_symbol, chart) in &mut self.charts {
+        for chart in self.charts.values_mut() {
             chart.clear_indicators();
             
             for config in configs {

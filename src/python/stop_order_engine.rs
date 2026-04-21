@@ -260,7 +260,7 @@ impl PyStopOrderEngine {
     fn cancel_stop_order(&self, stop_orderid: u64) -> PyResult<()> {
         self.inner
             .cancel_stop_order(stop_orderid)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Cancel all stop orders for a specific symbol.

@@ -15,9 +15,8 @@ use std::collections::HashMap;
 use crate::strategy::base::{StrategySetting, StrategyState, StrategyType};
 use crate::strategy::template::{BaseStrategy, StrategyContext, StrategyTemplate};
 use crate::trader::{
-    BarData, Direction, OrderData, OrderRequest, TickData, TradeData,
+    ArrayManager, BarData, Direction, OrderData, OrderRequest, TickData, TradeData,
 };
-use crate::trader::utility::ArrayManager;
 
 /// Volatility breakout strategy with ATR-based filter and dynamic take-profit.
 ///
@@ -319,7 +318,6 @@ impl StrategyTemplate for VolatilityStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trader::utility::ArrayManager;
     use crate::trader::{BarData, Exchange, Interval};
     use chrono::Utc;
 

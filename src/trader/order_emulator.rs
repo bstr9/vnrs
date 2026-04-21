@@ -254,6 +254,7 @@ impl EmulatedOrderRequest {
     }
 
     /// Create a stop-limit order
+    #[allow(clippy::too_many_arguments)]
     pub fn stop_limit(
         symbol: &str, exchange: Exchange, direction: Direction, offset: Offset,
         volume: f64, trigger_price: f64, limit_price: f64, gateway_name: &str,
@@ -304,6 +305,7 @@ impl EmulatedOrderRequest {
     }
 
     /// Create a limit-if-touched order
+    #[allow(clippy::too_many_arguments)]
     pub fn limit_if_touched(
         symbol: &str, exchange: Exchange, direction: Direction, offset: Offset,
         volume: f64, trigger_price: f64, limit_price: f64, gateway_name: &str,
@@ -329,6 +331,7 @@ impl EmulatedOrderRequest {
     }
 
     /// Create an iceberg order
+    #[allow(clippy::too_many_arguments)]
     pub fn iceberg(
         symbol: &str, exchange: Exchange, direction: Direction, offset: Offset,
         volume: f64, visible_volume: f64, price: f64, gateway_name: &str,
@@ -1041,7 +1044,7 @@ impl OrderEmulator {
             symbol: order.symbol.clone(),
             exchange: order.exchange,
             direction: order.direction,
-            order_type: order_type,
+            order_type,
             volume: order.volume,
             price,
             offset: order.offset,

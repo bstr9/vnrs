@@ -288,7 +288,7 @@ impl PyOrderEmulator {
         self.inner
             .add_order(&req)
             .map(|id| id.to_string())
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Add a trailing stop order with absolute price distance.
@@ -325,7 +325,7 @@ impl PyOrderEmulator {
         self.inner
             .add_order(&req)
             .map(|id| id.to_string())
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Add a stop-limit order.
@@ -345,6 +345,7 @@ impl PyOrderEmulator {
     /// Returns:
     ///     The emulated order ID as a string
     #[pyo3(signature = (vt_symbol, direction, volume, stop_price, limit_price, gateway_name, offset="NONE"))]
+    #[allow(clippy::too_many_arguments)]
     fn add_stop_limit(
         &self,
         vt_symbol: &str,
@@ -372,7 +373,7 @@ impl PyOrderEmulator {
         self.inner
             .add_order(&req)
             .map(|id| id.to_string())
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Add an iceberg order.
@@ -392,6 +393,7 @@ impl PyOrderEmulator {
     /// Returns:
     ///     The emulated order ID as a string
     #[pyo3(signature = (vt_symbol, direction, volume, display_volume, price, gateway_name, offset="NONE"))]
+    #[allow(clippy::too_many_arguments)]
     fn add_iceberg(
         &self,
         vt_symbol: &str,
@@ -419,7 +421,7 @@ impl PyOrderEmulator {
         self.inner
             .add_order(&req)
             .map(|id| id.to_string())
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Add a Market-If-Touched (MIT) order.
@@ -457,7 +459,7 @@ impl PyOrderEmulator {
         self.inner
             .add_order(&req)
             .map(|id| id.to_string())
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Add a Limit-If-Touched (LIT) order.
@@ -477,6 +479,7 @@ impl PyOrderEmulator {
     /// Returns:
     ///     The emulated order ID as a string
     #[pyo3(signature = (vt_symbol, direction, volume, touch_price, limit_price, gateway_name, offset="NONE"))]
+    #[allow(clippy::too_many_arguments)]
     fn add_limit_if_touched(
         &self,
         vt_symbol: &str,
@@ -504,7 +507,7 @@ impl PyOrderEmulator {
         self.inner
             .add_order(&req)
             .map(|id| id.to_string())
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Cancel an emulated order by ID.
@@ -525,7 +528,7 @@ impl PyOrderEmulator {
             })?;
         self.inner
             .cancel_order(id)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Cancel all emulated orders for a specific symbol.

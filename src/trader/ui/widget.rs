@@ -131,7 +131,7 @@ fn format_time(dt: &DateTime<Utc>) -> String {
 pub fn format_price(price: f64, pricetick: Option<f64>) -> String {
     let decimals = pricetick
         .filter(|&p| p > 0.0)
-        .map(|p| (-p.log10().ceil() as usize).max(0).min(8))
+        .map(|p| (-p.log10().ceil() as usize).clamp(0, 8))
         .unwrap_or(4);
     format!("{:.1$}", price, decimals)
 }

@@ -311,6 +311,12 @@ impl SqliteDatabase {
             [],
         ).map_err(|e| format!("Failed to create dbtickdata table: {}", e))?;
 
+        // Create index for faster tick queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tick_datetime ON dbtickdata(symbol, exchange, datetime)",
+            [],
+        ).map_err(|e| format!("Failed to create tick datetime index: {}", e))?;
+
         // Order data table
         conn.execute(
             r#"

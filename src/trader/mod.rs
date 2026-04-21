@@ -84,7 +84,7 @@ pub use sqlite_database::SqliteDatabase;
 pub use parquet_database::ParquetDatabase;
 pub use data_download::{DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult};
 pub use data_engine::{DataEngine, TickBarAggregator, DefaultBarAggregator};
-pub use datafeed::{BaseDatafeed, EmptyDatafeed};
+pub use datafeed::{BaseDatafeed, BinanceDatafeed, EmptyDatafeed};
 pub use engine::{BaseEngine, LogEngine, MainEngine, OmsEngine};
 pub use event::*;
 pub use gateway::{BaseGateway, GatewayEvent, GatewayEventSender, GatewaySettings, GatewaySettingValue, TimerFire};

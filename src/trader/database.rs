@@ -386,7 +386,7 @@ impl BaseDatabase for MemoryDatabase {
     async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
         let data = self.orders.read().map_err(|e| e.to_string())?;
         let result: Vec<OrderData> = data.iter()
-            .filter(|o| gateway_name.map_or(true, |gw| o.gateway_name == gw))
+            .filter(|o| gateway_name.is_none_or(|gw| o.gateway_name == gw))
             .cloned()
             .collect();
         Ok(result)
@@ -395,7 +395,7 @@ impl BaseDatabase for MemoryDatabase {
     async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
         let data = self.trades.read().map_err(|e| e.to_string())?;
         let result: Vec<TradeData> = data.iter()
-            .filter(|t| gateway_name.map_or(true, |gw| t.gateway_name == gw))
+            .filter(|t| gateway_name.is_none_or(|gw| t.gateway_name == gw))
             .cloned()
             .collect();
         Ok(result)
@@ -404,7 +404,7 @@ impl BaseDatabase for MemoryDatabase {
     async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
         let data = self.positions.read().map_err(|e| e.to_string())?;
         let result: Vec<PositionData> = data.iter()
-            .filter(|p| gateway_name.map_or(true, |gw| p.gateway_name == gw))
+            .filter(|p| gateway_name.is_none_or(|gw| p.gateway_name == gw))
             .cloned()
             .collect();
         Ok(result)

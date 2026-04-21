@@ -1516,7 +1516,7 @@ impl ChartWidget {
                                 }
                                 LineStyle::Dashed => {
                                     LineStyle::draw_dashed_line(
-                                        &painter,
+                                        painter,
                                         &segment,
                                         config.width,
                                         config.color,
@@ -1524,7 +1524,7 @@ impl ChartWidget {
                                 }
                                 LineStyle::Dotted => {
                                     LineStyle::draw_dotted_line(
-                                        &painter,
+                                        painter,
                                         &segment,
                                         config.width,
                                         config.color,

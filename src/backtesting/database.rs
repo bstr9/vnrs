@@ -1,11 +1,16 @@
 //! Database integration for historical data loading
 //! 
-//! Loads historical bar and tick data from PostgreSQL database
+//! Loads historical bar and tick data from database backends.
+//! Supports PostgreSQL (via `database` feature) and SQLite (via `sqlite` feature).
 
 use chrono::{DateTime, Utc};
 #[cfg(feature = "database")]
 use chrono::NaiveDateTime;
+#[cfg(feature = "sqlite")]
+use std::sync::Arc;
 use crate::trader::{BarData, TickData, Exchange, Interval};
+#[cfg(feature = "sqlite")]
+use crate::trader::database::BaseDatabase;
 
 #[cfg(feature = "database")]
 use sqlx::{PgPool, Row};
@@ -14,6 +19,8 @@ use sqlx::{PgPool, Row};
 pub struct DatabaseLoader {
     #[cfg(feature = "database")]
     pool: Option<PgPool>,
+    #[cfg(feature = "sqlite")]
+    sqlite_db: Option<Arc<dyn BaseDatabase>>,
 }
 
 impl Default for DatabaseLoader {
@@ -28,10 +35,12 @@ impl DatabaseLoader {
         Self {
             #[cfg(feature = "database")]
             pool: None,
+            #[cfg(feature = "sqlite")]
+            sqlite_db: None,
         }
     }
 
-    /// Connect to database
+    /// Connect to PostgreSQL database
     #[cfg(feature = "database")]
     pub async fn connect(&mut self, database_url: &str) -> Result<(), String> {
         match PgPool::connect(database_url).await {
@@ -48,9 +57,69 @@ impl DatabaseLoader {
         Err("数据库功能未启用，请使用 --features database 编译".to_string())
     }
 
+    /// Set the SQLite database for loading data
+    ///
+    /// Only available when the `sqlite` feature is enabled.
+    #[cfg(feature = "sqlite")]
+    pub fn set_sqlite_database(&mut self, db: Arc<dyn BaseDatabase>) {
+        self.sqlite_db = Some(db);
+    }
+
     /// Load bar data from database
-    #[cfg(feature = "database")]
+    ///
+    /// Tries SQLite database first (if configured), then PostgreSQL.
+    #[cfg(feature = "sqlite")]
     pub async fn load_bar_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        interval: Interval,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<BarData>, String> {
+        // Try SQLite first
+        if let Some(db) = &self.sqlite_db {
+            let bars = db.load_bar_data(symbol, exchange, interval, start, end).await?;
+            if !bars.is_empty() {
+                return Ok(bars);
+            }
+            return Err(format!("SQLite数据库中无Bar数据: {} {:?}", symbol, interval));
+        }
+
+        // Fall through to PostgreSQL if available
+        #[cfg(feature = "database")]
+        {
+            self.load_bar_data_postgres(symbol, exchange, interval, start, end).await
+        }
+        #[cfg(not(feature = "database"))]
+        {
+            Err("数据库功能未启用，请配置SQLite或使用 --features database 编译".to_string())
+        }
+    }
+
+    #[cfg(not(feature = "sqlite"))]
+    pub async fn load_bar_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        interval: Interval,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<BarData>, String> {
+        #[cfg(feature = "database")]
+        {
+            self.load_bar_data_postgres(symbol, exchange, interval, start, end).await
+        }
+        #[cfg(not(feature = "database"))]
+        {
+            let _ = (symbol, exchange, interval, start, end);
+            Err("数据库功能未启用".to_string())
+        }
+    }
+
+    /// Load bar data from PostgreSQL (internal method)
+    #[cfg(feature = "database")]
+    async fn load_bar_data_postgres(
         &self,
         symbol: &str,
         exchange: Exchange,
@@ -122,21 +191,59 @@ impl DatabaseLoader {
         Ok(bars)
     }
 
-    #[cfg(not(feature = "database"))]
-    pub async fn load_bar_data(
+    /// Load tick data from database
+    ///
+    /// Tries SQLite database first (if configured), then PostgreSQL.
+    #[cfg(feature = "sqlite")]
+    pub async fn load_tick_data(
         &self,
-        _symbol: &str,
-        _exchange: Exchange,
-        _interval: Interval,
-        _start: DateTime<Utc>,
-        _end: DateTime<Utc>,
-    ) -> Result<Vec<BarData>, String> {
-        Err("数据库功能未启用".to_string())
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<TickData>, String> {
+        // Try SQLite first
+        if let Some(db) = &self.sqlite_db {
+            let ticks = db.load_tick_data(symbol, exchange, start, end).await?;
+            if !ticks.is_empty() {
+                return Ok(ticks);
+            }
+            return Err(format!("SQLite数据库中无Tick数据: {}", symbol));
+        }
+
+        // Fall through to PostgreSQL if available
+        #[cfg(feature = "database")]
+        {
+            self.load_tick_data_postgres(symbol, exchange, start, end).await
+        }
+        #[cfg(not(feature = "database"))]
+        {
+            Err("数据库功能未启用，请配置SQLite或使用 --features database 编译".to_string())
+        }
     }
 
-    /// Load tick data from database
-    #[cfg(feature = "database")]
+    #[cfg(not(feature = "sqlite"))]
     pub async fn load_tick_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<TickData>, String> {
+        #[cfg(feature = "database")]
+        {
+            self.load_tick_data_postgres(symbol, exchange, start, end).await
+        }
+        #[cfg(not(feature = "database"))]
+        {
+            let _ = (symbol, exchange, start, end);
+            Err("数据库功能未启用".to_string())
+        }
+    }
+
+    /// Load tick data from PostgreSQL (internal method)
+    #[cfg(feature = "database")]
+    async fn load_tick_data_postgres(
         &self,
         symbol: &str,
         exchange: Exchange,
@@ -226,17 +333,6 @@ impl DatabaseLoader {
 
         Ok(ticks)
     }
-
-    #[cfg(not(feature = "database"))]
-    pub async fn load_tick_data(
-        &self,
-        _symbol: &str,
-        _exchange: Exchange,
-        _start: DateTime<Utc>,
-        _end: DateTime<Utc>,
-    ) -> Result<Vec<TickData>, String> {
-        Err("数据库功能未启用".to_string())
-    }
 }
 
 #[cfg(test)]
@@ -291,5 +387,115 @@ mod tests {
         ).await;
         assert!(result.is_err());
         assert!(result.expect_err("should be error").contains("数据库功能未启用"));
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_database_loader_sqlite_tick_data() {
+        use crate::trader::SqliteDatabase;
+
+        let sqlite_db = SqliteDatabase::new_in_memory().expect("Failed to create SQLite database");
+        let db = Arc::new(sqlite_db) as Arc<dyn crate::trader::database::BaseDatabase>;
+
+        let mut loader = DatabaseLoader::new();
+        loader.set_sqlite_database(db.clone());
+
+        // Save tick data
+        let now = Utc::now();
+        let tick = TickData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: now,
+            last_price: 50000.0,
+            last_volume: 1.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            bid_price_1: 49999.0,
+            bid_volume_1: 0.5,
+            ask_price_1: 50001.0,
+            ask_volume_1: 0.5,
+            ..TickData::new("BINANCE_SPOT".to_string(), "BTCUSDT".to_string(), Exchange::Binance, now)
+        };
+        db.save_tick_data(vec![tick], false).await.expect("save should succeed");
+
+        // Load tick data via DatabaseLoader
+        let ticks = loader.load_tick_data(
+            "BTCUSDT",
+            Exchange::Binance,
+            now - chrono::Duration::hours(1),
+            now + chrono::Duration::hours(1),
+        ).await.expect("load should succeed");
+
+        assert_eq!(ticks.len(), 1);
+        assert_eq!(ticks[0].symbol, "BTCUSDT");
+        assert_eq!(ticks[0].last_price, 50000.0);
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_database_loader_sqlite_tick_data_empty() {
+        use crate::trader::SqliteDatabase;
+
+        let sqlite_db = SqliteDatabase::new_in_memory().expect("Failed to create SQLite database");
+        let db = Arc::new(sqlite_db) as Arc<dyn crate::trader::database::BaseDatabase>;
+
+        let mut loader = DatabaseLoader::new();
+        loader.set_sqlite_database(db);
+
+        // Load from empty database should fail
+        let result = loader.load_tick_data(
+            "BTCUSDT",
+            Exchange::Binance,
+            Utc::now() - chrono::Duration::hours(1),
+            Utc::now() + chrono::Duration::hours(1),
+        ).await;
+
+        assert!(result.is_err());
+        assert!(result.expect_err("should be error").contains("SQLite数据库中无Tick数据"));
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_database_loader_sqlite_bar_data() {
+        use crate::trader::SqliteDatabase;
+
+        let sqlite_db = SqliteDatabase::new_in_memory().expect("Failed to create SQLite database");
+        let db = Arc::new(sqlite_db) as Arc<dyn crate::trader::database::BaseDatabase>;
+
+        let mut loader = DatabaseLoader::new();
+        loader.set_sqlite_database(db.clone());
+
+        // Save bar data
+        let now = Utc::now();
+        let bar = BarData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: now,
+            interval: Some(Interval::Minute),
+            open_price: 50000.0,
+            high_price: 50100.0,
+            low_price: 49900.0,
+            close_price: 50050.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            extra: None,
+        };
+        db.save_bar_data(vec![bar], false).await.expect("save should succeed");
+
+        // Load bar data via DatabaseLoader
+        let bars = loader.load_bar_data(
+            "BTCUSDT",
+            Exchange::Binance,
+            Interval::Minute,
+            now - chrono::Duration::hours(1),
+            now + chrono::Duration::hours(1),
+        ).await.expect("load should succeed");
+
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0].symbol, "BTCUSDT");
     }
 }

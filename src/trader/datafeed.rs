@@ -2,8 +2,10 @@
 
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::constant::{Exchange, Interval};
+use super::database::BaseDatabase;
 use super::object::{BarData, HistoryRequest, TickData};
 use super::setting::SETTINGS;
 
@@ -68,11 +70,16 @@ impl BaseDatafeed for EmptyDatafeed {
 /// Binance datafeed implementation using REST API for historical data.
 /// Supports both Spot and USDT-M Futures via the Binance klines API.
 /// Does not require API keys for public historical data.
+///
+/// For tick-level history, falls back to local SQLite database since
+/// Binance REST API doesn't provide tick data via klines endpoint.
 pub struct BinanceDatafeed {
     /// REST client for Binance API
     rest_client: crate::gateway::binance::BinanceRestClient,
     /// Whether using futures API
     futures: bool,
+    /// Optional database for tick history fallback
+    database: Option<Arc<dyn BaseDatabase>>,
 }
 
 impl BinanceDatafeed {
@@ -81,6 +88,7 @@ impl BinanceDatafeed {
         Self {
             rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
             futures: false,
+            database: None,
         }
     }
 
@@ -89,7 +97,31 @@ impl BinanceDatafeed {
         Self {
             rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
             futures: true,
+            database: None,
         }
+    }
+
+    /// Create a new BinanceDatafeed for Spot with database for tick history
+    pub fn new_spot_with_database(database: Arc<dyn BaseDatabase>) -> Self {
+        Self {
+            rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
+            futures: false,
+            database: Some(database),
+        }
+    }
+
+    /// Create a new BinanceDatafeed for USDT-M Futures with database for tick history
+    pub fn new_futures_with_database(database: Arc<dyn BaseDatabase>) -> Self {
+        Self {
+            rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
+            futures: true,
+            database: Some(database),
+        }
+    }
+
+    /// Set the database for tick history fallback
+    pub fn set_database(&mut self, database: Arc<dyn BaseDatabase>) {
+        self.database = Some(database);
     }
 
     /// Initialize the REST client with proxy and API settings from gateway config
@@ -200,9 +232,35 @@ impl BaseDatafeed for BinanceDatafeed {
         Ok(history)
     }
 
-    async fn query_tick_history(&self, _req: HistoryRequest) -> Result<Vec<TickData>, String> {
-        // Binance REST API doesn't provide tick-level historical data via klines
-        Err("Binance REST API不支持Tick级别历史数据查询".to_string())
+    async fn query_tick_history(&self, req: HistoryRequest) -> Result<Vec<TickData>, String> {
+        // Binance REST API doesn't provide tick-level historical data via klines.
+        // Try loading from database first if available.
+        if let Some(database) = &self.database {
+            let end = req.end.unwrap_or_else(chrono::Utc::now);
+            let ticks = database.load_tick_data(
+                &req.symbol,
+                req.exchange,
+                req.start,
+                end,
+            ).await?;
+
+            if !ticks.is_empty() {
+                tracing::info!(
+                    "BinanceDatafeed: 从数据库加载{}条Tick数据: {}",
+                    ticks.len(),
+                    req.symbol,
+                );
+                return Ok(ticks);
+            }
+
+            return Err(format!(
+                "数据库中无Tick数据: {} {}",
+                req.symbol,
+                req.exchange.value(),
+            ));
+        }
+
+        Err("Binance REST API不支持Tick级别历史数据查询，请配置数据库(datafeed.database)以加载本地Tick数据".to_string())
     }
 }
 
@@ -306,7 +364,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_binance_datafeed_query_tick_history_unsupported() {
+    async fn test_binance_datafeed_query_tick_history_no_database() {
         let datafeed = BinanceDatafeed::new_spot();
         let req = HistoryRequest::new(
             "BTCUSDT".to_string(),
@@ -315,6 +373,114 @@ mod tests {
         );
         let result = datafeed.query_tick_history(req).await;
         assert!(result.is_err());
-        assert!(result.expect_err("should be error").contains("不支持Tick"));
+        assert!(result.expect_err("should be error").contains("Binance REST API不支持Tick"));
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_query_tick_history_with_database() {
+        use super::super::database::MemoryDatabase;
+
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+        let datafeed = BinanceDatafeed::new_spot_with_database(db.clone());
+
+        // Save some tick data
+        let now = Utc::now();
+        let tick = TickData {
+            gateway_name: "BINANCE_SPOT".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            datetime: now,
+            last_price: 50000.0,
+            last_volume: 1.0,
+            volume: 100.0,
+            turnover: 5000000.0,
+            open_interest: 0.0,
+            bid_price_1: 49999.0,
+            bid_volume_1: 0.5,
+            ask_price_1: 50001.0,
+            ask_volume_1: 0.5,
+            ..TickData::new("BINANCE_SPOT".to_string(), "BTCUSDT".to_string(), Exchange::Binance, now)
+        };
+        db.save_tick_data(vec![tick], false).await.expect("save should succeed");
+
+        // Query tick history should return data from database
+        let req = HistoryRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::Binance,
+            start: now - chrono::Duration::hours(1),
+            end: Some(now + chrono::Duration::hours(1)),
+            interval: None,
+        };
+        let result = datafeed.query_tick_history(req).await;
+        assert!(result.is_ok());
+        let ticks = result.expect("should have ticks");
+        assert_eq!(ticks.len(), 1);
+        assert_eq!(ticks[0].symbol, "BTCUSDT");
+        assert_eq!(ticks[0].last_price, 50000.0);
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_query_tick_history_database_empty() {
+        use super::super::database::MemoryDatabase;
+
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+        let datafeed = BinanceDatafeed::new_spot_with_database(db);
+
+        // Query tick history on empty database should return error
+        let req = HistoryRequest::new(
+            "BTCUSDT".to_string(),
+            Exchange::Binance,
+            Utc::now(),
+        );
+        let result = datafeed.query_tick_history(req).await;
+        assert!(result.is_err());
+        assert!(result.expect_err("should be error").contains("数据库中无Tick数据"));
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_set_database() {
+        use super::super::database::MemoryDatabase;
+
+        let mut datafeed = BinanceDatafeed::new_spot();
+        assert!(datafeed.database.is_none());
+
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+        datafeed.set_database(db);
+        assert!(datafeed.database.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_binance_datafeed_futures_with_database() {
+        use super::super::database::MemoryDatabase;
+
+        let db = Arc::new(MemoryDatabase::new()) as Arc<dyn BaseDatabase>;
+        let datafeed = BinanceDatafeed::new_futures_with_database(db.clone());
+        assert!(datafeed.futures);
+        assert!(datafeed.database.is_some());
+
+        // Save tick data for futures
+        let now = Utc::now();
+        let tick = TickData {
+            gateway_name: "BINANCE_USDM".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::BinanceUsdm,
+            datetime: now,
+            last_price: 50000.0,
+            open_interest: 1000.0,
+            ..TickData::new("BINANCE_USDM".to_string(), "BTCUSDT".to_string(), Exchange::BinanceUsdm, now)
+        };
+        db.save_tick_data(vec![tick], false).await.expect("save should succeed");
+
+        let req = HistoryRequest {
+            symbol: "BTCUSDT".to_string(),
+            exchange: Exchange::BinanceUsdm,
+            start: now - chrono::Duration::hours(1),
+            end: Some(now + chrono::Duration::hours(1)),
+            interval: None,
+        };
+        let result = datafeed.query_tick_history(req).await;
+        assert!(result.is_ok());
+        let ticks = result.expect("should have ticks");
+        assert_eq!(ticks.len(), 1);
     }
 }

@@ -808,7 +808,7 @@ impl BacktestingEngine {
             let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, bar);
             
             // 5c. Check timers and dispatch on_timer callbacks (before on_bar)
-            let timer_fired = self.check_timers(bar.datetime.into());
+            let timer_fired = self.check_timers(bar.datetime);
             for timer_id in &timer_fired {
                 if let Some(strategy) = &mut self.strategy {
                     strategy.on_timer(timer_id);
@@ -903,7 +903,7 @@ impl BacktestingEngine {
             let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
             
             // Check timers and dispatch on_timer callbacks (before on_tick)
-            let timer_fired = self.check_timers(tick.datetime.into());
+            let timer_fired = self.check_timers(tick.datetime);
             for timer_id in &timer_fired {
                 if let Some(strategy) = &mut self.strategy {
                     strategy.on_timer(timer_id);
@@ -1805,6 +1805,7 @@ impl BacktestingEngine {
     /// Send a Limit-If-Touched order
     ///
     /// LIT: triggers like MIT, but submits a limit order at limit_price instead of market
+    #[allow(clippy::too_many_arguments)]
     pub fn send_lit(
         &mut self,
         symbol: &str,
@@ -4078,7 +4079,7 @@ mod tests {
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
 
         // Get entry order id
-        let entry_vt_orderid = engine.bracket_groups[&group_id].children["entry"].vt_orderid.clone().unwrap_or_default();
+        let _entry_vt_orderid = engine.bracket_groups[&group_id].children["entry"].vt_orderid.clone().unwrap_or_default();
 
         // Bar that fills the entry order
         let bar = BarData {
@@ -4190,7 +4191,7 @@ mod tests {
         engine.cross_limit_order(&bar1);
 
         // Get TP and SL order ids
-        let tp_vt_orderid = engine.bracket_groups[&group_id].children["take_profit"].vt_orderid.clone().unwrap_or_default();
+        let _tp_vt_orderid = engine.bracket_groups[&group_id].children["take_profit"].vt_orderid.clone().unwrap_or_default();
         let sl_vt_orderid = engine.bracket_groups[&group_id].children["stop_loss"].vt_orderid.clone().unwrap_or_default();
 
         // Fill TP order (sell limit at 51000, bar high >= 51000)

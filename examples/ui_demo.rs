@@ -116,6 +116,7 @@ impl DemoApp {
                     reference: "Demo".to_string(),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
                     extra: None,
                 };
         self.main_window.order_monitor.update(&order);

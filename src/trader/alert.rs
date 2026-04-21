@@ -321,15 +321,14 @@ impl AlertEngine {
 
     /// Create a new AlertEngine with custom configuration
     pub fn with_config(config: AlertConfig) -> Self {
-        let engine = Self {
+        Self {
             name: "AlertEngine".to_string(),
             config: RwLock::new(config),
             channels: RwLock::new(vec![Arc::new(LogAlertChannel::new())]),
             running: AtomicBool::new(false),
             enabled: AtomicBool::new(true),
             event_tx: RwLock::new(None),
-        };
-        engine
+        }
     }
 
     /// Add an alert channel
