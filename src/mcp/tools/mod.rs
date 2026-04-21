@@ -24,3 +24,13 @@ pub use account::AccountTools;
 pub use strategy::StrategyTools;
 pub use risk::RiskTools;
 pub use backtest::BacktestTools;
+pub use backtest::BacktestEntry;
+
+// Re-export the router functions
+pub use trading::trading_router;
+pub use ui::ui_router;
+pub use market::market_router;
+pub use account::account_router;
+pub use strategy::strategy_router;
+pub use risk::risk_router;
+pub use backtest::backtest_router;

@@ -93,14 +93,15 @@ pub struct BacktestEntry {
     pub result: Option<serde_json::Value>,
 }
 
-// ---- BacktestTools ----
+// ---- BacktestTools (data holder, no longer has #[tool_router]) ----
 
-/// 回测管理 MCP Tool 集合
+/// 回测管理数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
 #[allow(dead_code)]
 pub struct BacktestTools {
     results: Arc<RwLock<Vec<BacktestEntry>>>,
 }
 
+#[allow(dead_code)]
 impl BacktestTools {
     /// 创建 BacktestTools 实例
     pub fn new() -> Self {
@@ -116,8 +117,10 @@ impl Default for BacktestTools {
     }
 }
 
-#[tool_router]
-impl BacktestTools {
+// ---- TradingMcpServer tool router for backtest tools ----
+
+#[tool_router(router = backtest_router, vis = "pub")]
+impl TradingMcpServer {
     #[tool(description = "Run a backtest with specified parameters")]
     async fn run_backtest(
         &self,
@@ -145,7 +148,7 @@ impl BacktestTools {
 
         // Store the entry
         {
-            let mut results = self.results.write().await;
+            let mut results = self.backtest_cache.write().await;
             results.push(entry);
         }
 
@@ -166,7 +169,7 @@ impl BacktestTools {
         &self,
         Parameters(params): Parameters<BacktestIdParams>,
     ) -> Result<CallToolResult, McpError> {
-        let results = self.results.read().await;
+        let results = self.backtest_cache.read().await;
         let entry = results.iter().find(|e| e.id == params.backtest_id);
 
         match entry {
@@ -195,7 +198,7 @@ impl BacktestTools {
 
     #[tool(description = "List all backtest runs")]
     async fn list_backtests(&self) -> Result<CallToolResult, McpError> {
-        let results = self.results.read().await;
+        let results = self.backtest_cache.read().await;
         if results.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
                 "No backtests found.".to_string(),
@@ -227,7 +230,7 @@ impl BacktestTools {
         let ids: Vec<String> = serde_json::from_str(&params.backtest_ids)
             .map_err(|e| McpError::invalid_params(format!("Invalid backtest_ids JSON: {}", e), None))?;
 
-        let results = self.results.read().await;
+        let results = self.backtest_cache.read().await;
         let matched: Vec<&BacktestEntry> = results
             .iter()
             .filter(|e| ids.contains(&e.id))

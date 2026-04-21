@@ -10,7 +10,7 @@ use rmcp::{
     RoleServer, ServerHandler, ServiceExt,
     handler::server::router::tool::ToolRouter,
     service::RequestContext,
-    tool_handler, tool_router,
+    tool_handler,
 };
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
@@ -18,13 +18,12 @@ use tokio::sync::mpsc;
 use crate::trader::MainEngine;
 use crate::strategy::engine::StrategyEngine;
 use super::types::{McpConfig, McpTransport, SamplingConfig, UICommandReceiver, UICommandSender, UIState};
-#[allow(unused_imports)]
-use super::tools::{TradingTools, UITools, MarketTools, AccountTools, StrategyTools, RiskTools, BacktestTools};
+use super::tools::backtest::BacktestEntry;
 
 /// 交易系统 MCP Server
 ///
-/// 聚合后端交易工具和前端 UI 工具，通过 MCP 协议暴露给 LLM 客户端。
-/// 同时提供 Resources 接口查询实时交易数据和 UI 状态。
+/// 聚合 7 组工具（Trading / UI / Market / Account / Strategy / Risk / Backtest），
+/// 通过 MCP 协议暴露给 LLM 客户端。同时提供 Resources 和 Prompts 接口。
 /// 支持 Sampling：工具可通过 `request_sampling()` 请求客户端 LLM 推理。
 ///
 /// 支持两种传输模式：
@@ -39,9 +38,10 @@ pub struct TradingMcpServer {
     tool_router: ToolRouter<Self>,
     /// Optional StrategyEngine for strategy tools
     pub(crate) strategy_engine: Option<Arc<StrategyEngine>>,
+    /// Backtest results cache
+    pub(crate) backtest_cache: Arc<tokio::sync::RwLock<Vec<BacktestEntry>>>,
 }
 
-#[tool_router]
 impl TradingMcpServer {
     /// 创建 TradingMcpServer 实例
     ///
@@ -55,16 +55,36 @@ impl TradingMcpServer {
         engine: Arc<MainEngine>,
         sampling_config: SamplingConfig,
     ) -> (Self, UICommandReceiver) {
+        use super::tools::{
+            trading::trading_router,
+            ui::ui_router,
+            market::market_router,
+            account::account_router,
+            strategy::strategy_router,
+            risk::risk_router,
+            backtest::backtest_router,
+        };
+
         let (tx, rx) = mpsc::unbounded_channel();
         let ui_state = Arc::new(RwLock::new(UIState::default()));
+        let backtest_cache = Arc::new(tokio::sync::RwLock::new(Vec::new()));
+
+        let router = trading_router()
+            + ui_router()
+            + market_router()
+            + account_router()
+            + strategy_router()
+            + risk_router()
+            + backtest_router();
 
         let server = Self {
             engine,
             ui_sender: tx,
             ui_state: ui_state.clone(),
             sampling_config,
-            tool_router: Self::tool_router(),
+            tool_router: router,
             strategy_engine: None,
+            backtest_cache,
         };
 
         (server, rx)
@@ -171,22 +191,40 @@ impl TradingMcpServer {
             StreamableHttpServerConfig,
             session::local::LocalSessionManager,
         };
+        use super::tools::{
+            trading::trading_router,
+            ui::ui_router,
+            market::market_router,
+            account::account_router,
+            strategy::strategy_router,
+            risk::risk_router,
+            backtest::backtest_router,
+        };
 
         let engine = self.engine.clone();
         let ui_state = self.ui_state.clone();
         let sampling_config = self.sampling_config.clone();
         let strategy_engine = self.strategy_engine.clone();
+        let backtest_cache = self.backtest_cache.clone();
 
         let service = rmcp::transport::StreamableHttpService::new(
             move || {
                 let (tx, _rx) = mpsc::unbounded_channel();
+                let router = trading_router()
+                    + ui_router()
+                    + market_router()
+                    + account_router()
+                    + strategy_router()
+                    + risk_router()
+                    + backtest_router();
                 Ok(Self {
                     engine: engine.clone(),
                     ui_sender: tx,
                     ui_state: ui_state.clone(),
                     sampling_config: sampling_config.clone(),
                     strategy_engine: strategy_engine.clone(),
-                    tool_router: Self::tool_router(),
+                    backtest_cache: backtest_cache.clone(),
+                    tool_router: router,
                 })
             },
             LocalSessionManager::default().into(),
@@ -224,7 +262,7 @@ impl TradingMcpServer {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for TradingMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
