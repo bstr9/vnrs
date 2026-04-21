@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-064
 title: "三大引擎回调绑定——止损单/模拟单/组合单功能断头路修复"
 status: completed
@@ -60,35 +60,35 @@ versions:
 ## 验收标准
 
 ### StopOrderEngine 回调绑定
-- [ ] 在 MainEngine 中调用 `stop_order_engine.register_callback()` 绑定触发回调
-- [ ] 回调逻辑：将 StopOrder 转换为 OrderRequest，通过 MainEngine.send_order() 提交到对应 gateway
-- [ ] 回调中正确使用 stop_order.gateway_name 定位 gateway
-- [ ] 止损单触发后日志输出：包含 stop_orderid、vt_symbol、direction、trigger_price
+- [x] 在 MainEngine 中调用 `stop_order_engine.register_callback()` 绑定触发回调
+- [x] 回调逻辑：将 StopOrder 转换为 OrderRequest，通过 MainEngine.send_order() 提交到对应 gateway
+- [x] 回调中正确使用 stop_order.gateway_name 定位 gateway
+- [x] 止损单触发后日志输出：包含 stop_orderid、vt_symbol、direction、trigger_price
 
 ### OrderEmulator 回调绑定
-- [ ] 在 MainEngine 中调用 `order_emulator.set_send_order_callback()` 绑定下单回调
-- [ ] 在 MainEngine 中调用 `order_emulator.set_cancel_order_callback()` 绑定撤单回调
-- [ ] send_callback 逻辑：通过 MainEngine.send_order() 提交到对应 gateway
-- [ ] cancel_callback 逻辑：通过 MainEngine.cancel_order() 撤销对应委托
-- [ ] 回调中正确使用 emulated_order.gateway_name 定位 gateway
+- [x] 在 MainEngine 中调用 `order_emulator.set_send_order_callback()` 绑定下单回调
+- [x] 在 MainEngine 中调用 `order_emulator.set_cancel_order_callback()` 绑定撤单回调
+- [x] send_callback 逻辑：通过 MainEngine.send_order() 提交到对应 gateway
+- [x] cancel_callback 逻辑：通过 MainEngine.cancel_order() 撤销对应委托
+- [x] 回调中正确使用 emulated_order.gateway_name 定位 gateway
 
 ### BracketOrderEngine 回调绑定
-- [ ] 在 MainEngine 中调用 `bracket_order_engine.set_send_order_callback()` 绑定下单回调
-- [ ] 在 MainEngine 中调用 `bracket_order_engine.set_cancel_order_callback()` 绑定撤单回调
-- [ ] 在 MainEngine 中调用 `bracket_order_engine.set_state_change_callback()` 绑定状态变更回调
-- [ ] send_callback 逻辑：通过 MainEngine.send_order() 提交到对应 gateway
-- [ ] cancel_callback 逻辑：通过 MainEngine.cancel_order() 撤销对应委托
-- [ ] state_change_callback 逻辑：写入 MainEngine 日志（write_log），通知组状态变更
+- [x] 在 MainEngine 中调用 `bracket_order_engine.set_send_order_callback()` 绑定下单回调
+- [x] 在 MainEngine 中调用 `bracket_order_engine.set_cancel_order_callback()` 绑定撤单回调
+- [x] 在 MainEngine 中调用 `bracket_order_engine.set_state_change_callback()` 绑定状态变更回调
+- [x] send_callback 逻辑：通过 MainEngine.send_order() 提交到对应 gateway
+- [x] cancel_callback 逻辑：通过 MainEngine.cancel_order() 撤销对应委托
+- [x] state_change_callback 逻辑：写入 MainEngine 日志（write_log），通知组状态变更
 
 ### 集成验证
-- [ ] MainEngine::new_internal() 编译通过
-- [ ] 现有单元测试不受影响
-- [ ] 回调闭包中正确处理 Arc<MainEngine> 引用（避免循环引用或生命周期问题）
+- [x] MainEngine::new_internal() 编译通过
+- [x] 现有单元测试不受影响
+- [x] 回调闭包中正确处理 Arc<MainEngine> 引用（避免循环引用或生命周期问题）
 
 ### 注意事项
-- [ ] MainEngine.send_order() 是 async 方法，回调签名是同步的——需要用 tokio::spawn 或 spawn_blocking 处理
-- [ ] 回调绑定位置选择：构造函数末尾 vs start() 方法。构造函数末尾更安全（回调立即可用），但需要处理 Arc<Self> 获取
-- [ ] 不能在回调中直接 await async 方法，需要通过 event_tx 发送事件或 tokio::spawn
+- [x] MainEngine.send_order() 是 async 方法，回调签名是同步的——需要用 tokio::spawn 或 spawn_blocking 处理
+- [x] 回调绑定位置选择：构造函数末尾 vs start() 方法。构造函数末尾更安全（回调立即可用），但需要处理 Arc<Self> 获取
+- [x] 不能在回调中直接 await async 方法，需要通过 event_tx 发送事件或 tokio::spawn
 
 ## 影响范围
 

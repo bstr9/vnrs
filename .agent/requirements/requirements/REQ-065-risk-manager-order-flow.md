@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-065
 title: "RiskManager 订单流拦截——风控引擎接入 send_order 流程"
 status: completed
@@ -51,17 +51,17 @@ versions:
 ## 验收标准
 
 ### 风控覆盖验证
-- [ ] StopOrderEngine 回调提交委托通过 MainEngine.send_order() 走风控
-- [ ] OrderEmulator 回调提交委托通过 MainEngine.send_order() 走风控
-- [ ] BracketOrderEngine 回调提交委托通过 MainEngine.send_order() 走风控
-- [ ] 风控拒绝时，StopOrderEngine 止损单状态正确更新（不应为 Triggered）
-- [ ] 风控拒绝时，OrderEmulator 模拟单状态正确更新（不应为 Triggered）
-- [ ] 风控拒绝时，BracketOrderEngine 组合单状态正确更新（不应进入 Active）
+- [x] StopOrderEngine 回调提交委托通过 MainEngine.send_order() 走风控
+- [x] OrderEmulator 回调提交委托通过 MainEngine.send_order() 走风控
+- [x] BracketOrderEngine 回调提交委托通过 MainEngine.send_order() 走风控
+- [x] 风控拒绝时，StopOrderEngine 止损单状态正确更新（不应为 Triggered）
+- [x] 风控拒绝时，OrderEmulator 模拟单状态正确更新（不应为 Triggered）
+- [x] 风控拒绝时，BracketOrderEngine 组合单状态正确更新（不应进入 Active）
 
 ### 异常处理
-- [ ] 风控拒绝的委托有日志记录
-- [ ] 风控拒绝后，引擎内部状态一致（不应残留"已触发但未提交"的脏状态）
-- [ ] 风控拒绝后，策略的 on_stop_order / on_order 回调能收到拒绝通知
+- [x] 风控拒绝的委托有日志记录
+- [x] 风控拒绝后，引擎内部状态一致（不应残留"已触发但未提交"的脏状态）
+- [x] 风控拒绝后，策略的 on_stop_order / on_order 回调能收到拒绝通知
 
 ## 影响范围
 

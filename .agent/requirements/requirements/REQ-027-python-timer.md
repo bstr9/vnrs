@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-027
 title: "Python 策略定时器/调度功能"
 status: completed
@@ -38,10 +38,10 @@ nautilus_trader 提供完整的时钟系统：`LiveClock`/`TestClock` + `schedul
 - [ ] Python `Strategy` 添加 `on_timer(self, timer_id)` 回调
 - [ ] Python `Strategy` 添加 `schedule_timer(timer_id, interval_seconds, repeat=True)` 方法
 - [ ] Python `Strategy` 添加 `cancel_timer(timer_id)` 方法
-- [ ] 回测模式：定时器由回测引擎的虚拟时钟驱动
-- [ ] 实盘模式：定时器由 tokio 定时器驱动
-- [ ] 支持一次性定时（time_alert）和重复定时（schedule）
-- [ ] 定时器到期时触发 `on_timer(timer_id)` 回调
+- [x] 回测模式：定时器由回测引擎的虚拟时钟驱动
+- [x] 实盘模式：定时器由 tokio 定时器驱动
+- [x] 支持一次性定时（time_alert）和重复定时（schedule）
+- [x] 定时器到期时触发 `on_timer(timer_id)` 回调
 
 ## 影响范围
 

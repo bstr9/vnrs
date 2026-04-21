@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-068
 title: "AlertEngine → ToastManager 告警通知集成"
 status: completed
@@ -45,23 +45,23 @@ AlertEngine（`src/trader/alert.rs`）实现了多种告警类型：
 ## 验收标准
 
 ### 事件转发
-- [ ] AlertEngine 告警事件通过 MainEngine 事件总线发出
-- [ ] 定义 EVENT_ALERT 事件类型
-- [ ] ToastManager 注册为 EVENT_ALERT 事件处理器
+- [x] AlertEngine 告警事件通过 MainEngine 事件总线发出
+- [x] 定义 EVENT_ALERT 事件类型
+- [x] ToastManager 注册为 EVENT_ALERT 事件处理器
 
 ### UI 展示
-- [ ] 风控拒绝告警：Toast 弹窗显示"风控拒绝"红色通知
-- [ ] 连接断开告警：Toast 弹窗显示"连接断开"红色通知
-- [ ] 大额委托告警：Toast 弹窗显示"大额委托"黄色通知
-- [ ] 高频交易告警：Toast 弹窗显示"高频交易"黄色通知
-- [ ] 告警按级别显示不同颜色（Error=红、Warning=黄、Info=蓝）
+- [x] 风控拒绝告警：Toast 弹窗显示"风控拒绝"红色通知
+- [x] 连接断开告警：Toast 弹窗显示"连接断开"红色通知
+- [x] 大额委托告警：Toast 弹窗显示"大额委托"黄色通知
+- [x] 高频交易告警：Toast 弹窗显示"高频交易"黄色通知
+- [x] 告警按级别显示不同颜色（Error=红、Warning=黄、Info=蓝）
 
 ### 告警历史面板
-- [ ] 新增"告警"标签页，展示告警历史记录
-- [ ] 告警列表显示：时间、级别、类型、合约、详情
-- [ ] 支持按级别筛选（Error/Warning/Info）
-- [ ] 支持按时间范围筛选
-- [ ] 告警记录持久化（数据库或文件）
+- [x] 新增"告警"标签页，展示告警历史记录
+- [x] 告警列表显示：时间、级别、类型、合约、详情
+- [x] 支持按级别筛选（Error/Warning/Info）
+- [x] 支持按时间范围筛选
+- [x] 告警记录持久化（数据库或文件）
 
 ## 影响范围
 

@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-067
 title: "GUI 交易面板支持止损单/止损限价单下单"
 status: completed
@@ -52,19 +52,19 @@ combo_box.show_index(&mut self.order_type_index, &ORDER_TYPES, ...);
 ## 验收标准
 
 ### 订单类型扩展
-- [ ] ORDER_TYPES 列表添加 "Stop" 和 "StopLimit"
-- [ ] 选择 Stop 时，显示 stop_price 输入框（触发价）
-- [ ] 选择 StopLimit 时，显示 stop_price + limit_price 两个输入框
-- [ ] Stop 订单提交通过 StopOrderEngine
-- [ ] StopLimit 订单提交通过 StopOrderEngine
+- [x] ORDER_TYPES 列表添加 "Stop" 和 "StopLimit"
+- [x] 选择 Stop 时，显示 stop_price 输入框（触发价）
+- [x] 选择 StopLimit 时，显示 stop_price + limit_price 两个输入框
+- [x] Stop 订单提交通过 StopOrderEngine
+- [x] StopLimit 订单提交通过 StopOrderEngine
 
 ### UI 交互
-- [ ] 止损单下单后，在活跃委托列表显示（带 STOP_ 前缀标识）
-- [ ] 止损单可在活跃委托列表中撤销
-- [ ] 止损单触发状态变更时，UI 列表实时更新
+- [x] 止损单下单后，在活跃委托列表显示（带 STOP_ 前缀标识）
+- [x] 止损单可在活跃委托列表中撤销
+- [x] 止损单触发状态变更时，UI 列表实时更新
 
 ### 依赖
-- [ ] 依赖 REQ-064 完成回调绑定后，GUI 提交的止损单才能实际触发下单
+- [x] 依赖 REQ-064 完成回调绑定后，GUI 提交的止损单才能实际触发下单
 
 ## 影响范围
 
