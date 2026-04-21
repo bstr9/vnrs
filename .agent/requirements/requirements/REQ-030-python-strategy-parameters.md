@@ -1,7 +1,7 @@
 ---
 id: REQ-030
 title: "Python 策略参数管理（parameters/variables）"
-status: active
+status: completed
 created_at: "2026-04-19T14:00:00"
 updated_at: "2026-04-19T14:00:00"
 priority: P2

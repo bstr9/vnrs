@@ -513,6 +513,7 @@ impl BacktestingEngine {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 

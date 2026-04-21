@@ -1162,8 +1162,9 @@ mod tests {
                     datetime: Some(Utc::now()),
                     reference: String::new(),
                     post_only: false,
-                    reduce_only: false,
-                    extra: None,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
                 };
 
         db.save_order_data(vec![order.clone()]).await.expect("save_order_data should succeed");

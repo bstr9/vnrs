@@ -255,6 +255,7 @@ async fn test_backtest_stop_order_fill() {
         reference: String::new(),
         post_only: false,
         reduce_only: false,
+        expire_time: None,
     };
     engine.send_limit_order(buy_req);
 
@@ -286,6 +287,7 @@ async fn test_backtest_stop_order_fill() {
         reference: String::new(),
         post_only: false,
         reduce_only: false,
+        expire_time: None,
     };
     engine.send_stop_order(stop_req);
 
@@ -431,6 +433,7 @@ async fn test_backtest_fill_model_comparison() {
         reference: String::new(),
         post_only: false,
         reduce_only: false,
+        expire_time: None,
     };
     engine_best.send_limit_order(buy_req);
     engine_best.set_history_data(bars.clone());
@@ -456,6 +459,7 @@ async fn test_backtest_fill_model_comparison() {
         reference: String::new(),
         post_only: false,
         reduce_only: false,
+        expire_time: None,
     };
     engine_ideal.send_limit_order(buy_req2);
     engine_ideal.set_history_data(bars);

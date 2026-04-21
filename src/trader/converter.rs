@@ -763,8 +763,9 @@ mod tests {
                     datetime: None,
                     reference: String::new(),
                     post_only: false,
-                    reduce_only: false,
-                    extra: None,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
                 };
 
         holding.update_order(&order);
@@ -861,6 +862,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let result = holding.convert_order_request_shfe(&req);
@@ -912,6 +914,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let result = holding.convert_order_request_net(&req);

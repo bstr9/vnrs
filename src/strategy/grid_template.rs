@@ -158,6 +158,7 @@ impl GridStrategy {
                 reference: self.base.strategy_name.clone(),
                 post_only: false,
                 reduce_only: false,
+                expire_time: None,
             };
             self.base.pending_orders
                 .lock()

@@ -39,8 +39,17 @@ pub fn level_to_string(level: i32) -> &'static str {
     }
 }
 
-/// Initialize the logger
-pub fn init_logger() {
+/// Check if JSON log format is enabled via the `VNRS_LOG_FORMAT` environment variable.
+fn is_json_format() -> bool {
+    std::env::var("VNRS_LOG_FORMAT").map_or(false, |v| v.eq_ignore_ascii_case("json"))
+}
+
+/// Initialize the logger with optional JSON format.
+///
+/// When `force_json` is `true`, JSON format is used regardless of the environment variable.
+/// When `force_json` is `false`, the `VNRS_LOG_FORMAT=json` environment variable is consulted.
+fn init_logger_inner(force_json: bool) {
+    let json = force_json || is_json_format();
     let log_level = SETTINGS.get_int("log.level").unwrap_or(INFO as i64) as i32;
     let log_console = SETTINGS.get_bool("log.console").unwrap_or(true);
     let log_file = SETTINGS.get_bool("log.file").unwrap_or(true);
@@ -51,39 +60,76 @@ pub fn init_logger() {
     let subscriber = tracing_subscriber::registry().with(filter);
 
     if log_console {
-        let fmt_layer = fmt::layer()
-            .with_target(true)
-            .with_thread_ids(false)
-            .with_thread_names(false)
-            .with_ansi(true);
+        if json {
+            let fmt_layer = fmt::layer()
+                .json()
+                .with_target(true)
+                .with_thread_ids(false)
+                .with_thread_names(false)
+                .with_ansi(true);
 
-        if log_file {
-            let log_path = get_log_file_path();
+            if log_file {
+                let log_path = get_log_file_path();
 
-            // Create log file if needed
-            if let Some(parent) = log_path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-
-            let file = OpenOptions::new().create(true).append(true).open(&log_path);
-
-            match file {
-                Ok(f) => {
-                    let file_layer = fmt::layer()
-                        .with_writer(std::sync::Mutex::new(f))
-                        .with_ansi(false);
-                    subscriber.with(fmt_layer).with(file_layer).init();
+                if let Some(parent) = log_path.parent() {
+                    let _ = fs::create_dir_all(parent);
                 }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
-                        log_path, e
-                    );
-                    subscriber.with(fmt_layer).init();
+
+                let file = OpenOptions::new().create(true).append(true).open(&log_path);
+
+                match file {
+                    Ok(f) => {
+                        let file_layer = fmt::layer()
+                            .json()
+                            .with_writer(std::sync::Mutex::new(f))
+                            .with_ansi(false);
+                        subscriber.with(fmt_layer).with(file_layer).init();
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
+                            log_path, e
+                        );
+                        subscriber.with(fmt_layer).init();
+                    }
                 }
+            } else {
+                subscriber.with(fmt_layer).init();
             }
         } else {
-            subscriber.with(fmt_layer).init();
+            let fmt_layer = fmt::layer()
+                .with_target(true)
+                .with_thread_ids(false)
+                .with_thread_names(false)
+                .with_ansi(true);
+
+            if log_file {
+                let log_path = get_log_file_path();
+
+                if let Some(parent) = log_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+
+                let file = OpenOptions::new().create(true).append(true).open(&log_path);
+
+                match file {
+                    Ok(f) => {
+                        let file_layer = fmt::layer()
+                            .with_writer(std::sync::Mutex::new(f))
+                            .with_ansi(false);
+                        subscriber.with(fmt_layer).with(file_layer).init();
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
+                            log_path, e
+                        );
+                        subscriber.with(fmt_layer).init();
+                    }
+                }
+            } else {
+                subscriber.with(fmt_layer).init();
+            }
         }
     } else if log_file {
         let log_path = get_log_file_path();
@@ -96,10 +142,18 @@ pub fn init_logger() {
 
         match file {
             Ok(f) => {
-                let file_layer = fmt::layer()
-                    .with_writer(std::sync::Mutex::new(f))
-                    .with_ansi(false);
-                subscriber.with(file_layer).init();
+                if json {
+                    let file_layer = fmt::layer()
+                        .json()
+                        .with_writer(std::sync::Mutex::new(f))
+                        .with_ansi(false);
+                    subscriber.with(file_layer).init();
+                } else {
+                    let file_layer = fmt::layer()
+                        .with_writer(std::sync::Mutex::new(f))
+                        .with_ansi(false);
+                    subscriber.with(file_layer).init();
+                }
             }
             Err(e) => {
                 eprintln!(
@@ -111,6 +165,23 @@ pub fn init_logger() {
             }
         }
     }
+}
+
+/// Initialize the logger.
+///
+/// Checks the `VNRS_LOG_FORMAT` environment variable: if set to `"json"`,
+/// all log layers output in JSON format. Otherwise, the default human-readable
+/// format is used.
+pub fn init_logger() {
+    init_logger_inner(false);
+}
+
+/// Initialize the logger with JSON format explicitly enabled.
+///
+/// This forces JSON output on all log layers regardless of the `VNRS_LOG_FORMAT`
+/// environment variable.
+pub fn init_logger_with_json() {
+    init_logger_inner(true);
 }
 
 /// Get the log file path for today
@@ -175,6 +246,7 @@ pub static LOGGER: LazyLock<Logger> = LazyLock::new(Logger::default);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     #[test]
     fn test_level_from_int() {
@@ -197,5 +269,38 @@ mod tests {
     fn test_logger_new() {
         let logger = Logger::new("TestLogger");
         assert_eq!(logger.name, "TestLogger");
+    }
+
+    #[test]
+    fn test_is_json_format() {
+        // Save original value if any
+        let original = env::var("VNRS_LOG_FORMAT").ok();
+
+        // Test: env var not set -> false
+        env::remove_var("VNRS_LOG_FORMAT");
+        assert!(!is_json_format());
+
+        // Test: env var set to "json" (lowercase) -> true
+        env::set_var("VNRS_LOG_FORMAT", "json");
+        assert!(is_json_format());
+
+        // Test: env var set to "JSON" (uppercase) -> true
+        env::set_var("VNRS_LOG_FORMAT", "JSON");
+        assert!(is_json_format());
+
+        // Test: env var set to "Json" (mixed case) -> true
+        env::set_var("VNRS_LOG_FORMAT", "Json");
+        assert!(is_json_format());
+
+        // Test: env var set to other value -> false
+        env::set_var("VNRS_LOG_FORMAT", "text");
+        assert!(!is_json_format());
+
+        // Restore original value
+        if let Some(val) = original {
+            env::set_var("VNRS_LOG_FORMAT", val);
+        } else {
+            env::remove_var("VNRS_LOG_FORMAT");
+        }
     }
 }

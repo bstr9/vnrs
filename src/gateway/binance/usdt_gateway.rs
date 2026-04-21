@@ -235,8 +235,9 @@ impl BinanceUsdtGateway {
                     reference: String::new(),
                     gateway_name: self.gateway_name.clone(),
                     post_only: false,
-                    reduce_only: false,
-                    extra: None,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
                 };
                 self.on_order(order).await;
             }
@@ -551,6 +552,7 @@ impl BinanceUsdtGateway {
                             gateway_name: gateway_name.clone(),
                             post_only: false,
                             reduce_only: false,
+                            expire_time: None,
                             extra: None,
                         };
 
@@ -970,6 +972,7 @@ impl BaseGateway for BinanceUsdtGateway {
                                                 gateway_name: gateway_name.clone(),
                                                 post_only: false,
                                                 reduce_only: false,
+                                                expire_time: None,
                                                 extra: None,
                                             };
                                             orders.write().await.insert(order.orderid.clone(), order.clone());
@@ -1056,6 +1059,7 @@ impl BaseGateway for BinanceUsdtGateway {
                                     gateway_name: gateway_name_checker.clone(),
                                     post_only: false,
                                     reduce_only: false,
+                                    expire_time: None,
                                     extra: None,
                                 };
 

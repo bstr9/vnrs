@@ -623,6 +623,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 
@@ -662,6 +663,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 
@@ -692,6 +694,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 

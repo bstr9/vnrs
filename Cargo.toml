@@ -24,13 +24,16 @@ chrono = { version = "0.4.38", features = ["serde"] }
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Numeric
 rust_decimal = { version = "1.33", features = ["serde-with-str"] }
 
 # Technical Analysis
 ta = "0.5"
+
+# Error handling
+thiserror = "2"
 
 # Utilities
 dirs = "6.0.0"

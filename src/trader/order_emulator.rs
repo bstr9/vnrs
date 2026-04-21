@@ -946,6 +946,7 @@ impl OrderEmulator {
             reference: format!("iceberg_{}", order.id),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let cb = self.send_callback.read().unwrap_or_else(|e| e.into_inner());
@@ -987,6 +988,7 @@ impl OrderEmulator {
             reference: format!("emulator_{}", order.id),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         })
     }
 }

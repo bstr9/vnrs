@@ -4,9 +4,10 @@
 //! following the existing PyBarData pattern in backtesting_bindings.rs.
 
 use pyo3::prelude::*;
+use rust_decimal::prelude::ToPrimitive;
 
 use crate::trader::{
-    Direction, Exchange, Offset, OrderData, OrderType, Status, TickData, TradeData,
+    DepthData, Direction, Exchange, Offset, OrderData, OrderType, Status, TickData, TradeData,
 };
 
 // ---------------------------------------------------------------------------
@@ -605,6 +606,7 @@ impl PyOrderData {
             OrderType::Fok => "FOK",
             OrderType::Rfq => "RFQ",
             OrderType::Etf => "ETF",
+            OrderType::Gtd => "GTD",
         };
 
         Self {
@@ -698,6 +700,7 @@ impl PyOrderData {
             reference: self.reference.clone(),
             post_only: self.post_only,
             reduce_only: self.reduce_only,
+            expire_time: None,
             extra: None,
         })
     }
@@ -924,6 +927,176 @@ impl PyTradeData {
 }
 
 // ---------------------------------------------------------------------------
+// PyDepthData
+// ---------------------------------------------------------------------------
+
+/// Python wrapper for DepthData
+#[pyclass]
+#[derive(Clone)]
+pub struct PyDepthData {
+    #[pyo3(get, set)]
+    pub gateway_name: String,
+    #[pyo3(get, set)]
+    pub symbol: String,
+    #[pyo3(get, set)]
+    pub exchange: String,
+
+    pub datetime: String, // Internal storage as ISO-8601 / RFC 3339
+
+    /// Bid prices sorted descending by price (highest first)
+    #[pyo3(get, set)]
+    pub bid_prices: Vec<f64>,
+    /// Bid volumes corresponding to bid_prices
+    #[pyo3(get, set)]
+    pub bid_volumes: Vec<f64>,
+    /// Ask prices sorted ascending by price (lowest first)
+    #[pyo3(get, set)]
+    pub ask_prices: Vec<f64>,
+    /// Ask volumes corresponding to ask_prices
+    #[pyo3(get, set)]
+    pub ask_volumes: Vec<f64>,
+}
+
+#[pymethods]
+impl PyDepthData {
+    #[new]
+    #[pyo3(signature = (
+        gateway_name="".into(),
+        symbol="".into(),
+        exchange="".into(),
+        datetime="".into(),
+        bid_prices=vec![],
+        bid_volumes=vec![],
+        ask_prices=vec![],
+        ask_volumes=vec![]
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        gateway_name: String,
+        symbol: String,
+        exchange: String,
+        datetime: String,
+        bid_prices: Vec<f64>,
+        bid_volumes: Vec<f64>,
+        ask_prices: Vec<f64>,
+        ask_volumes: Vec<f64>,
+    ) -> Self {
+        Self {
+            gateway_name,
+            symbol,
+            exchange,
+            datetime,
+            bid_prices,
+            bid_volumes,
+            ask_prices,
+            ask_volumes,
+        }
+    }
+
+    #[getter]
+    fn get_datetime<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        if self.datetime.is_empty() {
+            return Ok(py.None().into_pyobject(py)?.into_any());
+        }
+        let dt_cls = py.import("datetime")?.getattr("datetime")?;
+        match dt_cls.call_method1("fromisoformat", (&self.datetime,)) {
+            Ok(dt) => Ok(dt),
+            Err(_) => Ok(py.None().into_pyobject(py)?.into_any()),
+        }
+    }
+
+    #[setter]
+    fn set_datetime(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if value.is_none() {
+            self.datetime = String::new();
+        } else if let Ok(s) = value.extract::<String>() {
+            self.datetime = s;
+        } else {
+            self.datetime = value.call_method0("isoformat")?.extract::<String>()?;
+        }
+        Ok(())
+    }
+
+    /// Support dict-style access: depth["bid_prices"] → depth.bid_prices
+    fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
+        match key {
+            "gateway_name" => Ok(self.gateway_name.clone().into_pyobject(py)?.into_any().unbind()),
+            "symbol" => Ok(self.symbol.clone().into_pyobject(py)?.into_any().unbind()),
+            "exchange" => Ok(self.exchange.clone().into_pyobject(py)?.into_any().unbind()),
+            "datetime" => {
+                let dt = self.get_datetime(py)?;
+                Ok(dt.unbind())
+            }
+            "bid_prices" => Ok(self.bid_prices.clone().into_pyobject(py)?.into_any().unbind()),
+            "bid_volumes" => Ok(self.bid_volumes.clone().into_pyobject(py)?.into_any().unbind()),
+            "ask_prices" => Ok(self.ask_prices.clone().into_pyobject(py)?.into_any().unbind()),
+            "ask_volumes" => Ok(self.ask_volumes.clone().into_pyobject(py)?.into_any().unbind()),
+            _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
+                "DepthData has no key '{}'",
+                key
+            ))),
+        }
+    }
+
+    /// Support dict-style .get() method: depth.get("bid_prices", [])
+    fn get(
+        &self,
+        py: Python<'_>,
+        key: &str,
+        default_value: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        match self.__getitem__(py, key) {
+            Ok(val) => Ok(val),
+            Err(_) => Ok(default_value.unwrap_or_else(|| {
+                py.None().into_pyobject(py).unwrap().into_any().unbind()
+            })),
+        }
+    }
+}
+
+impl PyDepthData {
+    /// Convert a Rust DepthData into a PyDepthData
+    pub fn from_rust(depth: &DepthData) -> Self {
+        // BTreeMap<Decimal, Decimal> → Vec<f64>
+        // bids: sorted descending by price (BTreeMap default is ascending, so reverse)
+        let bid_prices: Vec<f64> = depth
+            .bids
+            .iter()
+            .rev()
+            .map(|(price, _)| price.to_f64().unwrap_or(0.0))
+            .collect();
+        let bid_volumes: Vec<f64> = depth
+            .bids
+            .iter()
+            .rev()
+            .map(|(_, vol)| vol.to_f64().unwrap_or(0.0))
+            .collect();
+        // asks: sorted ascending by price (BTreeMap default)
+        let ask_prices: Vec<f64> = depth
+            .asks
+            .iter()
+            .map(|(price, _)| price.to_f64().unwrap_or(0.0))
+            .collect();
+        let ask_volumes: Vec<f64> = depth
+            .asks
+            .iter()
+            .map(|(_, vol)| vol.to_f64().unwrap_or(0.0))
+            .collect();
+
+        Self {
+            gateway_name: depth.gateway_name.clone(),
+            symbol: depth.symbol.clone(),
+            exchange: depth.exchange.value().to_string(),
+            datetime: depth.datetime.to_rfc3339(),
+            bid_prices,
+            bid_volumes,
+            ask_prices,
+            ask_volumes,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
@@ -958,5 +1131,6 @@ pub fn register_data_types_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTickData>()?;
     m.add_class::<PyOrderData>()?;
     m.add_class::<PyTradeData>()?;
+    m.add_class::<PyDepthData>()?;
     Ok(())
 }

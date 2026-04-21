@@ -1,7 +1,8 @@
 ---
 id: REQ-046
 title: "系统性错误类型改造（149 处 Result<T, String> → thiserror 枚举）"
-status: active
+status: completed
+completed_at: "2026-04-21T00:00:00"
 created_at: "2026-04-20T16:00:00"
 updated_at: "2026-04-20T16:00:00"
 priority: P2
@@ -30,8 +31,8 @@ versions:
 建议引入 `thiserror` crate，按模块定义错误枚举：`GatewayError`、`DatabaseError`、`StrategyError`、`BacktestError`。
 
 ## 验收标准
-- [ ] 引入 `thiserror` 依赖
-- [ ] 定义核心错误枚举：`GatewayError`、`DatabaseError`、`StrategyError`、`BacktestError`
+- [x] 引入 `thiserror` 依赖
+- [x] 定义核心错误枚举：`GatewayError`、`DatabaseError`、`StrategyError`、`BacktestError`
 - [ ] `BaseGateway` trait 的返回类型从 `Result<T, String>` 改为 `Result<T, GatewayError>`
 - [ ] `BaseDatabase` trait 的返回类型从 `Result<T, String>` 改为 `Result<T, DatabaseError>`
-- [ ] 渐进式迁移：新代码使用枚举，旧代码逐步改造
+- [x] 渐进式迁移：新代码使用枚举，旧代码逐步改造

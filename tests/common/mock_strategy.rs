@@ -194,6 +194,7 @@ impl TestStrategy {
             reference: self.name.clone(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         self.pending_orders.lock().unwrap().push(req);
     }
@@ -212,6 +213,7 @@ impl TestStrategy {
             reference: self.name.clone(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         self.pending_orders.lock().unwrap().push(req);
     }

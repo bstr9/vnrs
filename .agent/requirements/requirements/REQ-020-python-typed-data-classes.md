@@ -1,7 +1,8 @@
 ---
 id: REQ-020
 title: "Python 类型化数据类（BarData, TickData, OrderData, TradeData）"
-status: active
+status: completed
+completed_at: "2026-04-21T00:00:00"
 created_at: "2026-04-19T12:00:00"
 updated_at: "2026-04-19T12:00:00"
 priority: P1

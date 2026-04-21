@@ -799,8 +799,9 @@ mod tests {
                     datetime: Some(Utc::now()),
                     reference: String::new(),
                     post_only: false,
-                    reduce_only: false,
-                    extra: None,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
                 };
         engine.oms().process_order(order);
 

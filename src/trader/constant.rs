@@ -155,6 +155,8 @@ pub enum OrderType {
     Rfq,
     /// ETF order
     Etf,
+    /// Good Till Date order
+    Gtd,
 }
 
 impl fmt::Display for OrderType {
@@ -168,6 +170,7 @@ impl fmt::Display for OrderType {
             OrderType::Fok => write!(f, "FOK"),
             OrderType::Rfq => write!(f, "询价"),
             OrderType::Etf => write!(f, "ETF"),
+            OrderType::Gtd => write!(f, "GTD"),
         }
     }
 }
@@ -593,6 +596,7 @@ mod tests {
         assert_eq!(format!("{}", OrderType::Fok), "FOK");
         assert_eq!(format!("{}", OrderType::Rfq), "询价");
         assert_eq!(format!("{}", OrderType::Etf), "ETF");
+        assert_eq!(format!("{}", OrderType::Gtd), "GTD");
     }
 
     #[test]

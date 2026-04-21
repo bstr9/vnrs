@@ -606,6 +606,26 @@ impl StrategyEngine {
         Ok(())
     }
 
+    /// Get the shared caches from the StrategyContext for a given strategy name.
+    ///
+    /// Returns the `(tick_cache, bar_cache, historical_bars)` Arcs if the
+    /// strategy's context exists, allowing Python code to read the same
+    /// live data that the StrategyEngine updates.
+    #[cfg(feature = "python")]
+    pub fn get_context_caches(
+        &self,
+        strategy_name: &str,
+    ) -> Option<(
+        Arc<Mutex<HashMap<String, TickData>>>,
+        Arc<Mutex<HashMap<String, BarData>>>,
+        Arc<Mutex<HashMap<String, Vec<BarData>>>>,
+    )> {
+        let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
+        contexts.get(strategy_name).map(|ctx| {
+            (ctx.tick_cache.clone(), ctx.bar_cache.clone(), ctx.historical_bars.clone())
+        })
+    }
+
     /// Subscribe to market data for a symbol
     async fn subscribe_symbol(&self, strategy_name: &str, vt_symbol: &str) {
         // Parse vt_symbol (format: "symbol.exchange")

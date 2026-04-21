@@ -485,6 +485,7 @@ impl BaseStrategy {
             reference: self.strategy_name.clone(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         }
     }
 

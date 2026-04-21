@@ -1,7 +1,8 @@
 ---
 id: REQ-026
 title: "StrategyContext 暴露给 Python 策略（含数据查询方法）"
-status: active
+status: completed
+completed_at: "2026-04-21T00:00:00"
 created_at: "2026-04-19T14:00:00"
 updated_at: "2026-04-19T19:04:20"
 priority: P1
@@ -49,17 +50,17 @@ nautilus_trader Strategy 可直接访问 cache 对象获取所有市场数据。
 
 ## 验收标准
 
-- [ ] 新增 `PyStrategyContext` PyO3 类，包装 `StrategyContext`
-- [ ] Python `Strategy` 添加 `self.context` 属性（注入时机与 portfolio 一致）
-- [ ] `context.get_tick(vt_symbol)` → 返回 PyTickData 或 None（原 REQ-032）
-- [ ] `context.get_bar(vt_symbol)` → 返回 PyBarData 或 None（原 REQ-032）
-- [ ] `context.get_bars(vt_symbol, count)` → 返回 List[PyBarData]，按时间升序（原 REQ-031）
+- [x] 新增 `PyStrategyContext` PyO3 类，包装 `StrategyContext`
+- [x] Python `Strategy` 添加 `self.context` 属性（注入时机与 portfolio 一致）
+- [x] `context.get_tick(vt_symbol)` → 返回 PyTickData 或 None（原 REQ-032）
+- [x] `context.get_bar(vt_symbol)` → 返回 PyBarData 或 None（原 REQ-032）
+- [x] `context.get_bars(vt_symbol, count)` → 返回 List[PyBarData]，按时间升序（原 REQ-031）
   - 回测模式：从 BacktestingEngine 历史数据缓存获取
   - 实盘模式：从 StrategyContext 的 historical_bars 缓存获取
   - 无数据时返回空列表
-- [ ] `context.load_bar(vt_symbol, days, interval)` → 返回 List[PyBarData]（从数据库/缓存加载）
-- [ ] 回测引擎和实盘引擎均注入 context
-- [ ] 与 REQ-020（类型化数据类）对齐
+- [x] `context.load_bar(vt_symbol, days, interval)` → 返回 List[PyBarData]（从数据库/缓存加载）
+- [x] 回测引擎和实盘引擎均注入 context
+- [x] 与 REQ-020（类型化数据类）对齐
 
 ## 影响范围
 

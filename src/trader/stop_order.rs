@@ -397,6 +397,7 @@ impl StopOrderEngine {
             price, offset: order.offset,
             reference: if order.reference.is_empty() { format!("STOP_{}", order.id) } else { order.reference.clone() },
             post_only: false, reduce_only: false,
+            expire_time: None,
         }
     }
 

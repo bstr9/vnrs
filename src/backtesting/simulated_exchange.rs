@@ -432,6 +432,7 @@ impl InstrumentMatchingEngine {
             reference: req.reference,
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 
@@ -508,8 +509,10 @@ impl InstrumentMatchingEngine {
                 reference: stop_order.strategy_name,
                 post_only: false,
                 reduce_only: false,
+                expire_time: None,
                 extra: None,
             })
+
         } else {
             Err(format!("订单不存在: {}", vt_orderid))
         }
@@ -666,6 +669,7 @@ impl InstrumentMatchingEngine {
                 reference: String::new(),
                 post_only: false,
                 reduce_only: false,
+                expire_time: None,
                 extra: None,
             };
 
@@ -812,6 +816,7 @@ impl InstrumentMatchingEngine {
                 reference: String::new(),
                 post_only: false,
                 reduce_only: false,
+                expire_time: None,
                 extra: None,
             };
 
@@ -986,6 +991,7 @@ impl SimulatedExchange {
             reference: req.reference.clone(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 
@@ -1258,6 +1264,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         }
     }
 

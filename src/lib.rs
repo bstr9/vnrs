@@ -27,6 +27,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+pub mod error;
 pub mod event;
 pub mod trader;
 pub mod rpc;

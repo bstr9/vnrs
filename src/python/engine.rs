@@ -4,7 +4,7 @@
 use crate::python::data_converter;
 use crate::python::strategy::Strategy;
 use crate::python::strategy_adapter::PythonStrategyAdapter;
-use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PortfolioState};
+use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PortfolioState, PyStrategyContext};
 use crate::strategy::{StrategyEngine, StrategySetting};
 use crate::trader::{
     BarData, BaseEngine, CancelRequest, Direction, Exchange, GatewayEvent, MainEngine, Offset,
@@ -84,6 +84,14 @@ impl PythonEngine {
         let message_bus = MessageBus::new();
         let bus_py = Py::new(py, message_bus)?;
         strategy.borrow_mut().message_bus = Some(bus_py);
+
+        // Create and inject PyStrategyContext
+        // For live trading with a StrategyEngine, the context will be updated
+        // by add_strategy_live() which shares the engine's caches.
+        // For non-StrategyEngine paths, this provides an empty context.
+        let context = PyStrategyContext::new_empty();
+        let context_py = Py::new(py, context)?;
+        strategy.borrow_mut().context = Some(context_py);
 
         self.strategies
             .insert(strategy_name.clone(), strategy.clone().unbind());
@@ -299,6 +307,7 @@ impl PythonEngine {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let gateway_name = match exchange {

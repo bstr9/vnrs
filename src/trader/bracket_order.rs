@@ -319,6 +319,7 @@ impl BracketOrderEngine {
             reference: if req.reference.is_empty() { format!("BRACKET_{}_ENTRY", id) } else { req.reference.clone() },
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let entry_child = ChildOrder {
             role: OrderRole::Entry, request: entry_request.clone(),
@@ -336,6 +337,7 @@ impl BracketOrderEngine {
             reference: format!("BRACKET_{}_TP", id),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let tp_child = ChildOrder {
             role: OrderRole::TakeProfit, request: tp_request,
@@ -353,6 +355,7 @@ impl BracketOrderEngine {
             reference: format!("BRACKET_{}_SL", id),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let sl_child = ChildOrder {
             role: OrderRole::StopLoss, request: sl_request,
@@ -394,6 +397,7 @@ impl BracketOrderEngine {
             reference: if req.reference.is_empty() { format!("OCO_{}_A", id) } else { req.reference.clone() },
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let b_req = OrderRequest {
             symbol: req.symbol.clone(),
@@ -406,6 +410,7 @@ impl BracketOrderEngine {
             reference: format!("OCO_{}_B", id),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let child_a = ChildOrder {
@@ -457,6 +462,7 @@ impl BracketOrderEngine {
             reference: if req.reference.is_empty() { format!("OTO_{}_PRIMARY", id) } else { req.reference.clone() },
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let s_req = OrderRequest {
             symbol: req.symbol.clone(),
@@ -469,6 +475,7 @@ impl BracketOrderEngine {
             reference: format!("OTO_{}_SECONDARY", id),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let p_child = ChildOrder {

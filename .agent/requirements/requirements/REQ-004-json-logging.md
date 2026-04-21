@@ -1,7 +1,7 @@
 ---
 id: REQ-004
 title: "结构化 JSON 日志"
-status: active
+status: completed
 created_at: "2026-04-19T00:00:00"
 updated_at: "2026-04-19T00:00:00"
 priority: P1

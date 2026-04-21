@@ -372,6 +372,9 @@ pub struct OrderData {
     /// Reduce-Only: Order can only reduce an existing position, not open a new one.
     #[serde(default)]
     pub reduce_only: bool,
+    /// Expire time for GTD (Good Till Date) orders.
+    #[serde(default)]
+    pub expire_time: Option<DateTime<Utc>>,
 
     #[serde(skip)]
     pub extra: Option<HashMap<String, String>>,
@@ -401,6 +404,7 @@ impl OrderData {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         }
     }
@@ -877,6 +881,10 @@ pub struct OrderRequest {
     /// Binance Futures: `reduceOnly=true`
     #[serde(default)]
     pub reduce_only: bool,
+    /// Expire time for GTD (Good Till Date) orders.
+    /// Specifies the date/time when the order should be automatically cancelled if not filled.
+    #[serde(default)]
+    pub expire_time: Option<DateTime<Utc>>,
 }
 
 impl OrderRequest {
@@ -899,6 +907,7 @@ impl OrderRequest {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         }
     }
 
@@ -918,6 +927,8 @@ impl OrderRequest {
         order.reference = self.reference.clone();
         order.post_only = self.post_only;
         order.reduce_only = self.reduce_only;
+        order.expire_time = self.expire_time;
+        order.expire_time = self.expire_time;
         order
     }
 }
@@ -1247,6 +1258,7 @@ mod tests {
             reference: "test_ref".to_string(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let order = req.create_order_data("OID1".to_string(), "binance".to_string());
         assert_eq!(order.gateway_name, "binance");

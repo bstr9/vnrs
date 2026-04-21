@@ -1,7 +1,7 @@
 ---
 id: REQ-025
 title: "Python 止损单完整功能（发送/回调/取消）"
-status: active
+status: completed
 created_at: "2026-04-19T12:00:00"
 updated_at: "2026-04-19T19:04:20"
 priority: P2

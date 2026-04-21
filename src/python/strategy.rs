@@ -16,15 +16,28 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::python::{MessageBus, OrderFactory, PortfolioFacade};
+use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PyStrategyContext};
 
 /// A pending order queued by the strategy during on_bar (to avoid mutex deadlock)
 #[derive(Clone)]
 pub struct PendingOrder {
     pub vt_symbol: String,
     pub direction: String, // "buy", "sell", "short", "cover"
+    pub offset: Option<String>, // "open", "close", "closetoday", "closeyesterday", None (= auto)
     pub price: f64,
     pub volume: f64,
+}
+
+/// A pending stop order queued by the strategy during on_bar (to avoid mutex deadlock)
+#[derive(Clone)]
+pub struct PendingStopOrder {
+    pub vt_symbol: String,
+    pub direction: String,  // "buy" or "sell"
+    pub offset: Option<String>,
+    pub price: f64,
+    pub volume: f64,
+    pub order_type: String, // "stop" or "stop_limit"
+    pub stop_price: f64,    // trigger price
 }
 
 /// Strategy state as a string property for Python consumers.
@@ -78,6 +91,13 @@ pub struct Strategy {
     #[pyo3(get)]
     pub target_data: HashMap<String, f64>,
 
+    // Strategy parameters and variables (vnpy CtaTemplate compatible)
+    #[pyo3(get)]
+    pub parameters: HashMap<String, String>,
+
+    #[pyo3(get)]
+    pub variables: HashMap<String, String>,
+
     #[pyo3(get)]
     pub active_orderids: Vec<String>,
 
@@ -97,8 +117,19 @@ pub struct Strategy {
     #[pyo3(get, set)]
     pub message_bus: Option<Py<MessageBus>>,
 
+    /// Strategy context for market data access (tick/bar caches)
+    #[pyo3(get, set)]
+    pub context: Option<Py<PyStrategyContext>>,
+
     /// Pending orders queued during on_bar (to avoid mutex deadlock on BacktestingEngine)
     pending_orders: Arc<Mutex<Vec<PendingOrder>>>,
+
+    /// Pending stop orders queued during on_bar (to avoid mutex deadlock on BacktestingEngine)
+    pending_stop_orders: Arc<Mutex<Vec<PendingStopOrder>>>,
+
+    /// Active stop order IDs for tracking
+    #[pyo3(get)]
+    pub active_stop_orderids: Vec<String>,
 }
 
 #[pymethods]
@@ -115,12 +146,17 @@ impl Strategy {
             stopped: false,
             pos_data: HashMap::new(),
             target_data: HashMap::new(),
+            parameters: HashMap::new(),
+            variables: HashMap::new(),
             active_orderids: Vec::new(),
             engine: None,
             portfolio: None,
             order_factory: None,
             message_bus: None,
+            context: None,
             pending_orders: Arc::new(Mutex::new(Vec::new())),
+            pending_stop_orders: Arc::new(Mutex::new(Vec::new())),
+            active_stop_orderids: Vec::new(),
         }
     }
 
@@ -193,6 +229,11 @@ impl Strategy {
         Ok(())
     }
 
+    /// Handle depth/order book update. Override in subclass.
+    fn on_depth(&self, _py: Python, _depth: Py<PyAny>) -> PyResult<()> {
+        Ok(())
+    }
+
     // ---- State mutators (called by the engine) ----
 
     /// Mark strategy as initialized
@@ -219,8 +260,15 @@ impl Strategy {
     // This avoids the mutex deadlock that would occur if we called back into
     // PyBacktestingEngine (which holds the engine mutex during the backtest loop).
 
-    /// Buy (long open)
-    fn buy(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+    /// Buy (long direction). Offset defaults to "open" for spot, auto for futures.
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     price: Order price
+    ///     volume: Order volume
+    ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto)
+    #[pyo3(signature = (vt_symbol, price, volume, offset=None))]
+    fn buy(&self, vt_symbol: &str, price: f64, volume: f64, offset: Option<&str>) -> PyResult<Vec<String>> {
         if volume <= 0.0 {
             return Ok(vec![]);
         }
@@ -230,14 +278,22 @@ impl Strategy {
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "buy".to_string(),
+                offset: offset.map(|s| s.to_string()),
                 price,
                 volume,
             });
         Ok(vec![])
     }
 
-    /// Sell (long close)
-    fn sell(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+    /// Sell (short direction). Offset defaults to "close" for spot, auto for futures.
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     price: Order price
+    ///     volume: Order volume
+    ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto)
+    #[pyo3(signature = (vt_symbol, price, volume, offset=None))]
+    fn sell(&self, vt_symbol: &str, price: f64, volume: f64, offset: Option<&str>) -> PyResult<Vec<String>> {
         if volume <= 0.0 {
             return Ok(vec![]);
         }
@@ -247,14 +303,22 @@ impl Strategy {
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "sell".to_string(),
+                offset: offset.map(|s| s.to_string()),
                 price,
                 volume,
             });
         Ok(vec![])
     }
 
-    /// Short (short open, futures only)
-    fn short(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+    /// Short (short open, futures only).
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     price: Order price
+    ///     volume: Order volume
+    ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto=open)
+    #[pyo3(signature = (vt_symbol, price, volume, offset=None))]
+    fn short(&self, vt_symbol: &str, price: f64, volume: f64, offset: Option<&str>) -> PyResult<Vec<String>> {
         if volume <= 0.0 {
             return Ok(vec![]);
         }
@@ -271,14 +335,22 @@ impl Strategy {
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "short".to_string(),
+                offset: offset.map(|s| s.to_string()),
                 price,
                 volume,
             });
         Ok(vec![])
     }
 
-    /// Cover (short close, futures only)
-    fn cover(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+    /// Cover (short close, futures only).
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     price: Order price
+    ///     volume: Order volume
+    ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto=close)
+    #[pyo3(signature = (vt_symbol, price, volume, offset=None))]
+    fn cover(&self, vt_symbol: &str, price: f64, volume: f64, offset: Option<&str>) -> PyResult<Vec<String>> {
         if volume <= 0.0 {
             return Ok(vec![]);
         }
@@ -295,10 +367,98 @@ impl Strategy {
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "cover".to_string(),
+                offset: offset.map(|s| s.to_string()),
                 price,
                 volume,
             });
         Ok(vec![])
+    }
+
+    /// Send stop order (conditional order that triggers when price reaches stop_price).
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     direction: "buy" or "sell"
+    ///     price: Order price (limit price for stop_limit, ignored for stop)
+    ///     volume: Order volume
+    ///     stop_price: Trigger price
+    ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None
+    ///     order_type: "stop" (market) or "stop_limit" (limit)
+    #[pyo3(signature = (vt_symbol, direction, price, volume, stop_price, offset=None, order_type="stop"))]
+    fn send_stop_order(
+        &self,
+        vt_symbol: &str,
+        direction: &str,
+        price: f64,
+        volume: f64,
+        stop_price: f64,
+        offset: Option<&str>,
+        order_type: &str,
+    ) -> PyResult<String> {
+        if volume <= 0.0 {
+            return Ok(String::new());
+        }
+        let stop_orderid = format!(
+            "STOP_{}_{}",
+            vt_symbol,
+            chrono::Utc::now().timestamp_millis()
+        );
+        self.pending_stop_orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(PendingStopOrder {
+                vt_symbol: vt_symbol.to_string(),
+                direction: direction.to_string(),
+                offset: offset.map(|s| s.to_string()),
+                price,
+                volume,
+                order_type: order_type.to_string(),
+                stop_price,
+            });
+        Ok(stop_orderid)
+    }
+
+    /// Handle stop order update. Override in subclass.
+    fn on_stop_order(&self, _py: Python, _stop_orderid: String) -> PyResult<()> {
+        Ok(())
+    }
+
+    /// Cancel stop order.
+    fn cancel_stop_order(&self, stop_orderid: &str) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "cancel_stop_order", (stop_orderid,));
+            });
+        }
+        Ok(())
+    }
+
+    // ---- Futures convenience methods ----
+    // These provide explicit offset semantics, matching vnpy's CtaTemplate
+    // buy_open / buy_close / short_open / sell_close naming convention.
+
+    /// Buy to open long position (futures). Equivalent to `buy(symbol, price, volume, offset="open")`.
+    #[pyo3(signature = (vt_symbol, price, volume))]
+    fn buy_open(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        self.buy(vt_symbol, price, volume, Some("open"))
+    }
+
+    /// Buy to close short position (futures). Equivalent to `buy(symbol, price, volume, offset="close")`.
+    #[pyo3(signature = (vt_symbol, price, volume))]
+    fn buy_close(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        self.buy(vt_symbol, price, volume, Some("close"))
+    }
+
+    /// Short to open short position (futures). Equivalent to `short(symbol, price, volume, offset="open")`.
+    #[pyo3(signature = (vt_symbol, price, volume))]
+    fn short_open(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        self.short(vt_symbol, price, volume, Some("open"))
+    }
+
+    /// Sell to close long position (futures). Equivalent to `sell(symbol, price, volume, offset="close")`.
+    #[pyo3(signature = (vt_symbol, price, volume))]
+    fn sell_close(&self, vt_symbol: &str, price: f64, volume: f64) -> PyResult<Vec<String>> {
+        self.sell(vt_symbol, price, volume, Some("close"))
     }
 
     /// Cancel order
@@ -400,6 +560,79 @@ impl Strategy {
         Ok(())
     }
 
+    // ---- Parameter and variable access (vnpy CtaTemplate compatible) ----
+
+    /// Get a strategy parameter by key.
+    ///
+    /// Returns the parameter value if found, or `default` if not.
+    /// Args:
+    ///     key: Parameter name
+    ///     default: Default value if key not found (None by default)
+    #[pyo3(signature = (key, default=None))]
+    fn get_parameter(&self, key: &str, default: Option<&str>) -> PyResult<Option<String>> {
+        Ok(self.parameters.get(key).cloned().or(default.map(|s| s.to_string())))
+    }
+
+    /// Set a strategy parameter.
+    ///
+    /// Args:
+    ///     key: Parameter name
+    ///     value: Parameter value
+    fn set_parameter(&mut self, key: &str, value: &str) -> PyResult<()> {
+        self.parameters.insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+
+    /// Get a strategy variable by key.
+    ///
+    /// Returns the variable value if found, or `default` if not.
+    /// Args:
+    ///     key: Variable name
+    ///     default: Default value if key not found (None by default)
+    #[pyo3(signature = (key, default=None))]
+    fn get_variable(&self, key: &str, default: Option<&str>) -> PyResult<Option<String>> {
+        Ok(self.variables.get(key).cloned().or(default.map(|s| s.to_string())))
+    }
+
+    /// Set a strategy variable.
+    ///
+    /// Args:
+    ///     key: Variable name
+    ///     value: Variable value
+    fn set_variable(&mut self, key: &str, value: &str) -> PyResult<()> {
+        self.variables.insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+
+    /// Insert a strategy parameter (called by engine when loading strategy settings).
+    ///
+    /// This is an alias for `set_parameter` used by the engine to populate
+    /// strategy parameters from configuration.
+    fn insert_parameter(&mut self, key: &str, value: &str) -> PyResult<()> {
+        self.parameters.insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+
+    /// Insert a strategy variable (called by engine to set computed variables).
+    ///
+    /// This is an alias for `set_variable` used by the engine to populate
+    /// strategy variables.
+    fn insert_variable(&mut self, key: &str, value: &str) -> PyResult<()> {
+        self.variables.insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+
+    /// Load strategy settings from a dict into parameters.
+    ///
+    /// Iterates over the setting dict and calls `insert_parameter` for each
+    /// entry. This is how vnpy's CtaTemplate loads strategy settings.
+    fn load_setting(&mut self, setting: HashMap<String, String>) -> PyResult<()> {
+        for (key, value) in setting {
+            self.parameters.insert(key, value);
+        }
+        Ok(())
+    }
+
     /// Write log message
     fn write_log(&self, msg: &str) -> PyResult<()> {
         tracing::info!("[策略:{}] {}", self.strategy_name, msg);
@@ -423,5 +656,10 @@ impl Strategy {
     /// Get the pending orders queue (for PythonStrategyAdapter to drain)
     pub fn pending_orders_arc(&self) -> Arc<Mutex<Vec<PendingOrder>>> {
         Arc::clone(&self.pending_orders)
+    }
+
+    /// Get the pending stop orders queue (for PythonStrategyAdapter to drain)
+    pub fn pending_stop_orders_arc(&self) -> Arc<Mutex<Vec<PendingStopOrder>>> {
+        Arc::clone(&self.pending_stop_orders)
     }
 }

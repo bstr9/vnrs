@@ -424,6 +424,7 @@ impl AlgoEngine {
                     reference: format!("TWAP_{}_{}", algo_id, slice_idx),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
                 };
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound
@@ -525,6 +526,7 @@ impl AlgoEngine {
                     reference: format!("VWAP_{}_{}", algo_id, slice_idx),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
                 };
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound

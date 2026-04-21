@@ -1,4 +1,4 @@
-use crate::python::{OrderFactory, PyOrder, PythonEngine, PythonEngineBridge, Strategy};
+use crate::python::{OrderFactory, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy};
 use crate::strategy::StrategyEngine;
 use crate::trader::constant::{Direction, Offset, OrderType};
 use crate::trader::MainEngine;
@@ -59,7 +59,7 @@ fn run_event_loop() -> PyResult<()> {
 #[pyfunction]
 #[pyo3(signature = (strategy, strategy_engine, _setting=None))]
 fn add_strategy_live(
-    _py: Python,
+    py: Python,
     strategy: Bound<'_, Strategy>,
     strategy_engine: &StrategyEngineHandle,
     _setting: Option<&Bound<'_, PyDict>>,
@@ -104,6 +104,15 @@ fn add_strategy_live(
         }
     }
 
+    // Inject PyStrategyContext sharing the live StrategyEngine's caches
+    if let Some((tick_cache, bar_cache, historical_bars)) =
+        strategy_engine.inner.get_context_caches(&strategy_name)
+    {
+        let context = PyStrategyContext::from_caches(tick_cache, bar_cache, historical_bars);
+        let context_py = Py::new(py, context)?;
+        strategy.setattr("context", context_py)?;
+    }
+
     tracing::info!("Python strategy '{}' added to live StrategyEngine", strategy_name);
     Ok(vec![strategy_name])
 }
@@ -116,6 +125,7 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<StrategyEngineHandle>()?;
     m.add_class::<PyOrder>()?;
     m.add_class::<OrderFactory>()?;
+    m.add_class::<PyStrategyContext>()?;
     m.add_function(wrap_pyfunction!(create_main_engine, m)?)?;
     m.add_function(wrap_pyfunction!(run_event_loop, m)?)?;
     m.add_function(wrap_pyfunction!(add_strategy_live, m)?)?;

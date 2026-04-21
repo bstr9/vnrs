@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use tracing::{error, warn};
 
-use crate::python::strategy::PendingOrder;
-use crate::strategy::{StrategyContext, StrategyState, StrategyTemplate, StrategyType};
+use crate::python::strategy::{PendingOrder, PendingStopOrder};
+use crate::strategy::{StrategyContext, StrategyState, StrategyTemplate, StrategyType, StopOrderRequest};
 use crate::trader::{
-    BarData, Direction, Exchange, Offset, OrderData, OrderRequest, OrderType, TickData, TradeData,
+    BarData, DepthData, Direction, Exchange, Offset, OrderData, OrderRequest, OrderType, TickData, TradeData,
 };
 
 /// Python strategy adapter that implements StrategyTemplate
@@ -42,6 +42,9 @@ pub struct PythonStrategyAdapter {
 
     /// Pending orders from Python strategy (shared with Strategy.pending_orders)
     pending_orders: Option<Arc<Mutex<Vec<PendingOrder>>>>,
+
+    /// Pending stop orders from Python strategy (shared with Strategy.pending_stop_orders)
+    pending_stop_orders: Option<Arc<Mutex<Vec<PendingStopOrder>>>>,
 }
 
 impl PythonStrategyAdapter {
@@ -144,6 +147,7 @@ impl PythonStrategyAdapter {
                 parameters: Arc::new(Mutex::new(HashMap::new())),
                 variables: Arc::new(Mutex::new(HashMap::new())),
                 pending_orders: None, // Will be set if the instance is a Strategy
+                pending_stop_orders: None, // Will be set if the instance is a Strategy
             })
         })
     }
@@ -156,12 +160,16 @@ impl PythonStrategyAdapter {
     ) -> Self {
         // Try to get the pending_orders Arc from the Strategy instance
         // by downcasting the PyAny to the Rust Strategy type
-        let pending_orders = Python::attach(|py| {
+        let (pending_orders, pending_stop_orders) = Python::attach(|py| {
             use crate::python::Strategy;
             py_strategy
                 .cast_bound::<Strategy>(py)
                 .ok()
-                .map(|bound| bound.borrow().pending_orders_arc())
+                .map(|bound| {
+                    let borrowed = bound.borrow();
+                    (borrowed.pending_orders_arc(), borrowed.pending_stop_orders_arc())
+                })
+                .unzip()
         });
 
         Self {
@@ -174,6 +182,7 @@ impl PythonStrategyAdapter {
             parameters: Arc::new(Mutex::new(HashMap::new())),
             variables: Arc::new(Mutex::new(HashMap::new())),
             pending_orders,
+            pending_stop_orders,
         }
     }
 
@@ -356,6 +365,20 @@ impl StrategyTemplate for PythonStrategyAdapter {
         });
     }
 
+    fn on_depth(&mut self, depth: &DepthData, _context: &StrategyContext) {
+        Python::attach(|py| {
+            let py_depth = crate::python::data_types::PyDepthData::from_rust(depth);
+            match Py::new(py, py_depth) {
+                Ok(py_depth_obj) => {
+                    if let Err(e) = self.call_py_method1("on_depth", py, py_depth_obj.into_any()) {
+                        warn!("策略 {} on_depth 错误: {}", self.strategy_name, e);
+                    }
+                }
+                Err(e) => error!("策略 {} 创建 PyDepthData 失败: {}", self.strategy_name, e),
+            }
+        });
+    }
+
     fn on_stop_order(&mut self, stop_orderid: &str) {
         Python::attach(|py| {
             if let Err(e) = self.call_py_method_with_str("on_stop_order", py, stop_orderid) {
@@ -377,24 +400,35 @@ impl StrategyTemplate for PythonStrategyAdapter {
         };
 
         // Convert PendingOrder to OrderRequest
-        // Direction/Offset mapping (consistent with apply_fill):
-        // - buy:   Long+Open  → delta = +vol (open long)
-        // - sell:  Short+Close→ delta = -vol (close long)
-        // - short: Short+Open → delta = -vol (open short)
-        // - cover: Long+Close → delta = +vol (close short)
+        // Direction/Offset mapping:
+        // - buy:   Long direction, offset auto=Open (overridable)
+        // - sell:  Short direction, offset auto=Close (overridable)
+        // - short: Short direction, offset auto=Open (overridable)
+        // - cover: Long direction, offset auto=Close (overridable)
+        // When po.offset is explicitly set, it takes precedence over the default.
         pending
             .into_iter()
             .map(|po| {
                 let (symbol, exchange) = crate::trader::utility::extract_vt_symbol(&po.vt_symbol)
                     .unwrap_or((po.vt_symbol.clone(), Exchange::Binance));
 
-                let (direction, offset) = match po.direction.as_str() {
+                let (direction, default_offset) = match po.direction.as_str() {
                     "buy" => (Direction::Long, Offset::Open),
                     "sell" => (Direction::Short, Offset::Close),
                     "short" => (Direction::Short, Offset::Open),
                     "cover" => (Direction::Long, Offset::Close),
                     _ => (Direction::Long, Offset::Open),
                 };
+
+                // Use explicit offset if provided, otherwise use the default
+                let offset = match po.offset.as_deref() {
+                    Some("open") => Offset::Open,
+                    Some("close") => Offset::Close,
+                    Some("closetoday") => Offset::CloseToday,
+                    Some("closeyesterday") => Offset::CloseYesterday,
+                    _ => default_offset,
+                };
+
                 OrderRequest {
                     symbol,
                     exchange,
@@ -406,6 +440,61 @@ impl StrategyTemplate for PythonStrategyAdapter {
                     reference: String::new(),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
+                }
+            })
+            .collect()
+    }
+
+    fn drain_pending_stop_orders(&mut self) -> Vec<StopOrderRequest> {
+        // Drain from the shared Arc<Mutex<Vec<PendingStopOrder>>>
+        let pending: Vec<PendingStopOrder> = if let Some(ref queue) = self.pending_stop_orders {
+            queue
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .drain(..)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Convert PendingStopOrder to StopOrderRequest
+        pending
+            .into_iter()
+            .map(|po| {
+                let direction = match po.direction.as_str() {
+                    "buy" => Direction::Long,
+                    "sell" => Direction::Short,
+                    _ => Direction::Long,
+                };
+
+                let offset = po.offset.as_deref().map(|s| match s {
+                    "open" => Offset::Open,
+                    "close" => Offset::Close,
+                    "closetoday" => Offset::CloseToday,
+                    "closeyesterday" => Offset::CloseYesterday,
+                    _ => Offset::None,
+                });
+
+                let order_type = match po.order_type.as_str() {
+                    "stop" => OrderType::Stop,
+                    "stop_limit" => OrderType::StopLimit,
+                    _ => OrderType::Stop,
+                };
+
+                StopOrderRequest {
+                    vt_symbol: po.vt_symbol,
+                    direction,
+                    offset,
+                    price: po.stop_price,
+                    volume: po.volume,
+                    order_type,
+                    limit_price: if order_type == OrderType::StopLimit {
+                        Some(po.price)
+                    } else {
+                        None
+                    },
+                    lock: false,
                 }
             })
             .collect()

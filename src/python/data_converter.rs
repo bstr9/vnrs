@@ -370,6 +370,7 @@ pub fn py_to_order(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::
         reference: String::new(),
         post_only: false,
         reduce_only: false,
+        expire_time: None,
         extra: None,
     })
 }

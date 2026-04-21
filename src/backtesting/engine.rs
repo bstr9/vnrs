@@ -1093,8 +1093,9 @@ impl BacktestingEngine {
                         datetime: Some(bar.datetime),
                         reference: String::new(),
                         post_only: false,
-                        reduce_only: false,
-                        extra: None,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
                     };
 
             // Use appropriate fill simulation based on order type
@@ -1293,8 +1294,9 @@ impl BacktestingEngine {
                         datetime: Some(tick.datetime),
                         reference: String::new(),
                         post_only: false,
-                        reduce_only: false,
-                        extra: None,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
                     };
 
             // For tick data, use simulate_tick_fill for stop orders
@@ -1410,8 +1412,10 @@ impl BacktestingEngine {
                     reference: req.reference.clone(),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
                     extra: None,
                 };
+
 
         // Pre-trade risk check
         let active_order_count = self.active_limit_orders.len() + self.active_stop_orders.len();
@@ -1439,6 +1443,7 @@ impl BacktestingEngine {
                 reference: req.reference,
                 post_only: false,
                 reduce_only: false,
+                expire_time: None,
             };
             if let Ok(sim_order) = sim_exchange.submit_order(
                 sim_req, self.exchange, req.direction, req.offset, self.clock.as_ref(),
@@ -1517,8 +1522,10 @@ impl BacktestingEngine {
                     reference: String::new(),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
                     extra: None,
                 };
+
         let active_order_count = self.active_limit_orders.len() + self.active_stop_orders.len();
         let risk_result = self.risk_engine.check_order(
             &order_for_check, &self.position, active_order_count, self.size,
@@ -1544,6 +1551,7 @@ impl BacktestingEngine {
                 reference: req.reference.clone(),
                 post_only: false,
                 reduce_only: false,
+                expire_time: None,
             };
             let dir = req.direction;
             let off = req.offset;
@@ -2206,6 +2214,7 @@ impl BacktestingEngine {
                     reference: format!("EMULATED_{}", id),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
                 };
 
                 self.send_limit_order(req);
@@ -3048,6 +3057,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let orderid = engine.send_limit_order(req);
 
@@ -3107,6 +3117,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let orderid = engine.send_limit_order(req);
 
@@ -3152,6 +3163,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let orderid = engine.send_limit_order(req);
 
@@ -3205,6 +3217,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let stop_orderid = engine.send_stop_order(req);
 
@@ -3263,6 +3276,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let stop_orderid = engine.send_stop_order(req);
 
@@ -3789,6 +3803,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let tp_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3801,6 +3816,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let sl_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3813,6 +3829,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
@@ -3860,6 +3877,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let tp_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3872,6 +3890,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let sl_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3884,6 +3903,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
@@ -3948,6 +3968,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let tp_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3960,6 +3981,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let sl_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -3972,6 +3994,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
@@ -4044,6 +4067,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let order_b_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -4056,6 +4080,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let group_id = engine.send_oco_order(order_a_req, order_b_req);
@@ -4097,6 +4122,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let order_b_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -4109,6 +4135,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let group_id = engine.send_oco_order(order_a_req, order_b_req);
@@ -4160,6 +4187,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let secondary_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -4172,6 +4200,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let group_id = engine.send_oto_order(primary_req, secondary_req);
@@ -4212,6 +4241,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let secondary_req = OrderRequest {
             symbol: "BTCUSDT".to_string(),
@@ -4224,6 +4254,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         let group_id = engine.send_oto_order(primary_req, secondary_req);

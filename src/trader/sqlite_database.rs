@@ -203,6 +203,7 @@ impl SqliteDatabase {
             gateway_name: row.get(12)?,
             post_only: post_only_val != 0,
             reduce_only: reduce_only_val != 0,
+            expire_time: None,
             extra: None,
         })
     }
@@ -1289,6 +1290,7 @@ mod tests {
             reference: "test_ref".to_string(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 
@@ -1401,6 +1403,7 @@ mod tests {
             reference: String::new(),
             post_only: true,
             reduce_only: true,
+            expire_time: None,
             extra: None,
         };
 
@@ -1433,6 +1436,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 
@@ -1452,6 +1456,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: true,
+            expire_time: None,
             extra: None,
         };
 
@@ -1492,6 +1497,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 
@@ -1513,6 +1519,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
             extra: None,
         };
 

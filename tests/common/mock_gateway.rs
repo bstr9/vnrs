@@ -227,6 +227,7 @@ impl BaseGateway for MockGateway {
                             reference: req.reference.clone(),
                             post_only: false,
                             reduce_only: false,
+                            expire_time: None,
                             extra: None,
                         };
                 sender.on_order(order);

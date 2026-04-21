@@ -558,6 +558,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         }
     }
 
@@ -672,6 +673,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let result = rm.check_order(&open_req);
         assert!(matches!(result, RiskCheckResult::Rejected(_)));
@@ -688,6 +690,7 @@ mod tests {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let result = rm.check_order(&close_req);
         assert!(matches!(result, RiskCheckResult::Approved));

@@ -264,15 +264,18 @@ def run_with_rust_engine():
             price = base_price + (i % 100 - 50) * 10
             
             bar = PyBarData(
+                gateway_name="",
                 symbol="BTCUSDT",
                 exchange="BINANCE",
                 datetime=dt.isoformat(),
                 interval="1m",
-                open=price - 5,
-                high=price + 10,
-                low=price - 10,
-                close=price,
-                volume=100.0
+                open_price=price - 5,
+                high_price=price + 10,
+                low_price=price - 10,
+                close_price=price,
+                volume=100.0,
+                turnover=0.0,
+                open_interest=0.0,
             )
             bars.append(bar)
         

@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::backtesting::{BacktestingEngine, BacktestingMode, BacktestingStatistics};
-use crate::python::{OrderFactory, PortfolioFacade, PortfolioState, PyRiskManager};
+use crate::python::{OrderFactory, PortfolioFacade, PortfolioState, PyRiskManager, PyStrategyContext};
 use crate::trader::{BarData, Direction, Exchange, Interval, Offset, OrderRequest, OrderType};
 
 use std::sync::{Arc, Mutex};
@@ -198,6 +198,12 @@ impl PyBacktestingEngine {
         let factory_py = Py::new(py, order_factory)?;
         strategy_instance.setattr(py, "order_factory", factory_py)?;
 
+        // Inject PyStrategyContext (empty caches for backtesting;
+        // Python strategies can use self.engine.load_bar() for historical data)
+        let context = PyStrategyContext::new_empty();
+        let context_py = Py::new(py, context)?;
+        strategy_instance.setattr(py, "context", context_py)?;
+
         let adapter =
             PythonStrategyAdapter::from_py_object(strategy_instance, strategy_name, vt_symbols);
 
@@ -249,6 +255,12 @@ impl PyBacktestingEngine {
         let order_factory = OrderFactory::from_engine(engine_ref, "");
         let factory_py = Py::new(py, order_factory)?;
         py_instance.setattr(py, "order_factory", factory_py)?;
+
+        // Inject PyStrategyContext (empty caches for backtesting;
+        // Python strategies can use self.engine.load_bar() for historical data)
+        let context = PyStrategyContext::new_empty();
+        let context_py = Py::new(py, context)?;
+        py_instance.setattr(py, "context", context_py)?;
 
         let adapter = PythonStrategyAdapter::from_py_object(
             py_instance,
@@ -336,6 +348,7 @@ impl PyBacktestingEngine {
             reference: "VNPY_STRATEGY".to_string(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
 
         // Risk manager check
@@ -395,6 +408,7 @@ impl PyBacktestingEngine {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -419,6 +433,7 @@ impl PyBacktestingEngine {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -443,6 +458,7 @@ impl PyBacktestingEngine {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -467,6 +483,7 @@ impl PyBacktestingEngine {
             reference: String::new(),
             post_only: false,
             reduce_only: false,
+            expire_time: None,
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -695,7 +712,7 @@ impl PyBarData {
 
 impl PyBarData {
     /// Convert a Rust BarData into a PyBarData
-    fn from_rust(bar: &BarData) -> Self {
+    pub fn from_rust(bar: &BarData) -> Self {
         let exchange_str = bar.exchange.value().to_string();
         let interval_str = bar.interval
             .map(|i| i.value().to_string())

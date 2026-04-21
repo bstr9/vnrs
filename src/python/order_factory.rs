@@ -50,6 +50,7 @@ fn order_type_to_str(ot: OrderType) -> &'static str {
         OrderType::Fok => "FOK",
         OrderType::Rfq => "RFQ",
         OrderType::Etf => "ETF",
+        OrderType::Gtd => "GTD",
     }
 }
 

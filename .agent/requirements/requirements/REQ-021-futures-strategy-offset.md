@@ -1,7 +1,8 @@
 ---
 id: REQ-021
 title: "FuturesStrategy Python 基类（含开平模式）"
-status: active
+status: completed
+completed_at: "2026-04-21T00:00:00"
 created_at: "2026-04-19T12:00:00"
 updated_at: "2026-04-19T12:00:00"
 priority: P1
@@ -31,13 +32,13 @@ vnpy 的 CtaTemplate 已有完整的开平模式支持。vnrs 应提供 `Futures
 
 ## 验收标准
 
-- [ ] `FuturesStrategy` Python 基类继承自 `Strategy`
-- [ ] `Offset` 枚举：Open, Close, CloseYesterday, CloseToday
-- [ ] `buy()` / `sell()` / `short()` / `cover()` 支持指定 offset 参数
-- [ ] `short()` 发送 Direction::Short + Offset::Open 的订单
-- [ ] `cover()` 发送 Direction::Short + Offset::Close 的订单
-- [ ] Position 查询支持期货方向（Long/Short 双向持仓）
-- [ ] 与现有 `SpotStrategy` 并列，共享 OrderFactory 基础设施
+- [x] `FuturesStrategy` Python 基类继承自 `Strategy`
+- [x] `Offset` 枚举：Open, Close, CloseYesterday, CloseToday
+- [x] `buy()` / `sell()` / `short()` / `cover()` 支持指定 offset 参数
+- [x] `short()` 发送 Direction::Short + Offset::Open 的订单
+- [x] `cover()` 发送 Direction::Short + Offset::Close 的订单
+- [x] Position 查询支持期货方向（Long/Short 双向持仓）
+- [x] 与现有 `SpotStrategy` 并列，共享 OrderFactory 基础设施
 
 ## 影响范围
 
