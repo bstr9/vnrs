@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PyStrategyContext};
+use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PyInstrument, PyStrategyContext};
 
 /// A pending order queued by the strategy during on_bar (to avoid mutex deadlock)
 #[derive(Clone)]
@@ -560,6 +560,45 @@ impl Strategy {
         Ok(())
     }
 
+    // ---- Runtime subscription management ----
+
+    /// Subscribe to market data for a symbol at runtime.
+    ///
+    /// In live trading, this sends a WebSocket subscription request to the gateway.
+    /// In backtesting mode, this is a no-op (data is preloaded).
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    fn subscribe(&self, vt_symbol: &str) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let strategy_name = self.strategy_name.clone();
+            let vt_symbol = vt_symbol.to_string();
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "subscribe", (strategy_name, vt_symbol));
+            });
+        }
+        Ok(())
+    }
+
+    /// Unsubscribe from market data for a symbol at runtime.
+    ///
+    /// In live trading, this sends a WebSocket unsubscription request to the gateway
+    /// if no other strategies are subscribed to the same symbol.
+    /// In backtesting mode, this is a no-op.
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    fn unsubscribe(&self, vt_symbol: &str) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let strategy_name = self.strategy_name.clone();
+            let vt_symbol = vt_symbol.to_string();
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "unsubscribe", (strategy_name, vt_symbol));
+            });
+        }
+        Ok(())
+    }
+
     // ---- Parameter and variable access (vnpy CtaTemplate compatible) ----
 
     /// Get a strategy parameter by key.
@@ -637,6 +676,30 @@ impl Strategy {
     fn write_log(&self, msg: &str) -> PyResult<()> {
         tracing::info!("[策略:{}] {}", self.strategy_name, msg);
         Ok(())
+    }
+
+    /// Get instrument metadata for a symbol.
+    ///
+    /// Delegates to the engine's `get_instrument` method.
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    ///
+    /// Returns:
+    ///     PyInstrument if found, None otherwise
+    fn get_instrument(&self, py: Python, vt_symbol: String) -> PyResult<Option<Py<PyInstrument>>> {
+        if let Some(engine_ref) = &self.engine {
+            let result = engine_ref.call_method1(py, "get_instrument", (vt_symbol,))?;
+            let is_none = result.is_none(py);
+            if is_none {
+                Ok(None)
+            } else {
+                let instr: Py<PyInstrument> = result.extract(py)?;
+                Ok(Some(instr))
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     /// Send email notification

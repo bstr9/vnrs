@@ -13,7 +13,7 @@ relations:
   conflicts_with: []
   refines: []
   merged_from: []
-  refined_by: [REQ-020, REQ-025, REQ-030]
+  refined_by: [REQ-020, REQ-025, REQ-030, REQ-055, REQ-056, REQ-063]
   related_to: [REQ-021, REQ-056]
 versions:
   - version: 1

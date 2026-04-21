@@ -11,10 +11,10 @@ cluster: Core-Trading
 relations:
   supersedes: []
   conflicts_with: []
-  refines: []
+  refines: [REQ-062]
   merged_from: []
   refined_by: []
-  related_to: [REQ-021]
+  related_to: [REQ-021, REQ-063]
 versions:
   - version: 1
     date: "2026-04-22T00:00:00"

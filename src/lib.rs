@@ -104,6 +104,13 @@ pub use trader::{
     DataEngine, TickBarAggregator, DefaultBarAggregator,
 };
 
+#[cfg(feature = "prometheus")]
+pub use trader::metrics::{
+    MetricsEngine, MetricsServer,
+    BALANCE, ORDERS_TOTAL, PNL_TOTAL, POSITION_VALUE, REGISTRY,
+    STRATEGY_ACTIVE, TICK_COUNT, TRADES_TOTAL,
+};
+
 // Re-export Binance gateways
 pub use gateway::binance::{BinanceSpotGateway, BinanceUsdtGateway};
 

@@ -264,6 +264,15 @@ impl StrategyEngine {
                 if let Some(strategy) = strategies.get_mut(strategy_name) {
                     strategy.on_bar(bar, context);
                 }
+                // Update indicators and dispatch on_indicator callbacks
+                let updated_indicators = context.update_indicators(&vt_symbol, bar);
+                if !updated_indicators.is_empty() {
+                    if let Some(strategy) = strategies.get_mut(strategy_name) {
+                        for (name, value) in &updated_indicators {
+                            strategy.on_indicator(name, *value);
+                        }
+                    }
+                }
             }
         }
 
@@ -278,13 +287,22 @@ impl StrategyEngine {
 
             // Feed the base bar into the synthesizer
             if let Some(synthesized_bar) = synthesizer.update_bar(bar) {
-                // A higher-timeframe bar was completed �?deliver to strategy
+                // A higher-timeframe bar was completed — deliver to strategy
                 let contexts = self.contexts.read().unwrap_or_else(|e| e.into_inner());
                 if let Some(context) = contexts.get(strategy_name) {
                     context.update_bar(synthesized_bar.clone());
                     let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
                     if let Some(strategy) = strategies.get_mut(strategy_name) {
                         strategy.on_bar(&synthesized_bar, context);
+                    }
+                    // Update indicators for synthesized bar's symbol and dispatch on_indicator
+                    let updated_indicators = context.update_indicators(syn_vt_symbol, &synthesized_bar);
+                    if !updated_indicators.is_empty() {
+                        if let Some(strategy) = strategies.get_mut(strategy_name) {
+                            for (name, value) in &updated_indicators {
+                                strategy.on_indicator(name, *value);
+                            }
+                        }
                     }
                 }
             }
@@ -663,6 +681,80 @@ impl StrategyEngine {
         map.entry(vt_symbol.to_string())
             .or_insert_with(Vec::new)
             .push(strategy_name.to_string());
+    }
+
+    /// Parse a vt_symbol into (symbol, Exchange).
+    /// Returns None if the format is invalid or the exchange is unsupported.
+    pub fn parse_vt_symbol(vt_symbol: &str) -> Option<(String, Exchange)> {
+        let parts: Vec<&str> = vt_symbol.split('.').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let symbol = parts[0].to_string();
+        let exchange = match parts[1].to_uppercase().as_str() {
+            "BINANCE" => Exchange::Binance,
+            "BINANCE_USDM" => Exchange::BinanceUsdm,
+            "BINANCE_COINM" => Exchange::BinanceCoinm,
+            "OKX" => Exchange::Okx,
+            "BYBIT" => Exchange::Bybit,
+            _ => return None,
+        };
+        Some((symbol, exchange))
+    }
+
+    /// Subscribe a strategy to market data for a symbol at runtime.
+    pub async fn dynamic_subscribe(&self, strategy_name: &str, vt_symbol: &str) -> Result<(), String> {
+        let (symbol, exchange) = Self::parse_vt_symbol(vt_symbol)
+            .ok_or_else(|| format!("Invalid vt_symbol format: {}", vt_symbol))?;
+
+        // Subscribe through main engine
+        let req = SubscribeRequest { symbol, exchange };
+        if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+            self.main_engine.subscribe(req, &gw_name).await?;
+        } else {
+            return Err(format!("No gateway found for exchange {:?}", exchange));
+        }
+
+        // Update symbol-strategy mapping
+        let mut map = self.symbol_strategy_map.write().unwrap_or_else(|e| e.into_inner());
+        map.entry(vt_symbol.to_string())
+            .or_insert_with(Vec::new)
+            .push(strategy_name.to_string());
+
+        tracing::info!("Strategy {} subscribed to {}", strategy_name, vt_symbol);
+        Ok(())
+    }
+
+    /// Unsubscribe a strategy from market data for a symbol at runtime.
+    /// If no other strategies are subscribed to the symbol, unsubscribes from the gateway.
+    pub async fn dynamic_unsubscribe(&self, strategy_name: &str, vt_symbol: &str) -> Result<(), String> {
+        let (symbol, exchange) = Self::parse_vt_symbol(vt_symbol)
+            .ok_or_else(|| format!("Invalid vt_symbol format: {}", vt_symbol))?;
+
+        // Remove strategy from symbol-strategy mapping
+        let should_unsubscribe_gateway = {
+            let mut map = self.symbol_strategy_map.write().unwrap_or_else(|e| e.into_inner());
+            if let Some(strategies) = map.get_mut(vt_symbol) {
+                strategies.retain(|s| s != strategy_name);
+                strategies.is_empty()
+            } else {
+                false
+            }
+        };
+
+        // Only unsubscribe from gateway if no other strategies need this symbol
+        if should_unsubscribe_gateway {
+            let req = SubscribeRequest { symbol, exchange };
+            if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
+                self.main_engine.unsubscribe(req, &gw_name).await?;
+            }
+            // Clean up empty entry
+            let mut map = self.symbol_strategy_map.write().unwrap_or_else(|e| e.into_inner());
+            map.remove(vt_symbol);
+        }
+
+        tracing::info!("Strategy {} unsubscribed from {}", strategy_name, vt_symbol);
+        Ok(())
     }
 
     /// Initialize a strategy

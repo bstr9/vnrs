@@ -4,7 +4,7 @@ title: "回测引擎：填充模型、模拟交易所、保证金与统计"
 status: completed
 completed_at: "2026-04-22T00:00:00"
 created_at: "2026-04-22T00:00:00"
-updated_at: "2026-04-22T00:00:00"
+updated_at: "2026-04-22T12:00:00"
 priority: P0
 level: epic
 cluster: Backtesting
@@ -14,7 +14,7 @@ relations:
   refines: []
   merged_from: []
   refined_by: []
-  related_to: []
+  related_to: [REQ-062, REQ-059]
 versions:
   - version: 1
     date: "2026-04-22T00:00:00"

@@ -10,7 +10,7 @@ relations:
   conflicts_with: []
   refines: []
   merged_from: []
-  related_to: [REQ-023]
+  related_to: [REQ-023, REQ-059]
   cluster: Bug-Fix
 versions:
   - version: 1

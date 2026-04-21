@@ -56,6 +56,11 @@ impl PythonEngine {
         self.strategy_engine = Some(engine);
     }
 
+    /// Get a reference to the live StrategyEngine, if set.
+    pub fn get_strategy_engine(&self) -> Option<&Arc<StrategyEngine>> {
+        self.strategy_engine.as_ref()
+    }
+
     pub fn add_strategy(
         &mut self,
         py: Python,

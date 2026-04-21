@@ -4,7 +4,7 @@ title: "StrategyContext 暴露给 Python 策略（含数据查询方法）"
 status: completed
 completed_at: "2026-04-21T00:00:00"
 created_at: "2026-04-19T14:00:00"
-updated_at: "2026-04-19T19:04:20"
+updated_at: "2026-04-21T17:22:57"
 priority: P1
 relations:
   supersedes: []
@@ -12,6 +12,7 @@ relations:
   refines: []
   merged_from: [REQ-031, REQ-032]
   depends_on: [REQ-020]
+  refined_by: []
   cluster: Python-API
 versions:
   - version: 1
@@ -28,6 +29,12 @@ versions:
     snapshot: "StrategyContext 暴露给 Python，含 get_tick/get_bar/get_bars/load_bar 全部数据查询方法"
   - version: 3
     date: "2026-04-19T19:04:20"
+    author: ai
+    context: "元数据自动同步"
+    reason: "自动补充反向关系: refined_by"
+    snapshot: "自动同步元数据"
+  - version: 4
+    date: "2026-04-21T17:22:57"
     author: ai
     context: "元数据自动同步"
     reason: "自动补充反向关系: refined_by"

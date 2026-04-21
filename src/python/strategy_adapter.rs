@@ -387,6 +387,13 @@ impl StrategyTemplate for PythonStrategyAdapter {
         });
     }
 
+    fn on_indicator(&mut self, name: &str, value: f64) {
+        Python::attach(|py| {
+            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = strategy.call_method1(py, "on_indicator", (name, value));
+        });
+    }
+
     fn drain_pending_orders(&mut self) -> Vec<OrderRequest> {
         // Drain from the shared Arc<Mutex<Vec<PendingOrder>>> (set during from_py_object)
         let pending: Vec<PendingOrder> = if let Some(ref queue) = self.pending_orders {

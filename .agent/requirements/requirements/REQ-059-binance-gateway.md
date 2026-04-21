@@ -14,7 +14,7 @@ relations:
   refines: []
   merged_from: []
   refined_by: []
-  related_to: []
+  related_to: [REQ-057, REQ-062]
 versions:
   - version: 1
     date: "2026-04-22T00:00:00"

@@ -1,4 +1,4 @@
-use crate::python::{OrderFactory, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy};
+use crate::python::{OrderFactory, PyInstrument, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy};
 use crate::strategy::StrategyEngine;
 use crate::trader::constant::{Direction, Offset, OrderType};
 use crate::trader::MainEngine;
@@ -125,6 +125,7 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<StrategyEngineHandle>()?;
     m.add_class::<PyOrder>()?;
     m.add_class::<OrderFactory>()?;
+    m.add_class::<PyInstrument>()?;
     m.add_class::<PyStrategyContext>()?;
     m.add_function(wrap_pyfunction!(create_main_engine, m)?)?;
     m.add_function(wrap_pyfunction!(run_event_loop, m)?)?;
@@ -437,5 +438,57 @@ impl PythonEngineWrapper {
     fn create_order_factory(slf: &Bound<'_, Self>) -> PyResult<OrderFactory> {
         let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
         Ok(OrderFactory::from_engine(engine_ref, ""))
+    }
+
+    /// Get instrument metadata for a symbol.
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    ///
+    /// Returns:
+    ///     PyInstrument if found, None otherwise
+    fn get_instrument(&self, vt_symbol: String) -> PyResult<Option<PyInstrument>> {
+        let contract = self.main_engine.get_contract(&vt_symbol);
+        Ok(contract.map(|c| PyInstrument::from_contract_data(&c)))
+    }
+
+    /// Subscribe a strategy to market data for a symbol at runtime.
+    ///
+    /// Args:
+    ///     strategy_name: Name of the strategy
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    fn subscribe(&self, strategy_name: String, vt_symbol: String) -> PyResult<()> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(se) = inner.get_strategy_engine() {
+            let se: Arc<StrategyEngine> = (*se).clone();
+            let strategy_name = strategy_name.clone();
+            let vt_symbol = vt_symbol.clone();
+            tokio::spawn(async move {
+                if let Err(e) = se.dynamic_subscribe(&strategy_name, &vt_symbol).await {
+                    tracing::error!("Failed to subscribe {}: {}", vt_symbol, e);
+                }
+            });
+        }
+        Ok(())
+    }
+
+    /// Unsubscribe a strategy from market data for a symbol at runtime.
+    ///
+    /// Args:
+    ///     strategy_name: Name of the strategy
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    fn unsubscribe(&self, strategy_name: String, vt_symbol: String) -> PyResult<()> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(se) = inner.get_strategy_engine() {
+            let se: Arc<StrategyEngine> = (*se).clone();
+            let strategy_name = strategy_name.clone();
+            let vt_symbol = vt_symbol.clone();
+            tokio::spawn(async move {
+                if let Err(e) = se.dynamic_unsubscribe(&strategy_name, &vt_symbol).await {
+                    tracing::error!("Failed to unsubscribe {}: {}", vt_symbol, e);
+                }
+            });
+        }
+        Ok(())
     }
 }

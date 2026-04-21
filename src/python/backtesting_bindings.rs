@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::backtesting::{BacktestingEngine, BacktestingMode, BacktestingStatistics};
-use crate::python::{OrderFactory, PortfolioFacade, PortfolioState, PyRiskManager, PyStrategyContext};
+use crate::python::{OrderFactory, PortfolioFacade, PortfolioState, PyInstrument, PyRiskManager, PyStrategyContext};
 use crate::trader::{BarData, Direction, Exchange, Interval, Offset, OrderRequest, OrderType};
 
 use std::sync::{Arc, Mutex};
@@ -496,6 +496,31 @@ impl PyBacktestingEngine {
     /// Get current position quantity for a symbol
     fn get_pos(&self, _vt_symbol: Option<&str>) -> PyResult<f64> {
         Ok(self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_pos())
+    }
+
+    /// Get instrument metadata for the backtesting symbol.
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (ignored in backtesting,
+    ///                always returns the engine's contract data)
+    ///
+    /// Returns:
+    ///     PyInstrument if the engine is configured, None otherwise
+    fn get_instrument(&self, _vt_symbol: Option<&str>) -> PyResult<Option<PyInstrument>> {
+        let contract = self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_contract_data();
+        Ok(contract.map(|c| PyInstrument::from_contract_data(&c)))
+    }
+
+    /// Subscribe to market data — no-op in backtesting (data is preloaded).
+    fn subscribe(&self, _vt_symbol: &str) -> PyResult<()> {
+        tracing::warn!("subscribe() is not supported in backtesting mode — data is preloaded");
+        Ok(())
+    }
+
+    /// Unsubscribe from market data — no-op in backtesting.
+    fn unsubscribe(&self, _vt_symbol: &str) -> PyResult<()> {
+        tracing::warn!("unsubscribe() is not supported in backtesting mode — data is preloaded");
+        Ok(())
     }
 
     /// Write log — matches Strategy.write_log() signature (single msg argument)

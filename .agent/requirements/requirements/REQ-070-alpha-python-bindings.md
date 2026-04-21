@@ -1,0 +1,60 @@
+---
+id: REQ-070
+title: "Alpha 模块 Python 绑定——量化研究平台 Python API"
+status: active
+created_at: "2026-04-22T20:00:00"
+updated_at: "2026-04-22T20:00:00"
+priority: P2
+level: story
+cluster: Python-API
+relations:
+  supersedes: []
+  conflicts_with: []
+  refines: [REQ-058]
+  merged_from: []
+  refined_by: []
+  related_to: [REQ-055, REQ-069]
+  depends_on: []
+versions:
+  - version: 1
+    date: "2026-04-22T20:00:00"
+    author: ai
+    context: "集成审计发现 Alpha 模块（src/alpha/）实现了 ML 模型库（LinearRegression/Ridge/Lasso/随机森林/XGBoost）和因子分析，但 Python 绑定完全无暴露。Python 用户无法使用任何 Alpha 研究功能。"
+    reason: "录入 Alpha 模块 Python 暴露需求"
+    snapshot: "Python 通过 PyAlphaModule 访问 ML 模型训练、因子分析和回测集成"
+---
+
+# Alpha 模块 Python 绑定——量化研究平台 Python API
+
+## 描述
+
+Alpha 模块（`src/alpha/`）是 vnrs 的量化研究平台，包含：
+- ML 模型：LinearRegression、Ridge、Lasso、RandomForest、XGBoost
+- 因子分析：因子计算、截面分析、Alpha 组合
+- 数据管道：Polars 高性能数据处理
+
+但 Python 绑定**完全无暴露**。Python 量化研究员无法使用这些功能。
+
+## 验收标准
+
+### ML 模型 Python 接口
+- [ ] `PyAlphaModel` 基类暴露 `fit(X, y)` 训练方法
+- [ ] `PyAlphaModel` 基类暴露 `predict(X)` 预测方法
+- [ ] 暴露 LinearRegression / Ridge / Lasso 模型类
+- [ ] 暴露 RandomForest 模型类
+- [ ] 暴露 XGBoost 模型类（如已实现）
+
+### 因子分析 Python 接口
+- [ ] 暴露因子计算函数
+- [ ] 暴露截面分析函数
+- [ ] 暴露 Alpha 组合权重计算
+
+### 集成
+- [ ] Python 可从 Alpha 模型输出直接创建策略信号
+- [ ] Python 可将因子分析结果传递给回测引擎
+
+## 影响范围
+
+- `src/python/bindings.rs` — 添加 PyAlphaModule 类
+- `src/python/` — 可能需要新增 `alpha.rs` 绑定文件
+- `src/alpha/` — 可能需要添加 Python 友好的接口

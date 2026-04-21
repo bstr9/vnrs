@@ -11,7 +11,7 @@ relations:
   refines: []
   merged_from: []
   refined_by: [REQ-012]
-  related_to: [REQ-008, REQ-009]
+  related_to: [REQ-008, REQ-009, REQ-055, REQ-058]
   cluster: AI-Native
 versions:
   - version: 1

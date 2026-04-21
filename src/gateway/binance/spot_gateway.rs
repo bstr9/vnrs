@@ -400,6 +400,7 @@ impl BinanceSpotGateway {
 
                 let mut pricetick: f64 = 1.0;
                 let mut min_volume: f64 = 1.0;
+                let mut min_notional: f64 = 0.0;
 
                 if let Some(filters) = d["filters"].as_array() {
                     for f in filters {
@@ -411,9 +412,19 @@ impl BinanceSpotGateway {
                             "LOT_SIZE" => {
                                 min_volume = f["stepSize"].as_str().unwrap_or("1").parse().unwrap_or(1.0);
                             }
+                            "NOTIONAL" | "MIN_NOTIONAL" => {
+                                // Binance Spot uses "NOTIONAL", some exchanges use "MIN_NOTIONAL"
+                                min_notional = f["minNotional"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                            }
                             _ => {}
                         }
                     }
+                }
+
+                // Build extra HashMap for min_notional
+                let mut extra = std::collections::HashMap::new();
+                if min_notional > 0.0 {
+                    extra.insert("min_notional".to_string(), min_notional.to_string());
                 }
 
                 let contract = ContractData {
@@ -436,7 +447,7 @@ impl BinanceSpotGateway {
                     option_portfolio: None,
                     option_index: None,
                     gateway_name: self.gateway_name.clone(),
-                    extra: None,
+                    extra: if extra.is_empty() { None } else { Some(extra) },
                 };
                 self.on_contract(contract).await;
             }
@@ -1170,6 +1181,21 @@ impl BaseGateway for BinanceSpotGateway {
         let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
         self.market_ws.subscribe(channels).await?;
         self.write_log(&format!("订阅行情: {}", symbol)).await;
+        Ok(())
+    }
+
+    async fn unsubscribe(&self, req: SubscribeRequest) -> Result<(), String> {
+        let symbol = req.symbol.to_lowercase();
+
+        // Remove from ticks cache
+        if self.ticks.write().await.remove(&symbol).is_none() {
+            return Ok(()); // Not subscribed, no-op
+        }
+
+        // Unsubscribe from WebSocket streams
+        let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
+        self.market_ws.unsubscribe(channels).await?;
+        self.write_log(&format!("退订行情: {}", symbol)).await;
         Ok(())
     }
 

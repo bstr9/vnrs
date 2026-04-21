@@ -7,16 +7,46 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::base::{StrategySetting, StrategyState, StrategyType, StopOrderRequest, CancelRequestType};
-#[cfg(feature = "gui")]
-use crate::chart::Indicator;
 use crate::trader::{
     BarData, Direction, Exchange, Interval, Offset, OrderData, OrderRequest, OrderType, TickData, TradeData,
     DepthData,
 };
 use crate::trader::database::BaseDatabase;
 
+/// Minimal indicator trait for strategy event dispatch.
+///
+/// Unlike the chart `Indicator` trait (which depends on egui), this trait
+/// provides only the interface needed for the `on_indicator()` callback path:
+/// updating with bar data and reading the current value.
+pub trait StrategyIndicator: Send + Sync {
+    /// Get indicator name
+    fn name(&self) -> &str;
+
+    /// Update indicator with a single bar.
+    /// Returns `true` if the indicator produced a new value (i.e. is ready).
+    fn update(&mut self, bar: &BarData) -> bool;
+
+    /// Get the current (latest) value, if the indicator is ready
+    fn current_value(&self) -> Option<f64>;
+}
+
+/// Adapter: a `Box<dyn Indicator>` (chart indicator) also implements `StrategyIndicator`.
 #[cfg(feature = "gui")]
-type IndicatorMap = Arc<Mutex<HashMap<String, Vec<Box<dyn Indicator>>>>>;
+impl StrategyIndicator for Box<dyn crate::chart::Indicator> {
+    fn name(&self) -> &str {
+        crate::chart::Indicator::name(self)
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        crate::chart::Indicator::update(self, bar)
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        crate::chart::Indicator::current_value(self)
+    }
+}
+
+type IndicatorMap = Arc<Mutex<HashMap<String, Vec<Box<dyn StrategyIndicator>>>>>;
 
 /// Strategy context providing market data and trading interface
 pub struct StrategyContext {
@@ -25,7 +55,6 @@ pub struct StrategyContext {
     pub historical_bars: Arc<Mutex<HashMap<String, Vec<BarData>>>>,
     /// Optional database for loading historical data
     database: Option<Arc<dyn BaseDatabase>>,
-    #[cfg(feature = "gui")]
     indicators: IndicatorMap,
 }
 
@@ -36,7 +65,6 @@ impl StrategyContext {
             bar_cache: Arc::new(Mutex::new(HashMap::new())),
             historical_bars: Arc::new(Mutex::new(HashMap::new())),
             database: None,
-            #[cfg(feature = "gui")]
             indicators: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -48,7 +76,6 @@ impl StrategyContext {
             bar_cache: Arc::new(Mutex::new(HashMap::new())),
             historical_bars: Arc::new(Mutex::new(HashMap::new())),
             database: Some(database),
-            #[cfg(feature = "gui")]
             indicators: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -154,11 +181,10 @@ impl StrategyContext {
         bars.truncate(10000);
     }
 
-    #[cfg(feature = "gui")]
     pub fn register_indicator(
         &self,
         vt_symbol: &str,
-        indicator: Box<dyn Indicator>,
+        indicator: Box<dyn StrategyIndicator>,
     ) -> IndicatorRef {
         let mut indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
         let list = indicators.entry(vt_symbol.to_string()).or_default();
@@ -171,7 +197,6 @@ impl StrategyContext {
         }
     }
 
-    #[cfg(feature = "gui")]
     pub fn get_indicator_refs(&self, vt_symbol: &str) -> Vec<IndicatorRef> {
         let indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
         match indicators.get(vt_symbol) {
@@ -186,14 +211,25 @@ impl StrategyContext {
         }
     }
 
-    #[cfg(feature = "gui")]
-    pub fn update_indicators(&self, vt_symbol: &str, bar: &BarData) {
+    /// Update indicators for the given symbol with bar data.
+    ///
+    /// Returns a list of `(name, value)` pairs for indicators that produced
+    /// a new value (i.e. `update()` returned `true`). This enables the
+    /// engine to dispatch `on_indicator()` callbacks to strategies.
+    pub fn update_indicators(&self, vt_symbol: &str, bar: &BarData) -> Vec<(String, f64)> {
         let mut indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let mut updated = Vec::new();
         if let Some(indicator_list) = indicators.get_mut(vt_symbol) {
             for indicator in indicator_list.iter_mut() {
-                indicator.update(bar);
+                let was_ready = indicator.update(bar);
+                if was_ready {
+                    if let Some(value) = indicator.current_value() {
+                        updated.push((indicator.name().to_string(), value));
+                    }
+                }
             }
         }
+        updated
     }
 }
 
@@ -203,20 +239,18 @@ impl Default for StrategyContext {
     }
 }
 
-#[cfg(feature = "gui")]
 pub struct IndicatorRef {
     key: String,
     index: usize,
     indicators: IndicatorMap,
 }
 
-#[cfg(feature = "gui")]
 impl IndicatorRef {
     pub fn is_ready(&self) -> bool {
         let map = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
         map.get(&self.key)
             .and_then(|v| v.get(self.index))
-            .map(|i| i.is_ready())
+            .map(|i| i.current_value().is_some())
             .unwrap_or(false)
     }
 
@@ -336,7 +370,7 @@ pub trait StrategyTemplate: Send + Sync {
         &self,
         context: &StrategyContext,
         vt_symbol: &str,
-        indicator: Box<dyn Indicator>,
+        indicator: Box<dyn crate::chart::Indicator>,
     ) -> IndicatorRef {
         context.register_indicator(vt_symbol, indicator)
     }

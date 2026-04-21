@@ -1105,6 +1105,16 @@ impl MainEngine {
         }
     }
 
+    /// Unsubscribe from tick data
+    pub async fn unsubscribe(&self, req: SubscribeRequest, gateway_name: &str) -> Result<(), String> {
+        if let Some(gateway) = self.get_gateway(gateway_name) {
+            self.write_log(format!("退订行情 -> {}：{:?}", gateway_name, req), "MainEngine");
+            gateway.unsubscribe(req).await
+        } else {
+            Err(format!("找不到底层接口：{}", gateway_name))
+        }
+    }
+
     /// Send an order (with risk check and offset conversion)
     pub async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String> {
         // Pre-trade risk check (with gateway context for balance check)
@@ -1288,6 +1298,21 @@ impl MainEngine {
     /// Get the ReconciliationEngine if one has been added
     pub fn reconciliation_engine(&self) -> Option<Arc<ReconciliationEngine>> {
         self.reconciliation_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Add a MetricsEngine and start a Prometheus metrics HTTP server.
+    ///
+    /// Requires the `prometheus` feature flag. The server exposes a `/metrics`
+    /// endpoint on `addr` (e.g. `"127.0.0.1:9090"`).
+    #[cfg(feature = "prometheus")]
+    pub fn add_metrics_engine(self: &Arc<Self>, addr: &str) -> Result<(), String> {
+        crate::trader::metrics::init();
+        let metrics_engine = crate::trader::metrics::MetricsEngine::new();
+        self.add_engine(Arc::new(metrics_engine));
+        let server = crate::trader::metrics::MetricsServer::new(addr.to_string());
+        server.start();
+        info!("MetricsEngine registered, Prometheus endpoint at {addr}");
+        Ok(())
     }
 
     /// Add a DataEngine for centralized subscription management and tick→bar aggregation

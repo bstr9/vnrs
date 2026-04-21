@@ -16,8 +16,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc, NaiveDate, Duration};
 
 use crate::trader::{
-    TickData, BarData, OrderData, TradeData,
-    Direction, Offset, Status, Interval, Exchange,
+    TickData, BarData, OrderData, TradeData, ContractData,
+    Direction, Offset, Status, Interval, Exchange, Product,
     OrderRequest, Clock, TestClock,
 };
 use crate::trader::database::BaseDatabase;
@@ -761,13 +761,16 @@ impl BacktestingEngine {
             // 5. Cross emulated orders (trailing stops, MIT, LIT)
             self.cross_emulated_order(bar);
             
-            #[cfg(feature = "gui")]
-            self.strategy_context.update_indicators(&self.vt_symbol, bar);
+            // 5b. Update indicators and dispatch on_indicator callbacks
+            let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, bar);
             
             // 6. Call strategy on_bar AFTER fills are settled
             //    Orders placed here won't be evaluated until next bar's step 3-5
             let pending = if let Some(strategy) = &mut self.strategy {
                 strategy.on_bar(bar, &context);
+                for (name, value) in &updated_indicators {
+                    strategy.on_indicator(name, *value);
+                }
                 strategy.drain_pending_orders()
             } else {
                 Vec::new()
@@ -845,13 +848,16 @@ impl BacktestingEngine {
             // Cross emulated orders (trailing stops, MIT, LIT)
             self.cross_emulated_order(&synthetic_bar);
             
-            #[cfg(feature = "gui")]
-            self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
+            // Update indicators and dispatch on_indicator callbacks
+            let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
             
             // Call strategy on_tick AFTER fills are settled
             let pending = if let Some(strategy) = &mut self.strategy {
                 let ctx = Arc::clone(&self.strategy_context);
                 strategy.on_tick(tick, &ctx);
+                for (name, value) in &updated_indicators {
+                    strategy.on_indicator(name, *value);
+                }
                 strategy.drain_pending_orders()
             } else {
                 Vec::new()
@@ -2686,6 +2692,46 @@ impl BacktestingEngine {
     /// Get vt_symbol
     pub fn get_vt_symbol(&self) -> &str {
         &self.vt_symbol
+    }
+
+    /// Get contract data for the trading symbol.
+    ///
+    /// Constructs a ContractData from the engine's settings (pricetick, size, etc.).
+    /// Used by Python bindings to create PyInstrument for strategy code.
+    pub fn get_contract_data(&self) -> Option<ContractData> {
+        if self.vt_symbol.is_empty() {
+            return None;
+        }
+
+        // Determine product type from exchange
+        let product = match self.exchange {
+            Exchange::Binance => Product::Spot,
+            Exchange::BinanceUsdm => Product::Futures,
+            _ => Product::Spot,
+        };
+
+        Some(ContractData {
+            gateway_name: "BACKTEST".to_string(),
+            symbol: self.symbol.clone(),
+            exchange: self.exchange,
+            name: self.symbol.clone(),
+            product,
+            size: self.size,
+            pricetick: self.pricetick,
+            min_volume: 1.0,
+            max_volume: None,
+            stop_supported: true,
+            net_position: true,
+            history_data: true,
+            option_strike: None,
+            option_underlying: None,
+            option_type: None,
+            option_listed: None,
+            option_expiry: None,
+            option_portfolio: None,
+            option_index: None,
+            extra: None,
+        })
     }
 
     /// Set risk-free rate for Sharpe ratio calculation

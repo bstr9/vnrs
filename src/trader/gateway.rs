@@ -133,6 +133,13 @@ pub trait BaseGateway: Send + Sync {
     /// Subscribe tick data update.
     async fn subscribe(&self, req: SubscribeRequest) -> Result<(), String>;
 
+    /// Unsubscribe tick data update.
+    /// Default no-op implementation for backward compatibility.
+    async fn unsubscribe(&self, req: SubscribeRequest) -> Result<(), String> {
+        let _ = req;
+        Ok(())
+    }
+
     /// Send a new order to server.
     ///
     /// Implementation should:

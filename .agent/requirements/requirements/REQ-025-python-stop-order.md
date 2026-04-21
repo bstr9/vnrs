@@ -4,13 +4,14 @@ title: "Python 止损单完整功能（发送/回调/取消）"
 status: completed
 completed_at: "2026-04-22T18:00:00"
 created_at: "2026-04-19T12:00:00"
-updated_at: "2026-04-19T19:04:20"
+updated_at: "2026-04-21T17:22:57"
 priority: P2
 relations:
   supersedes: []
   conflicts_with: []
   refines: []
   merged_from: [REQ-028, REQ-029]
+  refined_by: []
   related_to: [REQ-017, REQ-021]
   cluster: Python-API
 versions:
@@ -44,6 +45,12 @@ versions:
     context: "代码验证发现：send_stop_order() 完整实现（strategy.rs:388-419），支持 vt_symbol/direction/price/volume/stop_price/offset/order_type 参数，生成 STOP_ 前缀的 stop_orderid，排入 pending_stop_orders 队列；on_stop_order() 回调已实现（strategy.rs:422-424），Python 子类可覆盖；cancel_stop_order() 已实现（strategy.rs:427-434），通过 engine.cancel_stop_order() 路由；PendingStopOrder 结构体（strategy.rs:33-41）；active_stop_orderids 追踪（strategy.rs:132）。大部分验收标准已满足，状态恢复为 completed。"
     reason: "代码验证确认 Python 止损单三环节（发送/回调/取消）均已实现"
     snapshot: "Python 止损单完整功能：send_stop_order 排队+生成ID，on_stop_order 回调，cancel_stop_order 通过 engine 路由"
+  - version: 6
+    date: "2026-04-21T17:22:57"
+    author: ai
+    context: "元数据自动同步"
+    reason: "自动补充反向关系: refined_by"
+    snapshot: "自动同步元数据"
 ---
 
 # Python 止损单完整功能（发送/回调/取消）

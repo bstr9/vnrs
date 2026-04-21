@@ -61,6 +61,9 @@ pub mod parquet_database;
 #[cfg(feature = "gui")]
 pub mod ui;
 
+#[cfg(feature = "prometheus")]
+pub mod metrics;
+
 // Re-exports for convenience
 pub use alert::{AlertChannel, AlertConfig, AlertEngine, AlertLevel, AlertMessage, LogAlertChannel, WebhookAlertChannel, WebhookConfig};
 pub use algo::{AlgoEngine, AlgoId, AlgoOrderState, AlgoStatus, AlgoType, TwapConfig, VwapConfig, OrderExecutor};

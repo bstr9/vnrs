@@ -31,6 +31,8 @@ pub mod sync_bar_bindings;
 pub mod data_types;
 #[cfg(feature = "python")]
 pub mod context;
+#[cfg(feature = "python")]
+pub mod instrument;
 
 #[cfg(feature = "python")]
 pub use strategy::{Strategy, PendingOrder, PendingStopOrder};
@@ -61,6 +63,8 @@ pub use sync_bar_bindings::{PySyncBarGenerator, PySynchronizedBars};
 pub use data_types::{PyDepthData, PyTickData, PyOrderData, PyTradeData};
 #[cfg(feature = "python")]
 pub use context::PyStrategyContext;
+#[cfg(feature = "python")]
+pub use instrument::PyInstrument;
 
 /// Setup Python sys.path for embedded interpreter.
 ///
