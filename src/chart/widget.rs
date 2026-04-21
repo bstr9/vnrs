@@ -547,6 +547,14 @@ impl ChartWidget {
                                             IndicatorLocation::Main,
                                         )));
                                     }
+                                    _ => {
+                                        // RSI, MACD, ATR, KDJ, CCI, MFI: use MA as fallback
+                                        self.add_indicator(Box::new(MA::new(
+                                            20,
+                                            Color32::YELLOW,
+                                            IndicatorLocation::Sub,
+                                        )));
+                                    }
                                 }
                                 self.show_indicator_selector = false;
                             }
@@ -716,6 +724,20 @@ impl ChartWidget {
                                     );
                                 });
                             }
+                            _ => {
+                                // RSI, MACD, ATR, KDJ, CCI, MFI: show period + color
+                                ui.horizontal(|ui| {
+                                    ui.label("周期:");
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.indicator_config.period)
+                                            .range(1..=200),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("颜色:");
+                                    ui.color_edit_button_srgba(&mut self.indicator_config.color);
+                                });
+                            }
                         }
 
                         ui.separator();
@@ -787,6 +809,11 @@ impl ChartWidget {
                                             self.indicator_config.multiplier,
                                             self.indicator_config.color,
                                             self.indicator_config.signal_color,
+                                            self.indicator_config.location,
+                                        )),
+                                        _ => Box::new(MA::new(
+                                            self.indicator_config.period,
+                                            self.indicator_config.color,
                                             self.indicator_config.location,
                                         )),
                                     };

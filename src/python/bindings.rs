@@ -1,4 +1,4 @@
-use crate::python::{OrderFactory, PyInstrument, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy, PyArrayManager};
+use crate::python::{OrderFactory, PyInstrument, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy, PyArrayManager, MessageBus};
 use crate::strategy::StrategyEngine;
 use crate::trader::constant::{Direction, Offset, OrderType};
 use crate::trader::alert::AlertLevel;
@@ -193,6 +193,12 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Register offset converter module
     crate::python::offset_converter::register_offset_converter_module(m)?;
+
+    // Register stop order engine module
+    crate::python::stop_order_engine::register_stop_order_engine_module(m)?;
+
+    // Register order emulator module
+    crate::python::order_emulator::register_order_emulator_module(m)?;
 
     Ok(())
 }
@@ -480,6 +486,7 @@ impl PythonEngineWrapper {
             "LIMIT" => OrderType::Limit,
             "STOP" => OrderType::Stop,
             "STOP_LIMIT" => OrderType::StopLimit,
+            "PEGGED_BEST" => OrderType::PeggedBest,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "Invalid order_type '{}'",
@@ -647,5 +654,45 @@ impl PythonEngineWrapper {
     ///     PyOffsetConverter instance
     fn offset_converter(&self) -> PyResult<crate::python::offset_converter::PyOffsetConverter> {
         crate::python::offset_converter::PyOffsetConverter::from_main_engine(&self.main_engine)
+    }
+
+    /// Get the StopOrderEngine for managing stop orders.
+    ///
+    /// The StopOrderEngine tracks conditional orders (stop-loss, take-profit,
+    /// trailing stops) and triggers real orders when conditions are met.
+    ///
+    /// Returns:
+    ///     StopOrderEngine instance
+    fn get_stop_order_engine(&self) -> crate::python::stop_order_engine::PyStopOrderEngine {
+        crate::python::stop_order_engine::PyStopOrderEngine::new(
+            self.main_engine.stop_order_engine().clone(),
+        )
+    }
+
+    /// Get the OrderEmulator for managing emulated order types.
+    ///
+    /// The OrderEmulator locally simulates advanced order types not natively
+    /// supported by exchanges: trailing stops, stop-limit, iceberg, MIT, LIT,
+    /// and pegged-to-best orders.
+    ///
+    /// Returns:
+    ///     OrderEmulator instance
+    fn get_order_emulator(&self) -> crate::python::order_emulator::PyOrderEmulator {
+        crate::python::order_emulator::PyOrderEmulator::new(
+            self.main_engine.order_emulator().clone(),
+        )
+    }
+
+    /// Get the shared MessageBus wrapping the MainEngine's Rust MessageBus.
+    ///
+    /// This allows Python code to use the same pub/sub bus as the Rust
+    /// engine, so messages published from Rust are visible to Python
+    /// strategies and vice versa.
+    ///
+    /// Returns:
+    ///     MessageBus instance backed by MainEngine's Rust MessageBus
+    fn get_message_bus(&self) -> PyResult<MessageBus> {
+        let rust_bus = self.main_engine.get_message_bus().clone();
+        Ok(MessageBus::from_rust_message_bus(rust_bus))
     }
 }

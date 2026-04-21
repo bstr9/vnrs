@@ -1,7 +1,7 @@
 ---
 id: REQ-075
 title: "组合单 GUI 面板——Bracket/OCO/OTO 可视化管理"
-status: active
+status: completed
 created_at: "2026-04-22T21:00:00"
 updated_at: "2026-04-22T21:00:00"
 priority: P1

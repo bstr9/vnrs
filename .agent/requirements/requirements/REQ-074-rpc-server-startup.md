@@ -1,7 +1,7 @@
 ---
 id: REQ-074
 title: "RPC 服务启动 + 远程监控 GUI 面板"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
 updated_at: "2026-04-22T21:00:00"
 priority: P3

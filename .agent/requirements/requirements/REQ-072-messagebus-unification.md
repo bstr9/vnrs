@@ -1,7 +1,7 @@
 ---
 id: REQ-072
 title: "Python/Rust MessageBus 统一——消除双消息系统"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
 updated_at: "2026-04-22T20:00:00"
 priority: P3

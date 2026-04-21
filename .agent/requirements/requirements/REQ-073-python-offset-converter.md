@@ -1,7 +1,7 @@
 ---
 id: REQ-073
 title: "Python OffsetConverter 暴露——期货今昨仓拆单接口"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
 updated_at: "2026-04-22T20:00:00"
 priority: P3

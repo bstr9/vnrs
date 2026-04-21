@@ -1,7 +1,7 @@
 ---
 id: REQ-066
 title: "高级订单类型暴露——Python API + GUI 面板（模拟单/止损单引擎管理）"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
 updated_at: "2026-04-22T21:00:00"
 priority: P2

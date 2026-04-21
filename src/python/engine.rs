@@ -85,8 +85,8 @@ impl PythonEngine {
         let factory_py = Py::new(py, order_factory)?;
         strategy.borrow_mut().order_factory = Some(factory_py);
 
-        // Create and inject MessageBus
-        let message_bus = MessageBus::new();
+        // Create and inject MessageBus (wrapping the MainEngine's Rust MessageBus)
+        let message_bus = MessageBus::from_rust_message_bus(self.main_engine.get_message_bus().clone());
         let bus_py = Py::new(py, message_bus)?;
         strategy.borrow_mut().message_bus = Some(bus_py);
 

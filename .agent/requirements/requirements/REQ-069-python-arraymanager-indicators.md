@@ -1,7 +1,7 @@
 ---
 id: REQ-069
 title: "Python ArrayManager 技术指标暴露"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
 updated_at: "2026-04-22T20:00:00"
 priority: P2

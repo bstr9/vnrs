@@ -41,6 +41,8 @@ pub enum EmulatedOrderType {
     Mit,
     /// Limit-If-Touched: trigger at price, submit limit order
     Lit,
+    /// Pegged to best bid/ask: tracks best bid (for buy) or best ask (for sell) with offset
+    PeggedBest,
 }
 
 impl std::fmt::Display for EmulatedOrderType {
@@ -52,6 +54,7 @@ impl std::fmt::Display for EmulatedOrderType {
             EmulatedOrderType::Iceberg => write!(f, "Iceberg"),
             EmulatedOrderType::Mit => write!(f, "MIT"),
             EmulatedOrderType::Lit => write!(f, "LIT"),
+            EmulatedOrderType::PeggedBest => write!(f, "PeggedBest"),
         }
     }
 }
@@ -125,6 +128,10 @@ pub struct EmulatedOrder {
     pub visible_volume: Option<f64>,
     /// Price for iceberg slices
     pub iceberg_price: Option<f64>,
+    /// Price offset from best bid/ask (for PeggedBest)
+    pub pegged_offset: Option<f64>,
+    /// Current pegged limit price (for PeggedBest — updated when best price moves)
+    pub pegged_price: Option<f64>,
     /// Real order ID from exchange (after trigger)
     pub real_order_id: Option<String>,
     /// Creation time
@@ -185,6 +192,8 @@ pub struct EmulatedOrderRequest {
     pub visible_volume: Option<f64>,
     /// Price for iceberg slices (Iceberg only)
     pub iceberg_price: Option<f64>,
+    /// Price offset from best bid/ask (PeggedBest only)
+    pub pegged_offset: Option<f64>,
     /// Expiration time
     pub expires_at: Option<DateTime<Utc>>,
     /// Gateway name
@@ -212,6 +221,7 @@ impl EmulatedOrderRequest {
             limit_price: None,
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
             expires_at: None,
             gateway_name: gateway_name.to_string(),
             reference: String::new(),
@@ -236,6 +246,7 @@ impl EmulatedOrderRequest {
             limit_price: None,
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
             expires_at: None,
             gateway_name: gateway_name.to_string(),
             reference: String::new(),
@@ -260,6 +271,7 @@ impl EmulatedOrderRequest {
             limit_price: Some(limit_price),
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
             expires_at: None,
             gateway_name: gateway_name.to_string(),
             reference: String::new(),
@@ -284,6 +296,7 @@ impl EmulatedOrderRequest {
             limit_price: None,
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
             expires_at: None,
             gateway_name: gateway_name.to_string(),
             reference: String::new(),
@@ -308,6 +321,7 @@ impl EmulatedOrderRequest {
             limit_price: Some(limit_price),
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
             expires_at: None,
             gateway_name: gateway_name.to_string(),
             reference: String::new(),
@@ -332,6 +346,39 @@ impl EmulatedOrderRequest {
             limit_price: None,
             visible_volume: Some(visible_volume),
             iceberg_price: Some(price),
+            pegged_offset: None,
+            expires_at: None,
+            gateway_name: gateway_name.to_string(),
+            reference: String::new(),
+        }
+    }
+
+    /// Create a pegged-to-best order
+    ///
+    /// For buy orders: tracks best bid + offset as the limit price
+    /// For sell orders: tracks best ask + offset as the limit price
+    ///
+    /// The `pegged_offset` represents how many price units away from the best price.
+    /// Positive offset makes the order more aggressive (better fill chance),
+    /// negative offset makes it more passive (better price).
+    pub fn pegged_best(
+        symbol: &str, exchange: Exchange, direction: Direction, offset: Offset,
+        volume: f64, pegged_offset: f64, gateway_name: &str,
+    ) -> Self {
+        Self {
+            order_type: EmulatedOrderType::PeggedBest,
+            symbol: symbol.to_string(),
+            exchange,
+            direction,
+            offset,
+            volume,
+            trail_pct: None,
+            trail_abs: None,
+            trigger_price: None,
+            limit_price: None,
+            visible_volume: None,
+            iceberg_price: None,
+            pegged_offset: Some(pegged_offset),
             expires_at: None,
             gateway_name: gateway_name.to_string(),
             reference: String::new(),
@@ -435,6 +482,11 @@ impl OrderEmulator {
                     return Err("冰山单可见数量必须大于0".to_string());
                 }
             }
+            EmulatedOrderType::PeggedBest => {
+                if req.pegged_offset.is_none() {
+                    return Err("钉住最优价单必须指定偏移量".to_string());
+                }
+            }
         }
 
         if req.volume <= 0.0 {
@@ -463,6 +515,8 @@ impl OrderEmulator {
             limit_price: req.limit_price,
             visible_volume: req.visible_volume,
             iceberg_price: req.iceberg_price,
+            pegged_offset: req.pegged_offset,
+            pegged_price: None,
             real_order_id: None,
             created_at: Utc::now(),
             expires_at: req.expires_at,
@@ -692,6 +746,7 @@ impl OrderEmulator {
                                 bar.low_price <= order.trigger_price.unwrap_or(f64::MAX)
                             }
                             EmulatedOrderType::Iceberg => false, // Iceberg doesn't trigger on bars
+                            EmulatedOrderType::PeggedBest => false, // PeggedBest needs bid/ask from ticks, not bars
                         }
                     }
                     Direction::Short => {
@@ -715,6 +770,7 @@ impl OrderEmulator {
                                 bar.high_price >= order.trigger_price.unwrap_or(0.0)
                             }
                             EmulatedOrderType::Iceberg => false,
+                            EmulatedOrderType::PeggedBest => false, // PeggedBest needs bid/ask from ticks, not bars
                         }
                     }
                     Direction::Net => false, // Net position not supported for emulated orders
@@ -886,6 +942,7 @@ impl OrderEmulator {
                 }
             }
             EmulatedOrderType::Iceberg => false, // Iceberg doesn't trigger on price
+            EmulatedOrderType::PeggedBest => false, // PeggedBest not yet fully implemented
         }
     }
 
@@ -977,6 +1034,7 @@ impl OrderEmulator {
             EmulatedOrderType::StopLimit |
             EmulatedOrderType::Lit => (OrderType::Limit, order.limit_price.unwrap_or(0.0)),
             EmulatedOrderType::Iceberg => (OrderType::Limit, order.iceberg_price.unwrap_or(0.0)),
+            EmulatedOrderType::PeggedBest => (OrderType::Limit, order.pegged_price.unwrap_or(0.0)),
         };
 
         Some(OrderRequest {
@@ -1168,6 +1226,7 @@ mod tests {
             limit_price: Some(50000.0),
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
             expires_at: None,
             gateway_name: "binance".to_string(),
             reference: String::new(),
@@ -1224,6 +1283,8 @@ mod tests {
             limit_price: None,
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
+            pegged_price: None,
             real_order_id: None,
             created_at: Utc::now(),
             expires_at: None,
@@ -1255,6 +1316,8 @@ mod tests {
             limit_price: None,
             visible_volume: None,
             iceberg_price: None,
+            pegged_offset: None,
+            pegged_price: None,
             real_order_id: None,
             created_at: Utc::now(),
             expires_at: None,

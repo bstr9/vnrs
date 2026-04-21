@@ -51,6 +51,7 @@ fn order_type_to_str(ot: OrderType) -> &'static str {
         OrderType::Rfq => "RFQ",
         OrderType::Etf => "ETF",
         OrderType::Gtd => "GTD",
+        OrderType::PeggedBest => "PEGGED_BEST",
     }
 }
 

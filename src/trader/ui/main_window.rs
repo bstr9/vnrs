@@ -808,6 +808,11 @@ impl MainWindow {
         if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
             self.central_tab = CentralTab::Dashboard;
         }
+        // Ctrl+9: Alpha Research tab (only if alpha feature is enabled)
+        #[cfg(feature = "alpha")]
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num9)) {
+            self.central_tab = CentralTab::AlphaResearch;
+        }
         
         // Ctrl+L: Log tab
         if ctrl && ctx.input(|i| i.key_pressed(egui::Key::L)) {
@@ -954,6 +959,7 @@ impl MainWindow {
                         ui.label("Ctrl+6  回测");
                         ui.label("Ctrl+7  策略");
                         ui.label("Ctrl+8  指标");
+                        ui.label("Ctrl+9  量化研究");
                         ui.label("Ctrl+0  仪表盘");
 
                         ui.separator();
@@ -1913,13 +1919,40 @@ impl MainWindow {
                         ))
                     }
                     IndicatorType::SUPER => {
-                        Box::new(SUPER::new(
-                            config.period,
-                            config.multiplier,
-                            Color32::GREEN,
-                            Color32::RED,
+                        Box::new(SUPER::new(config.period, config.multiplier, Color32::GREEN, Color32::RED, config.location))
+                    }
+                    IndicatorType::RSI => {
+                        Box::new(RSI::new(config.period, config.color, config.location))
+                    }
+                    IndicatorType::MACD => {
+                        Box::new(MACD::new(
+                            config.fast_period,
+                            config.slow_period,
+                            config.signal_period,
+                            config.color,
+                            config.signal_color,
+                            config.hist_color,
                             config.location,
                         ))
+                    }
+                    IndicatorType::ATR => {
+                        Box::new(ATR::new(config.period, config.color, config.location))
+                    }
+                    IndicatorType::KDJ => {
+                        Box::new(KDJ::new(
+                            config.period,
+                            config.signal_period,
+                            config.color,
+                            config.signal_color,
+                            config.hist_color,
+                            config.location,
+                        ))
+                    }
+                    IndicatorType::CCI => {
+                        Box::new(CCI::new(config.period, config.color, config.location))
+                    }
+                    IndicatorType::MFI => {
+                        Box::new(MFI::new(config.period, config.color, config.location))
                     }
                 };
                 
@@ -2036,6 +2069,8 @@ impl MainWindow {
                     "strategy" => self.central_tab = CentralTab::Strategy,
                     "alert" => self.central_tab = CentralTab::Alert,
                     "advanced_orders" => self.central_tab = CentralTab::AdvancedOrders,
+                    #[cfg(feature = "alpha")]
+                    "alpha_research" | "alpha" => self.central_tab = CentralTab::AlphaResearch,
                     "log" => self.bottom_tab = BottomTab::Log,
                     "account" => self.bottom_tab = BottomTab::Account,
                     "position" => self.bottom_tab = BottomTab::Position,
@@ -2181,6 +2216,12 @@ fn create_indicator(indicator_type: &str, period: usize) -> Box<dyn crate::chart
         "TRIX" => Box::new(TRIX::new(period, 9, Color32::from_rgb(200, 100, 255), Color32::from_rgb(255, 100, 0), sub_loc)),
         "SAR" => Box::new(SAR::new(0.02, 0.2, Color32::from_rgb(0, 255, 0), main_loc)),
         "SUPER" | "SUPERTREND" => Box::new(SUPER::new(period, 3.0, Color32::GREEN, Color32::RED, main_loc)),
+        "RSI" => Box::new(RSI::new(period, Color32::from_rgb(200, 200, 0), sub_loc)),
+        "MACD" => Box::new(MACD::new(12, 26, 9, Color32::from_rgb(100, 200, 255), Color32::from_rgb(255, 100, 0), Color32::from_rgb(100, 200, 100), sub_loc)),
+        "ATR" => Box::new(ATR::new(period, Color32::from_rgb(200, 100, 100), sub_loc)),
+        "KDJ" => Box::new(KDJ::new(period, 3, Color32::from_rgb(255, 255, 0), Color32::from_rgb(0, 200, 255), Color32::from_rgb(255, 100, 200), sub_loc)),
+        "CCI" => Box::new(CCI::new(period, Color32::from_rgb(200, 150, 255), sub_loc)),
+        "MFI" => Box::new(MFI::new(period, Color32::from_rgb(100, 255, 200), sub_loc)),
         _ => Box::new(MA::new(period, Color32::YELLOW, main_loc)),
     }
 }

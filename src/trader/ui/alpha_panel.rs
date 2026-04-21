@@ -7,7 +7,7 @@
 
 use egui::{RichText, Ui, Color32};
 
-use super::style::{COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, TABLE_ROW_HEIGHT};
+use super::style::{COLOR_TEXT_SECONDARY};
 
 // ---------------------------------------------------------------------------
 // Model types
@@ -353,11 +353,6 @@ impl AlphaPanel {
 
             ui.horizontal(|ui| {
                 ui.label("数据集:");
-                let text = if self.dataset_name.is_empty() {
-                    "选择数据集...".to_string()
-                } else {
-                    self.dataset_name.clone()
-                };
                 ui.text_edit_singleline(&mut self.dataset_name);
             });
 

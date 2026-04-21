@@ -1,7 +1,7 @@
 ---
 id: REQ-076
 title: "技术指标 GUI 面板——指标选择器 + 参数配置 + 图表叠加"
-status: active
+status: completed
 created_at: "2026-04-22T21:00:00"
 updated_at: "2026-04-22T21:00:00"
 priority: P2

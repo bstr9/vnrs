@@ -465,6 +465,7 @@ fn format_order_type(t: OrderType) -> String {
         OrderType::Rfq => "RFQ",
         OrderType::Etf => "ETF",
         OrderType::Gtd => "GTD",
+        OrderType::PeggedBest => "PEGGED_BEST",
     }
     .to_string()
 }

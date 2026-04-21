@@ -157,6 +157,9 @@ pub enum OrderType {
     Etf,
     /// Good Till Date order
     Gtd,
+    /// Pegged to best bid/ask order (locally emulated)
+    #[serde(rename = "pegged_best")]
+    PeggedBest,
 }
 
 impl fmt::Display for OrderType {
@@ -171,6 +174,7 @@ impl fmt::Display for OrderType {
             OrderType::Rfq => write!(f, "询价"),
             OrderType::Etf => write!(f, "ETF"),
             OrderType::Gtd => write!(f, "GTD"),
+            OrderType::PeggedBest => write!(f, "PeggedBest"),
         }
     }
 }
@@ -619,6 +623,7 @@ mod tests {
         assert_eq!(format!("{}", OrderType::Rfq), "询价");
         assert_eq!(format!("{}", OrderType::Etf), "ETF");
         assert_eq!(format!("{}", OrderType::Gtd), "GTD");
+        assert_eq!(format!("{}", OrderType::PeggedBest), "PeggedBest");
     }
 
     #[test]

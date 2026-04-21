@@ -517,6 +517,7 @@ impl AdvancedOrdersPanel {
             limit_price: parse_opt_f64(&self.emul_form.limit_price),
             visible_volume: parse_opt_f64(&self.emul_form.visible_volume),
             iceberg_price: parse_opt_f64(&self.emul_form.iceberg_price),
+            pegged_offset: None,
             expires_at: None,
             gateway_name: self.emul_form.gateway_name.trim().to_string(),
             reference: String::new(),
@@ -728,5 +729,6 @@ fn emul_type_label(ot: &EmulatedOrderType) -> &'static str {
         EmulatedOrderType::Lit => "触价限价",
         EmulatedOrderType::TrailingStopPct => "追踪止损%",
         EmulatedOrderType::TrailingStopAbs => "追踪止损",
+        EmulatedOrderType::PeggedBest => "钉住最优价",
     }
 }

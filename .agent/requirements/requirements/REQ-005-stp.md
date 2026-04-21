@@ -1,7 +1,7 @@
 ---
 id: REQ-005
 title: "自成交防范 (STP)"
-status: active
+status: completed
 created_at: "2026-04-19T00:00:00"
 updated_at: "2026-04-19T00:00:00"
 priority: P2

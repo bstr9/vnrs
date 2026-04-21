@@ -1,7 +1,7 @@
 ---
 id: REQ-067
 title: "GUI 交易面板支持止损单/止损限价单下单"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
 updated_at: "2026-04-22T20:00:00"
 priority: P1

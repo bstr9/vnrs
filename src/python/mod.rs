@@ -29,6 +29,10 @@ pub mod arraymanager;
 pub mod offset_converter;
 #[cfg(feature = "python")]
 pub mod risk_manager;
+#[cfg(feature = "python")]
+pub mod stop_order_engine;
+#[cfg(feature = "python")]
+pub mod order_emulator;
 
 #[cfg(feature = "python")]
 pub mod sync_bar_bindings;
@@ -59,9 +63,13 @@ pub use portfolio_stats::PyPortfolioStatistics;
 #[cfg(feature = "python")]
 pub use order_factory::{PyOrder, OrderFactory};
 #[cfg(feature = "python")]
-pub use message_bus::{MessageBus, PyMessage, Message, MessageBusInner};
+pub use message_bus::{MessageBus, PyMessage};
 #[cfg(feature = "python")]
 pub use risk_manager::{PyRiskManager, PyRiskConfig, PyRiskCheckResult};
+#[cfg(feature = "python")]
+pub use stop_order_engine::{PyStopOrder, PyStopOrderEngine};
+#[cfg(feature = "python")]
+pub use order_emulator::{PyEmulatedOrder, PyOrderEmulator};
 #[cfg(feature = "python")]
 pub use bindings::StrategyEngineHandle;
 #[cfg(feature = "python")]

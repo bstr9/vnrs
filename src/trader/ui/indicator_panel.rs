@@ -364,15 +364,39 @@ impl IndicatorPanel {
     fn show_indicator_config(&mut self, ui: &mut Ui, mut config: IndicatorConfigEntry) {
         ui.label(RichText::new(format!("配置: {}", config.display_name())).strong());
         
-        // Period parameter (for MA, EMA, WMA, BOLL, TRIX, SUPER)
+        // Period parameter (for MA, EMA, WMA, BOLL, TRIX, SUPER, RSI, ATR, CCI, MFI, KDJ)
         if matches!(config.indicator_type, 
             IndicatorType::MA | IndicatorType::EMA | IndicatorType::WMA | 
-            IndicatorType::BOLL | IndicatorType::TRIX | IndicatorType::SUPER) {
+            IndicatorType::BOLL | IndicatorType::TRIX | IndicatorType::SUPER |
+            IndicatorType::RSI | IndicatorType::ATR | IndicatorType::CCI |
+            IndicatorType::MFI | IndicatorType::KDJ) {
             ui.horizontal(|ui| {
                 ui.label("周期:");
                 let mut period = config.period as i32;
                 ui.add(egui::DragValue::new(&mut period).range(1..=500));
                 config.period = period as usize;
+            });
+        }
+        
+        // MACD: fast/slow/signal periods
+        if config.indicator_type == IndicatorType::MACD {
+            ui.horizontal(|ui| {
+                ui.label("快线周期:");
+                let mut fast = config.fast_period as i32;
+                ui.add(egui::DragValue::new(&mut fast).range(1..=200));
+                config.fast_period = fast as usize;
+            });
+            ui.horizontal(|ui| {
+                ui.label("慢线周期:");
+                let mut slow = config.slow_period as i32;
+                ui.add(egui::DragValue::new(&mut slow).range(1..=200));
+                config.slow_period = slow as usize;
+            });
+            ui.horizontal(|ui| {
+                ui.label("信号周期:");
+                let mut signal = config.signal_period as i32;
+                ui.add(egui::DragValue::new(&mut signal).range(1..=100));
+                config.signal_period = signal as usize;
             });
         }
         
@@ -388,10 +412,14 @@ impl IndicatorPanel {
             });
         }
         
-        // Signal period (for TRIX)
-        if config.indicator_type == IndicatorType::TRIX {
+        // Signal period (for TRIX, KDJ)
+        if matches!(config.indicator_type, IndicatorType::TRIX | IndicatorType::KDJ) {
             ui.horizontal(|ui| {
-                ui.label("信号周期:");
+                let label = match config.indicator_type {
+                    IndicatorType::KDJ => "D周期:",
+                    _ => "信号周期:",
+                };
+                ui.label(label);
                 let mut signal_period = config.signal_period as i32;
                 ui.add(egui::DragValue::new(&mut signal_period).range(1..=100));
                 config.signal_period = signal_period as usize;
@@ -404,11 +432,28 @@ impl IndicatorPanel {
             ui.color_edit_button_srgba(&mut config.color);
         });
         
-        // Signal color (for TRIX)
-        if config.indicator_type == IndicatorType::TRIX {
+        // Signal color (for TRIX, MACD, KDJ)
+        if matches!(config.indicator_type, IndicatorType::TRIX | IndicatorType::MACD | IndicatorType::KDJ) {
             ui.horizontal(|ui| {
-                ui.label("信号线颜色:");
+                let label = match config.indicator_type {
+                    IndicatorType::MACD => "信号线颜色:",
+                    IndicatorType::KDJ => "D线颜色:",
+                    _ => "信号线颜色:",
+                };
+                ui.label(label);
                 ui.color_edit_button_srgba(&mut config.signal_color);
+            });
+        }
+        
+        // Histogram / J-line color (for MACD, KDJ)
+        if matches!(config.indicator_type, IndicatorType::MACD | IndicatorType::KDJ) {
+            ui.horizontal(|ui| {
+                let label = match config.indicator_type {
+                    IndicatorType::KDJ => "J线颜色:",
+                    _ => "柱状图颜色:",
+                };
+                ui.label(label);
+                ui.color_edit_button_srgba(&mut config.hist_color);
             });
         }
         
@@ -559,13 +604,16 @@ impl serde::Serialize for IndicatorConfigEntry {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut s = serializer.serialize_struct("IndicatorConfigEntry", 9)?;
+        let mut s = serializer.serialize_struct("IndicatorConfigEntry", 12)?;
         s.serialize_field("indicator_type", &format!("{:?}", self.indicator_type))?;
         s.serialize_field("period", &self.period)?;
         s.serialize_field("multiplier", &self.multiplier)?;
         s.serialize_field("signal_period", &self.signal_period)?;
+        s.serialize_field("fast_period", &self.fast_period)?;
+        s.serialize_field("slow_period", &self.slow_period)?;
         s.serialize_field("color", &format!("{:08x}", self.color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | b as u32)))?;
         s.serialize_field("signal_color", &format!("{:08x}", self.signal_color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | b as u32)))?;
+        s.serialize_field("hist_color", &format!("{:08x}", self.hist_color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | b as u32)))?;
         s.serialize_field("location", &format!("{:?}", self.location))?;
         s.serialize_field("line_width", &self.line_width)?;
         s.serialize_field("enabled", &self.enabled)?;
@@ -592,6 +640,12 @@ impl<'de> serde::Deserialize<'de> for IndicatorConfigEntry {
                 "TRIX" => IndicatorType::TRIX,
                 "SAR" => IndicatorType::SAR,
                 "SUPER" => IndicatorType::SUPER,
+                "RSI" => IndicatorType::RSI,
+                "MACD" => IndicatorType::MACD,
+                "ATR" => IndicatorType::ATR,
+                "KDJ" => IndicatorType::KDJ,
+                "CCI" => IndicatorType::CCI,
+                "MFI" => IndicatorType::MFI,
                 _ => IndicatorType::MA,
             };
         }
@@ -604,8 +658,11 @@ impl<'de> serde::Deserialize<'de> for IndicatorConfigEntry {
         if let Some(v) = map.get("signal_period").and_then(|v| v.as_u64()) {
             result.signal_period = v as usize;
         }
-        if let Some(v) = map.get("period").and_then(|v| v.as_u64()) {
-            result.period = v as usize;
+        if let Some(v) = map.get("fast_period").and_then(|v| v.as_u64()) {
+            result.fast_period = v as usize;
+        }
+        if let Some(v) = map.get("slow_period").and_then(|v| v.as_u64()) {
+            result.slow_period = v as usize;
         }
         if let Some(v) = map.get("line_width").and_then(|v| v.as_f64()) {
             result.line_width = v as f32;

@@ -607,6 +607,7 @@ impl PyOrderData {
             OrderType::Rfq => "RFQ",
             OrderType::Etf => "ETF",
             OrderType::Gtd => "GTD",
+            OrderType::PeggedBest => "PEGGED_BEST",
         };
 
         Self {

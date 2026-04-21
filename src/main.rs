@@ -14,6 +14,7 @@ use trade_engine::trader::recorder::DataRecorder;
 use trade_engine::trader::database::FileDatabase;
 use trade_engine::event::EventEngine;
 use trade_engine::gateway::binance::{BinanceSpotGateway, BinanceUsdtGateway};
+use trade_engine::rpc::server::RpcServer;
 
 #[cfg(feature = "gui")]
 use trade_engine::trader::ui::MainWindow;
@@ -443,6 +444,80 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("Received Ctrl+C, shutting down gracefully...");
+                    main_engine_for_shutdown.close().await;
+                    tracing::info!("Engine closed, exiting.");
+                }
+            }
+        });
+        return Ok(());
+    }
+    
+    // Check for RPC mode via --rpc flag or VNRS_RPC_ENABLED env var
+    let rpc_enabled = std::env::args().any(|a| a == "--rpc")
+        || std::env::var("VNRS_RPC_ENABLED").map(|v| !v.is_empty()).unwrap_or(false);
+    
+    if rpc_enabled {
+        info!("🔧 RPC 模式启动中...");
+        
+        // Create MainEngine
+        let db = Arc::new(FileDatabase::with_default_dir());
+        let main_engine = MainEngine::new_with_database(db);
+        
+        // Register Binance gateways
+        let binance_spot = Arc::new(BinanceSpotGateway::new("BINANCE_SPOT"));
+        let binance_usdt = Arc::new(BinanceUsdtGateway::new("BINANCE_USDT"));
+        let event_sender = main_engine.get_event_sender();
+        let spot_sender = GatewayEventSender::new("BINANCE_SPOT".to_string(), event_sender.clone());
+        let usdt_sender = GatewayEventSender::new("BINANCE_USDT".to_string(), event_sender);
+        let spot = binance_spot.clone();
+        let usdt = binance_usdt.clone();
+        runtime.spawn(async move {
+            spot.set_event_sender(spot_sender).await;
+            usdt.set_event_sender(usdt_sender).await;
+        });
+        main_engine.add_gateway(binance_spot);
+        main_engine.add_gateway(binance_usdt);
+        
+        // Start the main engine event loop
+        let engine = main_engine.clone();
+        runtime.spawn(async move {
+            engine.start().await;
+        });
+        
+        // Configure and start RPC server
+        let rpc_port: u16 = std::env::var("VNRS_RPC_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5555);
+        
+        let mut server_config = trade_engine::rpc::server::ServerConfig::default();
+        server_config.rep_address = format!("tcp://*:{}", rpc_port);
+        server_config.pub_address = format!("tcp://*:{}", rpc_port + 1);
+        
+        let rpc_server = Arc::new(RpcServer::with_config(server_config));
+        
+        // Register a basic ping function so the RPC server is useful out of the box
+        let rpc_server_clone = rpc_server.clone();
+        runtime.block_on(async {
+            rpc_server_clone.register("ping".to_string(), |args, _kwargs| {
+                let msg = args.first().and_then(|v| v.as_str()).unwrap_or("pong");
+                Ok(serde_json::json!({ "result": msg }))
+            }).await;
+            
+            if let Err(e) = rpc_server_clone.start().await {
+                tracing::error!("❌ RPC Server 启动失败: {}", e);
+                return;
+            }
+            info!("✅ RPC Server 已启动 (REP: :{}, PUB: :{})", rpc_port, rpc_port + 1);
+        });
+        
+        // Wait for shutdown signal
+        let main_engine_for_shutdown = main_engine.clone();
+        runtime.block_on(async {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received Ctrl+C, shutting down gracefully...");
+                    rpc_server.stop().await;
                     main_engine_for_shutdown.close().await;
                     tracing::info!("Engine closed, exiting.");
                 }
