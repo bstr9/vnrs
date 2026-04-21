@@ -12,6 +12,11 @@ pub mod style;
 pub mod backtesting_panel;
 pub mod strategy_panel;
 pub mod dashboard;
+pub mod bracket_panel;
+pub mod indicator_panel;
+pub mod advanced_orders_panel;
+#[cfg(feature = "alpha")]
+pub mod alpha_panel;
 
 // Re-export commonly used types
 pub use widget::*;
@@ -19,6 +24,11 @@ pub use trading::TradingWidget;
 pub use dialogs::*;
 pub use main_window::MainWindow;
 pub use style::*;
-pub use backtesting_panel::BacktestingPanel;
+pub use backtesting_panel::{BacktestingPanel, FillModelType};
 pub use strategy_panel::StrategyPanel;
 pub use dashboard::{DashboardPanel, DashboardAction};
+pub use bracket_panel::BracketOrderPanel;
+pub use indicator_panel::IndicatorPanel;
+pub use advanced_orders_panel::AdvancedOrdersPanel;
+#[cfg(feature = "alpha")]
+pub use alpha_panel::AlphaPanel;

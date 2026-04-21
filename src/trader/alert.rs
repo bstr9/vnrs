@@ -501,6 +501,22 @@ impl AlertEngine {
         self.send_alert(alert);
     }
 
+    /// Create alert for self-trade prevention rejection
+    pub fn alert_stp_reject(&self, reason: &str, symbol: Option<&str>, gateway_name: &str) {
+        let mut alert = AlertMessage::new(
+            AlertLevel::Warning,
+            "Self-Trade Prevention",
+            reason.to_string(),
+            gateway_name,
+        );
+
+        if let Some(s) = symbol {
+            alert = alert.with_symbol(s);
+        }
+
+        self.send_alert(alert);
+    }
+
     /// Create alert for connection state change
     pub fn alert_connection(&self, gateway_name: &str, connected: bool, reason: Option<&str>) {
         let config = self.config.read().unwrap_or_else(|e| e.into_inner());

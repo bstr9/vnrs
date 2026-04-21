@@ -1,9 +1,9 @@
 ---
 id: REQ-065
 title: "RiskManager 订单流拦截——风控引擎接入 send_order 流程"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
-updated_at: "2026-04-22T20:00:00"
+updated_at: "2026-04-22T22:00:00"
 priority: P0
 level: story
 cluster: Core-Trading

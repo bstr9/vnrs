@@ -397,6 +397,43 @@ impl BacktestingEngine {
         self.fill_model = model;
     }
 
+    /// Set fill model by name (convenience method for Python API)
+    ///
+    /// Accepts string names: "best_price", "ideal", "two_tier", "size_aware", "probabilistic"
+    /// Uses the engine's current slippage setting for default parameters.
+    pub fn set_fill_model_by_name(&mut self, model_name: &str) -> Result<(), String> {
+        let model: Box<dyn FillModel> = match model_name.to_lowercase().as_str() {
+            "best_price" => Box::new(BestPriceFillModel::new(self.slippage)),
+            "ideal" => Box::new(super::fill_model::IdealFillModel::new()),
+            "two_tier" => Box::new(super::fill_model::TwoTierFillModel::new(
+                self.slippage,         // slippage_base
+                self.slippage * 2.0,   // slippage_extra for large orders
+                100.0,                 // size_threshold
+                0.95,                  // prob_base
+                0.80,                  // prob_large
+            )),
+            "size_aware" => Box::new(super::fill_model::SizeAwareFillModel::new(
+                self.slippage,         // base_slippage
+                self.slippage * 5.0,   // max_slippage
+                0.1,                   // impact_coefficient
+                0.95,                  // max_fill_pct
+            )),
+            "probabilistic" => Box::new(super::fill_model::ProbabilisticFillModel::new(
+                self.slippage,         // slippage
+                0.95,                  // prob_fill_on_limit
+                0.5,                   // prob_slippage
+            )),
+            _ => {
+                return Err(format!(
+                    "Unknown fill model '{}'. Valid options: best_price, ideal, two_tier, size_aware, probabilistic",
+                    model_name
+                ));
+            }
+        };
+        self.fill_model = model;
+        Ok(())
+    }
+
     /// Set risk engine configuration
     pub fn set_risk_config(&mut self, config: RiskConfig) {
         self.risk_engine.set_config(config);

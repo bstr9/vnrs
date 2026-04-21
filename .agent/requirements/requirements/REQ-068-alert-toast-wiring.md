@@ -1,9 +1,9 @@
 ---
 id: REQ-068
 title: "AlertEngine → ToastManager 告警通知集成"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
-updated_at: "2026-04-22T21:00:00"
+updated_at: "2026-04-22T22:00:00"
 priority: P1
 level: story
 cluster: GUI

@@ -1,9 +1,9 @@
 ---
 id: REQ-064
 title: "三大引擎回调绑定——止损单/模拟单/组合单功能断头路修复"
-status: active
+status: completed
 created_at: "2026-04-22T20:00:00"
-updated_at: "2026-04-22T20:00:00"
+updated_at: "2026-04-22T22:00:00"
 priority: P0
 level: story
 cluster: Core-Trading

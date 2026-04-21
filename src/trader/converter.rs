@@ -526,7 +526,7 @@ impl OffsetConverter {
     }
 
     /// Check if the contract needs offset convert
-    fn is_convert_required(&self, vt_symbol: &str) -> bool {
+    pub fn is_convert_required(&self, vt_symbol: &str) -> bool {
         // Only contracts with long-short position mode require convert
         if let Some(contract) = (self.get_contract)(vt_symbol) {
             !contract.net_position

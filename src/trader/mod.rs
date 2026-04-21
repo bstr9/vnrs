@@ -73,6 +73,7 @@ pub use bracket_order::{BracketOrderEngine, ContingencyType, OrderGroupState, Or
 pub use clock::{Clock, LiveClock, TestClock};
 pub use constant::{
     Currency, Direction, Exchange, Interval, Offset, OptionType, OrderType, Product, Status,
+    StpMode,
 };
 pub use contract_manager::ContractManager;
 pub use converter::{OffsetConverter, PositionHolding};

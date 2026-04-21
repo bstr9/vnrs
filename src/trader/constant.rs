@@ -175,6 +175,28 @@ impl fmt::Display for OrderType {
     }
 }
 
+/// Self-trade prevention mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum StpMode {
+    /// Cancel the incoming (taker) order
+    #[default]
+    CancelTaker,
+    /// Cancel the existing (maker) resting order
+    CancelMaker,
+    /// Cancel both orders
+    CancelBoth,
+}
+
+impl fmt::Display for StpMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StpMode::CancelTaker => write!(f, "CancelTaker"),
+            StpMode::CancelMaker => write!(f, "CancelMaker"),
+            StpMode::CancelBoth => write!(f, "CancelBoth"),
+        }
+    }
+}
+
 /// Option type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OptionType {

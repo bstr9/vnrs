@@ -252,6 +252,7 @@ impl TradeEngineApp {
                     orderid,
                     symbol: String::new(),
                     exchange: trade_engine::trader::Exchange::Binance,
+                    gateway_name: String::new(),
                 };
                 
                 let engine = self.main_engine.clone();

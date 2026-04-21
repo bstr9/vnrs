@@ -1,9 +1,9 @@
 ---
 id: REQ-027
 title: "Python 策略定时器/调度功能"
-status: active
+status: completed
 created_at: "2026-04-19T14:00:00"
-updated_at: "2026-04-19T14:00:00"
+updated_at: "2026-04-22T22:00:00"
 priority: P2
 relations:
   supersedes: []

@@ -3,7 +3,7 @@
 //! This module implements the main application window with dock panels
 //! for various trading monitors and widgets.
 
-use egui::{Context, Ui, TopBottomPanel, SidePanel, CentralPanel, RichText};
+use egui::{Context, Ui, TopBottomPanel, SidePanel, CentralPanel, RichText, Color32};
 use egui::containers::menu::MenuBar;
 
 use super::widget::*;
@@ -14,10 +14,17 @@ use super::style::{ToastManager, ToastType};
 use super::backtesting_panel::BacktestingPanel;
 use super::dashboard::{DashboardPanel, DashboardAction};
 use super::strategy_panel::StrategyPanel;
+use super::indicator_panel::IndicatorPanel;
+use super::bracket_panel::BracketOrderPanel;
+use super::advanced_orders_panel::AdvancedOrdersPanel;
+#[cfg(feature = "alpha")]
+use super::alpha_panel::AlphaPanel;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use crate::chart::ChartWidget;
 use crate::trader::object::BarData;
+use crate::trader::toast::Toast;
+use crate::trader::alert::AlertLevel;
 use crate::mcp::UICommand;
 use chrono::{Utc, Timelike, Duration, Datelike};
 use crate::strategy::{StrategyEngine, StrategyState};
@@ -64,6 +71,12 @@ pub enum CentralTab {
     Quote,
     Strategy,
     Backtesting,
+    Indicator,
+    Alert,
+    AdvancedOrders,
+    BracketOrder,
+    #[cfg(feature = "alpha")]
+    AlphaResearch,
 }
 
 /// Tab selection for the bottom panel
@@ -107,6 +120,11 @@ pub struct MainWindow {
     pub backtesting_panel: BacktestingPanel,
     pub strategy_panel: StrategyPanel,
     pub dashboard_panel: DashboardPanel,
+    pub indicator_panel: IndicatorPanel,
+    pub advanced_orders_panel: AdvancedOrdersPanel,
+    pub bracket_panel: BracketOrderPanel,
+    #[cfg(feature = "alpha")]
+    pub alpha_panel: super::alpha_panel::AlphaPanel,
     
     // Dialogs
     pub connect_dialogs: Vec<ConnectDialog>,
@@ -139,6 +157,11 @@ pub struct MainWindow {
     strategy_update_counter: u32,
     // Frame counter for periodic dashboard data logging (every ~10 frames = 1 second)
     dashboard_log_counter: u32,
+    
+    // Alert history synced from backend ToastManager
+    alert_history: Vec<Toast>,
+    // Track last seen toast ID to detect new alerts
+    last_alert_id: u64,
     
     // Actions pending from UI
     pub pending_connect: Option<(String, std::collections::HashMap<String, serde_json::Value>)>,
@@ -175,6 +198,11 @@ impl MainWindow {
             backtesting_panel: BacktestingPanel::new(),
             strategy_panel: StrategyPanel::new(),
             dashboard_panel: DashboardPanel::new(),
+            indicator_panel: IndicatorPanel::new(),
+            bracket_panel: BracketOrderPanel::new(),
+            advanced_orders_panel: AdvancedOrdersPanel::new(),
+            #[cfg(feature = "alpha")]
+            alpha_panel: AlphaPanel::new(),
             connect_dialogs: Vec::new(),
             about_dialog: AboutDialog::new(),
             global_settings: GlobalSettingsDialog::new(),
@@ -189,6 +217,8 @@ impl MainWindow {
             strategy_cache: Arc::new(Mutex::new(Vec::new())),
             strategy_update_counter: 0,
             dashboard_log_counter: 0,
+            alert_history: Vec::new(),
+            last_alert_id: 0,
             pending_connect: None,
             pending_cancel_order: None,
             pending_cancel_quote: None,
@@ -307,11 +337,42 @@ impl MainWindow {
             // Update trading widget with available contracts for dropdown
             let all_contracts = engine.get_all_contracts();
             self.trading.set_contracts(all_contracts);
+            
+            // Refresh advanced orders panel data
+            self.advanced_orders_panel.refresh_data(
+                Some(&*engine.stop_order_engine()),
+                Some(&*engine.order_emulator()),
+            );
         }
         
         // Update dashboard panel data (separate borrow scope - clone Arc to avoid borrow conflict)
         if let Some(engine_arc) = self.main_engine.clone() {
             self.update_dashboard_data(&*engine_arc);
+        }
+        
+        // Sync alert history from backend ToastManager
+        if let Some(ref engine) = self.main_engine {
+            let backend_toasts = engine.toast_manager().get_all_toasts();
+            
+            // Detect new alerts by checking for IDs greater than last_alert_id
+            let max_id = backend_toasts.iter().map(|t| t.id).max().unwrap_or(0);
+            if max_id > self.last_alert_id {
+                // Find new alerts
+                for toast in &backend_toasts {
+                    if toast.id > self.last_alert_id {
+                        // Show toast notification for new alerts
+                        let toast_type = match toast.level {
+                            AlertLevel::Info => ToastType::Info,
+                            AlertLevel::Warning => ToastType::Warning,
+                            AlertLevel::Critical => ToastType::Error,
+                        };
+                        self.toast_manager.add(&format!("{}: {}", toast.title, toast.body), toast_type);
+                    }
+                }
+                self.last_alert_id = max_id;
+            }
+            
+            self.alert_history = backend_toasts;
         }
         
         // Update strategy data periodically (every 30 frames ~ every 3 seconds)
@@ -657,6 +718,8 @@ impl MainWindow {
     pub fn set_gateways(&mut self, gateways: Vec<String>) {
         self.gateway_names = gateways.clone();
         self.trading.set_gateways(gateways.clone());
+        self.advanced_orders_panel.set_gateways(&gateways);
+        self.bracket_panel.set_gateways(gateways.clone());
         
         // Create connect dialogs for each gateway
         self.connect_dialogs = gateways
@@ -736,6 +799,10 @@ impl MainWindow {
         }
         if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num7)) {
             self.central_tab = CentralTab::Strategy;
+        }
+        // Ctrl+8: Indicator tab
+        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num8)) {
+            self.central_tab = CentralTab::Indicator;
         }
         // Ctrl+0: Dashboard tab
         if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
@@ -886,6 +953,7 @@ impl MainWindow {
                         ui.label("Ctrl+5  报价");
                         ui.label("Ctrl+6  回测");
                         ui.label("Ctrl+7  策略");
+                        ui.label("Ctrl+8  指标");
                         ui.label("Ctrl+0  仪表盘");
 
                         ui.separator();
@@ -934,6 +1002,12 @@ impl MainWindow {
             }
             ui.selectable_value(&mut self.central_tab, CentralTab::Strategy, "策略");
             ui.selectable_value(&mut self.central_tab, CentralTab::Backtesting, "回测");
+            ui.selectable_value(&mut self.central_tab, CentralTab::Indicator, "指标");
+            ui.selectable_value(&mut self.central_tab, CentralTab::Alert, "告警");
+            ui.selectable_value(&mut self.central_tab, CentralTab::AdvancedOrders, "高级委托");
+            ui.selectable_value(&mut self.central_tab, CentralTab::BracketOrder, "组合单");
+            #[cfg(feature = "alpha")]
+            ui.selectable_value(&mut self.central_tab, CentralTab::AlphaResearch, "量化研究");
         });
         
         ui.separator();
@@ -979,6 +1053,38 @@ impl MainWindow {
                 self.backtesting_panel.ui(&ctx, ui);
                 // Sync trade overlay to matching chart after backtest
                 self.sync_backtest_trade_overlay();
+            }
+            CentralTab::Indicator => {
+                self.indicator_panel.show(ui);
+                // Apply indicator changes to charts
+                if let Some(configs) = self.indicator_panel.take_apply() {
+                    self.apply_indicators_to_charts(&configs);
+                }
+            }
+            CentralTab::BracketOrder => {
+                let bracket_engine = self.main_engine.as_ref().map(|e| e.bracket_order_engine().clone());
+                self.bracket_panel.show(ui, bracket_engine.as_ref(), &mut self.toast_manager);
+                // Check for pending cancel request
+                if let Some(group_id) = self.bracket_panel.take_cancel() {
+                    if let Some(ref engine) = self.main_engine {
+                        let boe = engine.bracket_order_engine().clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = boe.cancel_group(group_id) {
+                                tracing::warn!("撤销委托组失败: {}", e);
+                            }
+                        });
+                    }
+                }
+            }
+            CentralTab::Alert => {
+                self.show_alert_panel(ui);
+            }
+            CentralTab::AdvancedOrders => {
+                self.advanced_orders_panel.show(ui, &mut self.toast_manager);
+            }
+            #[cfg(feature = "alpha")]
+            CentralTab::AlphaResearch => {
+                self.alpha_panel.show(ui);
             }
         }
     }
@@ -1029,6 +1135,151 @@ impl MainWindow {
                 }
             }
         }
+    }
+    
+    /// Show the alert history panel
+    fn show_alert_panel(&mut self, ui: &mut Ui) {
+        // Toolbar
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("告警历史").strong());
+            ui.add_space(8.0);
+            ui.label(RichText::new(format!("共 {} 条", self.alert_history.len())).color(COLOR_TEXT_SECONDARY));
+            ui.add_space(8.0);
+            if ui.button("清除全部").clicked() {
+                if let Some(ref engine) = self.main_engine {
+                    engine.toast_manager().clear();
+                    self.alert_history.clear();
+                    self.last_alert_id = 0;
+                }
+            }
+            if ui.button("全部已读").clicked() {
+                if let Some(ref engine) = self.main_engine {
+                    engine.toast_manager().dismiss_all();
+                }
+            }
+        });
+        
+        ui.separator();
+        
+        // Table header
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("时间").color(COLOR_TEXT_SECONDARY).size(12.0));
+            ui.add_space(18.0);
+            ui.label(RichText::new("级别").color(COLOR_TEXT_SECONDARY).size(12.0));
+            ui.add_space(18.0);
+            ui.label(RichText::new("标题").color(COLOR_TEXT_SECONDARY).size(12.0));
+            ui.add_space(18.0);
+            ui.label(RichText::new("内容").color(COLOR_TEXT_SECONDARY).size(12.0));
+            ui.add_space(18.0);
+            ui.label(RichText::new("来源").color(COLOR_TEXT_SECONDARY).size(12.0));
+        });
+        
+        ui.separator();
+        
+        // Scrollable alert rows (most recent first)
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let alerts: Vec<_> = self.alert_history.iter().rev().collect();
+            for toast in &alerts {
+                let row_height = TABLE_ROW_HEIGHT;
+                
+                // Determine row color based on alert level
+                let level_color = match toast.level {
+                    AlertLevel::Info => Color32::from_rgb(80, 150, 255),
+                    AlertLevel::Warning => Color32::from_rgb(255, 200, 50),
+                    AlertLevel::Critical => Color32::from_rgb(255, 80, 80),
+                };
+                
+                let level_text = match toast.level {
+                    AlertLevel::Info => "信息",
+                    AlertLevel::Warning => "警告",
+                    AlertLevel::Critical => "严重",
+                };
+                
+                // Row background - subtle highlight for unread
+                let bg_color = if !toast.dismissed {
+                    Color32::from_rgba_unmultiplied(level_color.r(), level_color.g(), level_color.b(), 15)
+                } else {
+                    Color32::TRANSPARENT
+                };
+                
+                let (rect, _response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), row_height),
+                    egui::Sense::click(),
+                );
+                
+                // Draw row background
+                if bg_color != Color32::TRANSPARENT {
+                    ui.painter().rect_filled(rect, 0.0, bg_color);
+                }
+                
+                // Left border accent for unread
+                if !toast.dismissed {
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(rect.min, egui::vec2(3.0, row_height)),
+                        0.0,
+                        level_color,
+                    );
+                }
+                
+                let mut x = rect.left() + 5.0;
+                let y = rect.center().y;
+                
+                // Time column
+                let time_str = toast.timestamp.format("%H:%M:%S").to_string();
+                ui.painter().text(
+                    egui::Pos2::new(x, y),
+                    egui::Align2::LEFT_CENTER,
+                    &time_str,
+                    egui::FontId::proportional(11.0),
+                    COLOR_TEXT_SECONDARY,
+                );
+                x += 70.0;
+                
+                // Level column (color-coded)
+                ui.painter().text(
+                    egui::Pos2::new(x, y),
+                    egui::Align2::LEFT_CENTER,
+                    level_text,
+                    egui::FontId::proportional(11.0),
+                    level_color,
+                );
+                x += 60.0;
+                
+                // Title column
+                ui.painter().text(
+                    egui::Pos2::new(x, y),
+                    egui::Align2::LEFT_CENTER,
+                    &toast.title,
+                    egui::FontId::proportional(11.0),
+                    COLOR_TEXT_PRIMARY,
+                );
+                x += 100.0;
+                
+                // Body column
+                let body_display = if toast.body.len() > 80 {
+                    format!("{}...", &toast.body[..80])
+                } else {
+                    toast.body.clone()
+                };
+                ui.painter().text(
+                    egui::Pos2::new(x, y),
+                    egui::Align2::LEFT_CENTER,
+                    &body_display,
+                    egui::FontId::proportional(11.0),
+                    COLOR_TEXT_SECONDARY,
+                );
+                x += rect.width() - 265.0;
+                
+                // Source column
+                ui.painter().text(
+                    egui::Pos2::new(x, y),
+                    egui::Align2::LEFT_CENTER,
+                    &toast.source,
+                    egui::FontId::proportional(11.0),
+                    COLOR_TEXT_SECONDARY,
+                );
+            }
+        });
     }
     
     fn show_dialogs(&mut self, ctx: &Context) {
@@ -1096,6 +1347,7 @@ impl MainWindow {
                             orderid: order.orderid.clone(),
                             symbol: order.symbol.clone(),
                             exchange: order.exchange,
+                            gateway_name: String::new(),
                         };
                         let engine = engine.clone();
                         let gw = gw_name.clone();
@@ -1107,6 +1359,62 @@ impl MainWindow {
                     }
                 }
                 self.toast_manager.add(&format!("撤销 {} 个委托", count), ToastType::Info);
+            }
+        }
+
+        // Advanced orders panel: stop order submit
+        if let Some(req) = self.advanced_orders_panel.take_stop_request() {
+            if let Some(ref engine) = self.main_engine {
+                let se = engine.stop_order_engine().clone();
+                tokio::spawn(async move {
+                    match se.add_stop_order(req) {
+                        Ok(id) => tracing::info!("止损单已提交: id={}", id),
+                        Err(e) => tracing::warn!("止损单提交失败: {}", e),
+                    }
+                });
+            } else {
+                self.toast_manager.add("主引擎未就绪", ToastType::Error);
+            }
+        }
+
+        // Advanced orders panel: stop order cancel
+        if let Some(id) = self.advanced_orders_panel.take_cancel_stop() {
+            if let Some(ref engine) = self.main_engine {
+                let se = engine.stop_order_engine().clone();
+                tokio::spawn(async move {
+                    match se.cancel_stop_order(id) {
+                        Ok(()) => tracing::info!("止损单已撤销: id={}", id),
+                        Err(e) => tracing::warn!("止损单撤销失败: {}", e),
+                    }
+                });
+            }
+        }
+
+        // Advanced orders panel: emulated order submit
+        if let Some(req) = self.advanced_orders_panel.take_emul_request() {
+            if let Some(ref engine) = self.main_engine {
+                let oe = engine.order_emulator().clone();
+                tokio::spawn(async move {
+                    match oe.add_order(&req) {
+                        Ok(id) => tracing::info!("模拟委托已提交: id={}", id),
+                        Err(e) => tracing::warn!("模拟委托提交失败: {}", e),
+                    }
+                });
+            } else {
+                self.toast_manager.add("主引擎未就绪", ToastType::Error);
+            }
+        }
+
+        // Advanced orders panel: emulated order cancel
+        if let Some(id) = self.advanced_orders_panel.take_cancel_emul() {
+            if let Some(ref engine) = self.main_engine {
+                let oe = engine.order_emulator().clone();
+                tokio::spawn(async move {
+                    match oe.cancel_order(id) {
+                        Ok(()) => tracing::info!("模拟委托已撤销: id={}", id),
+                        Err(e) => tracing::warn!("模拟委托撤销失败: {}", e),
+                    }
+                });
             }
         }
 
@@ -1551,6 +1859,74 @@ impl MainWindow {
             chart.trade_overlay = overlay;
         }
     }
+    
+    /// Apply indicator configurations to all open chart windows.
+    ///
+    /// If `configs` is empty, all indicators are cleared from charts.
+    /// Otherwise, the current indicators are replaced with the ones specified
+    /// in the config entries.
+    fn apply_indicators_to_charts(&mut self, configs: &[super::indicator_panel::IndicatorConfigEntry]) {
+        use crate::chart::*;
+        
+        for (_vt_symbol, chart) in &mut self.charts {
+            chart.clear_indicators();
+            
+            for config in configs {
+                if !config.enabled {
+                    continue;
+                }
+                
+                let indicator: Box<dyn Indicator> = match config.indicator_type {
+                    IndicatorType::MA => {
+                        Box::new(MA::new(config.period, config.color, config.location))
+                    }
+                    IndicatorType::EMA => {
+                        Box::new(EMA::new(config.period, config.color, config.location))
+                    }
+                    IndicatorType::WMA => {
+                        Box::new(WMA::new(config.period, config.color, config.location))
+                    }
+                    IndicatorType::BOLL => {
+                        Box::new(BOLL::new(config.period, config.multiplier, config.location))
+                    }
+                    IndicatorType::VWAP => {
+                        Box::new(VWAP::new(config.color, config.location))
+                    }
+                    IndicatorType::AVL => {
+                        Box::new(AVL::new(config.color, config.location))
+                    }
+                    IndicatorType::TRIX => {
+                        Box::new(TRIX::new(
+                            config.period,
+                            config.signal_period,
+                            config.color,
+                            config.signal_color,
+                            config.location,
+                        ))
+                    }
+                    IndicatorType::SAR => {
+                        Box::new(SAR::new(
+                            config.multiplier,
+                            0.2,
+                            config.color,
+                            config.location,
+                        ))
+                    }
+                    IndicatorType::SUPER => {
+                        Box::new(SUPER::new(
+                            config.period,
+                            config.multiplier,
+                            Color32::GREEN,
+                            Color32::RED,
+                            config.location,
+                        ))
+                    }
+                };
+                
+                chart.add_indicator(indicator);
+            }
+        }
+    }
 
     /// Take pending connect action
     pub fn take_connect(&mut self) -> Option<(String, std::collections::HashMap<String, serde_json::Value>)> {
@@ -1658,6 +2034,8 @@ impl MainWindow {
                     "trade" => self.central_tab = CentralTab::Trade,
                     "backtesting" => self.central_tab = CentralTab::Backtesting,
                     "strategy" => self.central_tab = CentralTab::Strategy,
+                    "alert" => self.central_tab = CentralTab::Alert,
+                    "advanced_orders" => self.central_tab = CentralTab::AdvancedOrders,
                     "log" => self.bottom_tab = BottomTab::Log,
                     "account" => self.bottom_tab = BottomTab::Account,
                     "position" => self.bottom_tab = BottomTab::Position,
@@ -1715,6 +2093,7 @@ impl MainWindow {
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
+                    gateway_name: String::new(),
                 };
                 self.trading.set_order_request(req, &gateway_name);
                 tracing::info!("MCP: 下单请求");

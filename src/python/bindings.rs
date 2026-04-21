@@ -1,4 +1,4 @@
-use crate::python::{OrderFactory, PyInstrument, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy};
+use crate::python::{OrderFactory, PyInstrument, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy, PyArrayManager};
 use crate::strategy::StrategyEngine;
 use crate::trader::constant::{Direction, Offset, OrderType};
 use crate::trader::alert::AlertLevel;
@@ -128,6 +128,7 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OrderFactory>()?;
     m.add_class::<PyInstrument>()?;
     m.add_class::<PyStrategyContext>()?;
+    m.add_class::<PyArrayManager>()?;
     m.add_class::<PyAlertMessage>()?;
     m.add_function(wrap_pyfunction!(create_main_engine, m)?)?;
     m.add_function(wrap_pyfunction!(run_event_loop, m)?)?;
@@ -177,11 +178,21 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register sync bar generator module
     crate::python::sync_bar_bindings::register_sync_bar_module(m)?;
 
+    // Register array manager module
+    crate::python::arraymanager::register_arraymanager_module(m)?;
+
+    // Register alpha research module (requires both python and alpha features)
+    #[cfg(all(feature = "python", feature = "alpha"))]
+    crate::python::alpha_bindings::register_alpha_module(m)?;
+
     // Register deprecated strategy classes (kept for backward compatibility)
     #[allow(deprecated)]
     {
         crate::python::strategy_bindings::register_strategy_module(m)?;
     }
+
+    // Register offset converter module
+    crate::python::offset_converter::register_offset_converter_module(m)?;
 
     Ok(())
 }
@@ -593,5 +604,48 @@ impl PythonEngineWrapper {
     fn get_recent_toasts(&self, limit: usize) -> PyResult<Vec<PyAlertMessage>> {
         let toasts = self.main_engine.toast_manager().get_recent_toasts(limit);
         Ok(toasts.iter().map(PyAlertMessage::from_toast).collect())
+    }
+
+    /// Set the self-trade prevention (STP) mode.
+    ///
+    /// Args:
+    ///     mode: One of "CancelTaker", "CancelMaker", "CancelBoth"
+    fn set_stp_mode(&self, mode: String) -> PyResult<()> {
+        use crate::trader::constant::StpMode;
+        let stp_mode = match mode.as_str() {
+            "CancelTaker" => StpMode::CancelTaker,
+            "CancelMaker" => StpMode::CancelMaker,
+            "CancelBoth" => StpMode::CancelBoth,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid STP mode '{}'. Must be one of: CancelTaker, CancelMaker, CancelBoth",
+                    mode
+                )));
+            }
+        };
+        self.main_engine.set_stp_mode(stp_mode);
+        Ok(())
+    }
+
+    /// Get the current self-trade prevention (STP) mode.
+    ///
+    /// Returns:
+    ///     One of "CancelTaker", "CancelMaker", "CancelBoth"
+    fn get_stp_mode(&self) -> PyResult<String> {
+        Ok(self.main_engine.get_stp_mode().to_string())
+    }
+
+    /// Get an OffsetConverter bound to the live MainEngine's contract lookup.
+    ///
+    /// The returned converter uses the MainEngine's OmsEngine for contract
+    /// resolution, so it knows which symbols require offset conversion
+    /// (e.g., SHFE/INE futures). Position data is *not* shared — this is
+    /// intended for query/preview use (e.g., checking if a symbol requires
+    /// offset splitting before sending an order).
+    ///
+    /// Returns:
+    ///     PyOffsetConverter instance
+    fn offset_converter(&self) -> PyResult<crate::python::offset_converter::PyOffsetConverter> {
+        crate::python::offset_converter::PyOffsetConverter::from_main_engine(&self.main_engine)
     }
 }

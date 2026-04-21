@@ -24,7 +24,12 @@ pub mod order_factory;
 #[cfg(feature = "python")]
 pub mod message_bus;
 #[cfg(feature = "python")]
+pub mod arraymanager;
+#[cfg(feature = "python")]
+pub mod offset_converter;
+#[cfg(feature = "python")]
 pub mod risk_manager;
+
 #[cfg(feature = "python")]
 pub mod sync_bar_bindings;
 #[cfg(feature = "python")]
@@ -33,6 +38,8 @@ pub mod data_types;
 pub mod context;
 #[cfg(feature = "python")]
 pub mod instrument;
+#[cfg(all(feature = "python", feature = "alpha"))]
+pub mod alpha_bindings;
 
 #[cfg(feature = "python")]
 pub use strategy::{Strategy, PendingOrder, PendingStopOrder};
@@ -65,6 +72,12 @@ pub use data_types::{PyDepthData, PyTickData, PyOrderData, PyTradeData};
 pub use context::PyStrategyContext;
 #[cfg(feature = "python")]
 pub use instrument::PyInstrument;
+#[cfg(feature = "python")]
+pub use arraymanager::PyArrayManager;
+#[cfg(feature = "python")]
+pub use offset_converter::{PyOffsetConverter, PyOrderRequest};
+#[cfg(all(feature = "python", feature = "alpha"))]
+pub use alpha_bindings::PyAlphaModule;
 
 /// Setup Python sys.path for embedded interpreter.
 ///

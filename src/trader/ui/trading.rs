@@ -420,7 +420,7 @@ impl TradingWidget {
 
                     // Order type
                     ui.label("类型");
-                    let order_types = ["限价", "市价", "FAK", "FOK"];
+                    let order_types = ["限价", "市价", "FAK", "FOK", "止损市价", "止损限价"];
                     ComboBox::from_id_salt("order_type_combo")
                         .selected_text(order_types[self.order_type_index])
                         .show_ui(ui, |ui| {
@@ -734,7 +734,9 @@ impl TradingWidget {
             0 => OrderType::Limit,
             1 => OrderType::Market,
             2 => OrderType::Fak,
-            _ => OrderType::Fok,
+            3 => OrderType::Fok,
+            4 => OrderType::Stop,
+            _ => OrderType::StopLimit,
         };
 
         self.last_order_error = None;

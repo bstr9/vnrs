@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use chrono;
 
 use super::app::BaseApp;
-use super::constant::Exchange;
+use super::constant::{Exchange, StpMode};
 use super::contract_manager::ContractManager;
 use super::converter::OffsetConverter;
 use super::data_download::DataDownloadManager;
@@ -24,6 +24,7 @@ use super::bracket_order::{BracketOrderEngine, OrderGroup};
 use super::stop_order::{StopOrderEngine, StopOrder};
 use super::order_emulator::OrderEmulator;
 use super::order_book::OrderBookManager;
+use super::message_bus::MessageBus;
 use super::reconciliation::ReconciliationEngine;
 use super::data_engine::DataEngine;
 use super::session::TradingSessionManager;
@@ -628,6 +629,7 @@ pub struct MainEngine {
     contract_manager: Arc<ContractManager>,
     session_manager: Arc<TradingSessionManager>,
     order_book_manager: Arc<OrderBookManager>,
+    message_bus: Arc<MessageBus>,
     reconciliation_engine: RwLock<Option<Arc<ReconciliationEngine>>>,
     data_engine: RwLock<Option<Arc<DataEngine>>>,
     offset_converter: RwLock<OffsetConverter>,
@@ -651,6 +653,8 @@ pub struct MainEngine {
     persist_sent_count: AtomicU64,
     /// Counter for persistence tasks that overflowed to file
     persist_overflowed_count: AtomicU64,
+    /// Self-trade prevention mode
+    stp_mode: RwLock<StpMode>,
 }
 
 impl MainEngine {
@@ -715,6 +719,7 @@ impl MainEngine {
         let contract_manager = Arc::new(ContractManager::new());
         let session_manager = Arc::new(TradingSessionManager::new());
         let order_book_manager = Arc::new(OrderBookManager::new());
+        let message_bus = Arc::new(MessageBus::new());
 
         // Create OffsetConverter with contract lookup from OmsEngine
         let oms_for_converter = oms_engine.clone();
@@ -744,6 +749,7 @@ impl MainEngine {
             contract_manager,
             session_manager,
             order_book_manager,
+            message_bus,
             reconciliation_engine: RwLock::new(None),
             data_engine: RwLock::new(None),
             offset_converter: RwLock::new(offset_converter),
@@ -758,6 +764,7 @@ impl MainEngine {
             event_id_counter: AtomicU64::new(0),
             persist_sent_count: AtomicU64::new(0),
             persist_overflowed_count: AtomicU64::new(0),
+            stp_mode: RwLock::new(StpMode::CancelTaker),
         };
         
         // Wire AlertEngine to the event pipeline
@@ -779,6 +786,7 @@ impl MainEngine {
             engines.insert("ContractManager".to_string(), engine.contract_manager.clone());
             engines.insert("TradingSessionManager".to_string(), engine.session_manager.clone());
             engines.insert("OrderBookManager".to_string(), engine.order_book_manager.clone());
+            engines.insert("MessageBus".to_string(), engine.message_bus.clone());
             engines.insert("ToastManager".to_string(), engine.toast_manager.clone());
         }
         
@@ -1301,6 +1309,98 @@ impl MainEngine {
             }
         }
 
+        // Self-trade prevention check
+        let vt_symbol = format!("{}.{}", req.symbol, req.exchange.value());
+        let stp_mode = self.get_stp_mode();
+        let active_orders = self.oms_engine.get_all_active_orders();
+
+        // Find any resting order for the same symbol with opposite direction
+        let maker_orders: Vec<&OrderData> = active_orders
+            .iter()
+            .filter(|o| {
+                let o_vt_symbol = format!("{}.{}", o.symbol, o.exchange.value());
+                o_vt_symbol == vt_symbol
+                    && o.direction.map_or(false, |d| d != req.direction)
+                    && o.is_active()
+            })
+            .collect();
+
+        if !maker_orders.is_empty() {
+            let maker_ids: Vec<String> = maker_orders.iter().map(|o| o.vt_orderid()).collect();
+            match stp_mode {
+                StpMode::CancelTaker => {
+                    let reason = format!(
+                        "自成交防护(CancelTaker): 拒绝新委托 direction={:?} symbol={}, 对手委托={:?}",
+                        req.direction, vt_symbol, maker_ids
+                    );
+                    self.write_log(&reason, "STP");
+                    self.alert_engine.alert_stp_reject(
+                        &reason,
+                        Some(&vt_symbol),
+                        gateway_name,
+                    );
+                    return Err(reason);
+                }
+                StpMode::CancelMaker => {
+                    // Cancel all opposite resting orders, allow taker through
+                    for maker_order in &maker_orders {
+                        let cancel_req = CancelRequest::new(
+                            maker_order.orderid.clone(),
+                            maker_order.symbol.clone(),
+                            maker_order.exchange,
+                        );
+                        let reason = format!(
+                            "自成交防护(CancelMaker): 撤销对手委托 vt_orderid={} direction={:?} symbol={}",
+                            maker_order.vt_orderid(), maker_order.direction, vt_symbol
+                        );
+                        self.write_log(&reason, "STP");
+                        self.alert_engine.alert_stp_reject(
+                            &reason,
+                            Some(&vt_symbol),
+                            gateway_name,
+                        );
+                        if let Err(e) = self.cancel_order(cancel_req, gateway_name).await {
+                            warn!("STP撤单失败: {}", e);
+                        }
+                    }
+                }
+                StpMode::CancelBoth => {
+                    // Cancel all opposite resting orders AND reject the taker
+                    for maker_order in &maker_orders {
+                        let cancel_req = CancelRequest::new(
+                            maker_order.orderid.clone(),
+                            maker_order.symbol.clone(),
+                            maker_order.exchange,
+                        );
+                        let reason = format!(
+                            "自成交防护(CancelBoth): 撤销对手委托 vt_orderid={} direction={:?} symbol={}",
+                            maker_order.vt_orderid(), maker_order.direction, vt_symbol
+                        );
+                        self.write_log(&reason, "STP");
+                        self.alert_engine.alert_stp_reject(
+                            &reason,
+                            Some(&vt_symbol),
+                            gateway_name,
+                        );
+                        if let Err(e) = self.cancel_order(cancel_req, gateway_name).await {
+                            warn!("STP撤单失败: {}", e);
+                        }
+                    }
+                    let reason = format!(
+                        "自成交防护(CancelBoth): 拒绝新委托 direction={:?} symbol={}, 对手委托={:?}",
+                        req.direction, vt_symbol, maker_ids
+                    );
+                    self.write_log(&reason, "STP");
+                    self.alert_engine.alert_stp_reject(
+                        &reason,
+                        Some(&vt_symbol),
+                        gateway_name,
+                    );
+                    return Err(reason);
+                }
+            }
+        }
+
         // Convert offset for SHFE/INE exchanges (GAP 4 fix)
         let converted_reqs = {
             let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
@@ -1417,6 +1517,18 @@ impl MainEngine {
         &self.toast_manager
     }
 
+    /// Set self-trade prevention mode
+    pub fn set_stp_mode(&self, mode: StpMode) {
+        let mut stp = self.stp_mode.write().unwrap_or_else(|e| e.into_inner());
+        info!("自成交防护模式变更: {} -> {}", stp, mode);
+        *stp = mode;
+    }
+
+    /// Get current self-trade prevention mode
+    pub fn get_stp_mode(&self) -> StpMode {
+        *self.stp_mode.read().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Get data download manager
     pub fn data_download_manager(&self) -> &Arc<DataDownloadManager> {
         &self.data_download_manager
@@ -1455,6 +1567,11 @@ impl MainEngine {
     /// Get order book manager
     pub fn order_book_manager(&self) -> &Arc<OrderBookManager> {
         &self.order_book_manager
+    }
+
+    /// Get message bus
+    pub fn get_message_bus(&self) -> &Arc<MessageBus> {
+        &self.message_bus
     }
 
     /// Create and register a ReconciliationEngine for this MainEngine.

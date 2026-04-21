@@ -56,7 +56,7 @@ pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode
 pub use python::{Strategy, PythonEngine, PythonEngineBridge, StrategyEngineHandle};
 pub use trader::{
     // Constants
-    Direction, Exchange, Interval, Offset, OrderType, Product, Status,
+    Direction, Exchange, Interval, Offset, OrderType, Product, Status, StpMode,
     // Data objects
     AccountData, BarData, ContractData, OrderData, PositionData, QuoteData, TickData, TradeData,
     // Requests

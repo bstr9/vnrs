@@ -7,9 +7,73 @@ use egui::{Color32, Context, Grid, Id, Pos2, Rect, ScrollArea, Stroke, Ui, Vec2}
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::backtesting::{BacktestingEngine, BacktestingMode, BacktestingStatistics};
+use crate::backtesting::{
+    BacktestingEngine, BacktestingMode, BacktestingStatistics,
+    BestPriceFillModel, TwoTierFillModel, SizeAwareFillModel,
+    ProbabilisticFillModel, IdealFillModel, FillModel,
+};
 use crate::chart::TradeOverlay;
 use crate::trader::{Exchange, Interval};
+
+/// Fill model type selector for the UI
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillModelType {
+    BestPrice,
+    Ideal,
+    TwoTier,
+    SizeAware,
+    Probabilistic,
+}
+
+impl FillModelType {
+    /// All available fill model variants
+    pub const ALL: [FillModelType; 5] = [
+        FillModelType::BestPrice,
+        FillModelType::Ideal,
+        FillModelType::TwoTier,
+        FillModelType::SizeAware,
+        FillModelType::Probabilistic,
+    ];
+
+    /// Chinese display name
+    pub fn label(&self) -> &'static str {
+        match self {
+            FillModelType::BestPrice => "最优价格 (BestPrice)",
+            FillModelType::Ideal => "理想成交 (Ideal)",
+            FillModelType::TwoTier => "双层流动性 (TwoTier)",
+            FillModelType::SizeAware => "规模感知 (SizeAware)",
+            FillModelType::Probabilistic => "概率成交 (Probabilistic)",
+        }
+    }
+
+    /// Model description shown in the UI
+    pub fn description(&self) -> &'static str {
+        match self {
+            FillModelType::BestPrice => "乐观假设：订单总在K线最优价格成交，适合快速验证策略逻辑",
+            FillModelType::Ideal => "理想条件：零滑点成交，限价单按委托价、市价单按收盘价成交",
+            FillModelType::TwoTier => "双层流动性：小单高概率成交+低滑点，大单低概率+额外滑点",
+            FillModelType::SizeAware => "规模感知：根据订单量占K线成交量比例动态调整冲击成本和成交比例",
+            FillModelType::Probabilistic => "概率成交：限价单按设定概率成交，可模拟滑点出现的概率",
+        }
+    }
+
+    /// Estimated fill rate description
+    pub fn estimated_fill_rate(&self) -> &'static str {
+        match self {
+            FillModelType::BestPrice => "≈ 100% (乐观)",
+            FillModelType::Ideal => "100% (无滑点)",
+            FillModelType::TwoTier => "取决于订单规模",
+            FillModelType::SizeAware => "取决于成交量占比",
+            FillModelType::Probabilistic => "按设定概率",
+        }
+    }
+}
+
+impl Default for FillModelType {
+    fn default() -> Self {
+        FillModelType::BestPrice
+    }
+}
 
 #[cfg(feature = "python")]
 use crate::python::load_strategies_from_directory;
@@ -233,6 +297,27 @@ pub struct BacktestingPanel {
     capital: String,
     mode: BacktestingMode,
 
+    // Fill model configuration
+    fill_model_type: FillModelType,
+
+    // TwoTier parameters
+    two_tier_slippage_base: String,
+    two_tier_slippage_extra: String,
+    two_tier_size_threshold: String,
+    two_tier_prob_base: String,
+    two_tier_prob_large: String,
+
+    // SizeAware parameters
+    size_aware_base_slippage: String,
+    size_aware_max_slippage: String,
+    size_aware_impact_coefficient: String,
+    size_aware_max_fill_pct: String,
+
+    // Probabilistic parameters
+    prob_slippage: String,
+    prob_fill_on_limit: String,
+    prob_slippage_probability: String,
+
     // Strategy configuration
     strategy_file: String,
     strategy_class: String,
@@ -281,6 +366,19 @@ impl Default for BacktestingPanel {
             slippage: "0.0001".to_string(),
             capital: "100000.0".to_string(),
             mode: BacktestingMode::Bar,
+            fill_model_type: FillModelType::default(),
+            two_tier_slippage_base: "0.1".to_string(),
+            two_tier_slippage_extra: "0.2".to_string(),
+            two_tier_size_threshold: "100.0".to_string(),
+            two_tier_prob_base: "1.0".to_string(),
+            two_tier_prob_large: "0.8".to_string(),
+            size_aware_base_slippage: "0.1".to_string(),
+            size_aware_max_slippage: "1.0".to_string(),
+            size_aware_impact_coefficient: "0.5".to_string(),
+            size_aware_max_fill_pct: "0.5".to_string(),
+            prob_slippage: "0.2".to_string(),
+            prob_fill_on_limit: "0.9".to_string(),
+            prob_slippage_probability: "0.5".to_string(),
             strategy_file: "".to_string(),
             strategy_class: "BollChannelStrategy".to_string(),
             strategy_name: "BollChannel".to_string(),
@@ -326,6 +424,20 @@ impl BacktestingPanel {
         ScrollArea::vertical().show(ui, |ui| {
             // Configuration section
             self.render_configuration(ui);
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            // Fill model configuration section
+            self.render_fill_model_config(ui);
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            // Configuration summary
+            self.render_config_summary(ui);
 
             ui.add_space(10.0);
             ui.separator();
@@ -464,6 +576,304 @@ impl BacktestingPanel {
                 ui.text_edit_singleline(&mut self.fixed_size);
                 ui.end_row();
             });
+    }
+
+    /// Render fill model configuration section
+    fn render_fill_model_config(&mut self, ui: &mut Ui) {
+        ui.heading("填充模型");
+        ui.add_space(4.0);
+
+        // Fill model selector
+        Grid::new("fill_model_grid")
+            .num_columns(2)
+            .spacing([10.0, 5.0])
+            .show(ui, |ui| {
+                ui.label("模型类型:");
+                egui::ComboBox::from_id_salt("fill_model_selector")
+                    .selected_text(self.fill_model_type.label())
+                    .show_ui(ui, |ui| {
+                        for model_type in FillModelType::ALL {
+                            ui.selectable_value(
+                                &mut self.fill_model_type,
+                                model_type,
+                                model_type.label(),
+                            );
+                        }
+                    });
+                ui.end_row();
+            });
+
+        // Model description
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("ℹ").size(14.0));
+            ui.label(
+                egui::RichText::new(self.fill_model_type.description())
+                    .small()
+                    .color(ui.style().visuals.weak_text_color()),
+            );
+        });
+        ui.add_space(8.0);
+
+        // Model-specific parameters
+        match self.fill_model_type {
+            FillModelType::BestPrice => {
+                // BestPrice uses the general slippage from config - no extra params
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("此模型使用上方配置的滑点参数")
+                            .small()
+                            .color(ui.style().visuals.weak_text_color()),
+                    );
+                });
+            }
+            FillModelType::Ideal => {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("此模型无额外参数，零滑点理想成交")
+                            .small()
+                            .color(ui.style().visuals.weak_text_color()),
+                    );
+                });
+            }
+            FillModelType::TwoTier => {
+                Grid::new("two_tier_params_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 5.0])
+                    .show(ui, |ui| {
+                        ui.label("基础滑点:");
+                        ui.add(egui::TextEdit::singleline(&mut self.two_tier_slippage_base).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("大单额外滑点:");
+                        ui.add(egui::TextEdit::singleline(&mut self.two_tier_slippage_extra).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("大单阈值:");
+                        ui.add(egui::TextEdit::singleline(&mut self.two_tier_size_threshold).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("小单成交概率:");
+                        ui.add(egui::TextEdit::singleline(&mut self.two_tier_prob_base).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("大单成交概率:");
+                        ui.add(egui::TextEdit::singleline(&mut self.two_tier_prob_large).desired_width(100.0));
+                        ui.end_row();
+                    });
+            }
+            FillModelType::SizeAware => {
+                Grid::new("size_aware_params_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 5.0])
+                    .show(ui, |ui| {
+                        ui.label("基础滑点:");
+                        ui.add(egui::TextEdit::singleline(&mut self.size_aware_base_slippage).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("最大滑点:");
+                        ui.add(egui::TextEdit::singleline(&mut self.size_aware_max_slippage).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("冲击系数:");
+                        ui.add(egui::TextEdit::singleline(&mut self.size_aware_impact_coefficient).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("最大成交比例:");
+                        ui.add(egui::TextEdit::singleline(&mut self.size_aware_max_fill_pct).desired_width(100.0));
+                        ui.end_row();
+                    });
+            }
+            FillModelType::Probabilistic => {
+                Grid::new("prob_params_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 5.0])
+                    .show(ui, |ui| {
+                        ui.label("滑点:");
+                        ui.add(egui::TextEdit::singleline(&mut self.prob_slippage).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("限价单成交概率:");
+                        ui.add(egui::TextEdit::singleline(&mut self.prob_fill_on_limit).desired_width(100.0));
+                        ui.end_row();
+
+                        ui.label("滑点出现概率:");
+                        ui.add(egui::TextEdit::singleline(&mut self.prob_slippage_probability).desired_width(100.0));
+                        ui.end_row();
+                    });
+            }
+        }
+    }
+
+    /// Render configuration summary box
+    fn render_config_summary(&mut self, ui: &mut Ui) {
+        ui.heading("配置概要");
+        ui.add_space(4.0);
+
+        egui::Frame::group(ui.style())
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                Grid::new("config_summary_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("交易品种:").strong());
+                        ui.label(&self.vt_symbol);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("K线周期:").strong());
+                        ui.label(format!("{:?}", self.interval));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("回测模式:").strong());
+                        ui.label(match self.mode {
+                            BacktestingMode::Bar => "Bar回测",
+                            BacktestingMode::Tick => "Tick回测",
+                        });
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("填充模型:").strong());
+                        ui.label(self.fill_model_type.label());
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("预估成交率:").strong());
+                        ui.label(self.fill_model_type.estimated_fill_rate());
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("手续费率:").strong());
+                        ui.label(&self.rate);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("滑点:").strong());
+                        ui.label(&self.slippage);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("初始资金:").strong());
+                        ui.label(&self.capital);
+                        ui.end_row();
+
+                        // Model-specific summary
+                        match self.fill_model_type {
+                            FillModelType::TwoTier => {
+                                ui.label(egui::RichText::new("双层滑点:").strong());
+                                ui.label(format!(
+                                    "基础={} 大单额外={} 阈值={}",
+                                    self.two_tier_slippage_base,
+                                    self.two_tier_slippage_extra,
+                                    self.two_tier_size_threshold,
+                                ));
+                                ui.end_row();
+
+                                ui.label(egui::RichText::new("成交概率:").strong());
+                                ui.label(format!(
+                                    "小单={} 大单={}",
+                                    self.two_tier_prob_base,
+                                    self.two_tier_prob_large,
+                                ));
+                                ui.end_row();
+                            }
+                            FillModelType::SizeAware => {
+                                ui.label(egui::RichText::new("冲击参数:").strong());
+                                ui.label(format!(
+                                    "基础滑点={} 最大滑点={} 冲击系数={}",
+                                    self.size_aware_base_slippage,
+                                    self.size_aware_max_slippage,
+                                    self.size_aware_impact_coefficient,
+                                ));
+                                ui.end_row();
+
+                                ui.label(egui::RichText::new("最大成交:").strong());
+                                ui.label(format!("{}%", 
+                                    self.size_aware_max_fill_pct.parse::<f64>()
+                                        .unwrap_or(0.5) * 100.0
+                                ));
+                                ui.end_row();
+                            }
+                            FillModelType::Probabilistic => {
+                                ui.label(egui::RichText::new("概率参数:").strong());
+                                ui.label(format!(
+                                    "成交概率={} 滑点概率={}",
+                                    self.prob_fill_on_limit,
+                                    self.prob_slippage_probability,
+                                ));
+                                ui.end_row();
+                            }
+                            _ => {}
+                        }
+                    });
+            });
+
+        ui.add_space(6.0);
+
+        // Reset to defaults button
+        ui.horizontal(|ui| {
+            if ui.button("恢复默认配置").clicked() {
+                self.reset_to_defaults();
+            }
+        });
+    }
+
+    /// Reset all configuration to defaults
+    fn reset_to_defaults(&mut self) {
+        self.rate = "0.0003".to_string();
+        self.slippage = "0.0001".to_string();
+        self.capital = "100000.0".to_string();
+        self.mode = BacktestingMode::Bar;
+        self.fill_model_type = FillModelType::default();
+        self.two_tier_slippage_base = "0.1".to_string();
+        self.two_tier_slippage_extra = "0.2".to_string();
+        self.two_tier_size_threshold = "100.0".to_string();
+        self.two_tier_prob_base = "1.0".to_string();
+        self.two_tier_prob_large = "0.8".to_string();
+        self.size_aware_base_slippage = "0.1".to_string();
+        self.size_aware_max_slippage = "1.0".to_string();
+        self.size_aware_impact_coefficient = "0.5".to_string();
+        self.size_aware_max_fill_pct = "0.5".to_string();
+        self.prob_slippage = "0.2".to_string();
+        self.prob_fill_on_limit = "0.9".to_string();
+        self.prob_slippage_probability = "0.5".to_string();
+        self.fast_window = "10".to_string();
+        self.slow_window = "20".to_string();
+        self.fixed_size = "1.0".to_string();
+        self.status_message = "已恢复默认配置".to_string();
+    }
+
+    /// Build a fill model from the current UI configuration
+    fn build_fill_model(&self) -> Box<dyn FillModel> {
+        let slippage = self.slippage.parse::<f64>().unwrap_or(0.0001);
+
+        match self.fill_model_type {
+            FillModelType::BestPrice => {
+                Box::new(BestPriceFillModel::new(slippage))
+            }
+            FillModelType::Ideal => {
+                Box::new(IdealFillModel::new())
+            }
+            FillModelType::TwoTier => {
+                Box::new(TwoTierFillModel::new(
+                    self.two_tier_slippage_base.parse::<f64>().unwrap_or(0.1),
+                    self.two_tier_slippage_extra.parse::<f64>().unwrap_or(0.2),
+                    self.two_tier_size_threshold.parse::<f64>().unwrap_or(100.0),
+                    self.two_tier_prob_base.parse::<f64>().unwrap_or(1.0),
+                    self.two_tier_prob_large.parse::<f64>().unwrap_or(0.8),
+                ))
+            }
+            FillModelType::SizeAware => {
+                Box::new(SizeAwareFillModel::new(
+                    self.size_aware_base_slippage.parse::<f64>().unwrap_or(0.1),
+                    self.size_aware_max_slippage.parse::<f64>().unwrap_or(1.0),
+                    self.size_aware_impact_coefficient.parse::<f64>().unwrap_or(0.5),
+                    self.size_aware_max_fill_pct.parse::<f64>().unwrap_or(0.5),
+                ))
+            }
+            FillModelType::Probabilistic => {
+                Box::new(ProbabilisticFillModel::new(
+                    self.prob_slippage.parse::<f64>().unwrap_or(0.2),
+                    self.prob_fill_on_limit.parse::<f64>().unwrap_or(0.9),
+                    self.prob_slippage_probability.parse::<f64>().unwrap_or(0.5),
+                ))
+            }
+        }
     }
 
     /// Render control buttons
@@ -786,6 +1196,9 @@ impl BacktestingPanel {
         let interval = self.interval;
         let mode = self.mode;
 
+        // Build fill model from UI configuration
+        let fill_model = self.build_fill_model();
+
         // Parse dates
         let start_str = self.start_date_picker.to_datetime_string();
         let end_str = self.end_date_picker.to_end_datetime_string();
@@ -833,6 +1246,9 @@ impl BacktestingPanel {
                     capital,
                     mode,
                 );
+
+                // Apply fill model from UI configuration
+                engine.set_fill_model(fill_model);
 
                 // Load data from database using DatabaseLoader
                 use crate::backtesting::database::DatabaseLoader;

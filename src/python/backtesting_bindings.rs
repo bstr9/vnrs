@@ -47,6 +47,21 @@ impl PyBacktestingEngine {
         self.engine.lock().unwrap_or_else(|e| e.into_inner()).clear_data();
     }
 
+    /// Set fill model by name.
+    ///
+    /// Args:
+    ///     model_name: One of "best_price", "ideal", "two_tier", "size_aware", "probabilistic"
+    ///
+    /// Raises:
+    ///     ValueError if the model name is not recognized
+    fn set_fill_model(&self, model_name: String) -> PyResult<()> {
+        self.engine
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_fill_model_by_name(&model_name)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     /// Set backtesting parameters
     #[pyo3(signature = (
         vt_symbol,

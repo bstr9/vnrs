@@ -1999,8 +1999,837 @@ pub fn validate_expression(expr: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Relative Strength Index (RSI)
+pub struct RSI {
+    period: usize,
+    values: Vec<Option<f64>>,
+    config: IndicatorLineConfig,
+    location: IndicatorLocation,
+    base: IndicatorBase,
+    // Incremental state: Wilder's smoothing
+    avg_gain: f64,
+    avg_loss: f64,
+    prev_close: Option<f64>,
+}
+
+impl RSI {
+    pub fn new(period: usize, color: Color32, location: IndicatorLocation) -> Self {
+        Self {
+            period,
+            values: Vec::new(),
+            config: IndicatorLineConfig {
+                name: format!("RSI{}", period),
+                color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            location,
+            base: IndicatorBase::new(&format!("RSI{}", period), location),
+            avg_gain: 0.0,
+            avg_loss: 0.0,
+            prev_close: None,
+        }
+    }
+}
+
+impl Indicator for RSI {
+    fn name(&self) -> &str {
+        &self.config.name
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        let close = bar.close_price;
+
+        if let Some(prev) = self.prev_close {
+            let change = close - prev;
+            let gain = if change > 0.0 { change } else { 0.0 };
+            let loss = if change < 0.0 { -change } else { 0.0 };
+
+            if self.base.count <= self.period {
+                // Accumulate initial gains/losses
+                self.avg_gain += gain;
+                self.avg_loss += loss;
+
+                if self.base.count == self.period {
+                    // Initial SMA-based average
+                    self.avg_gain /= self.period as f64;
+                    self.avg_loss /= self.period as f64;
+                    let rsi = if self.avg_loss < 1e-10 {
+                        100.0
+                    } else {
+                        100.0 - 100.0 / (1.0 + self.avg_gain / self.avg_loss)
+                    };
+                    self.values.push(Some(rsi));
+                    self.base.check_initialized(self.period);
+                } else {
+                    self.values.push(None);
+                }
+            } else {
+                // Wilder's smoothing
+                self.avg_gain = (self.avg_gain * (self.period as f64 - 1.0) + gain) / self.period as f64;
+                self.avg_loss = (self.avg_loss * (self.period as f64 - 1.0) + loss) / self.period as f64;
+                let rsi = if self.avg_loss < 1e-10 {
+                    100.0
+                } else {
+                    100.0 - 100.0 / (1.0 + self.avg_gain / self.avg_loss)
+                };
+                self.values.push(Some(rsi));
+            }
+        } else {
+            self.values.push(None);
+        }
+
+        self.prev_close = Some(close);
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.avg_gain = 0.0;
+        self.avg_loss = 0.0;
+        self.prev_close = None;
+        self.base.reset_base();
+    }
+
+    fn series_count(&self) -> usize {
+        1
+    }
+
+    fn get_value(&self, bar_index: usize, _series_index: usize) -> Option<f64> {
+        self.values.get(bar_index).and_then(|v| *v)
+    }
+
+    fn get_line_config(&self, _series_index: usize) -> Option<&IndicatorLineConfig> {
+        Some(&self.config)
+    }
+
+    fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params
+    }
+}
+
+/// Moving Average Convergence Divergence (MACD)
+pub struct MACD {
+    fast_period: usize,
+    slow_period: usize,
+    signal_period: usize,
+    macd_values: Vec<Option<f64>>,
+    signal_values: Vec<Option<f64>>,
+    histogram_values: Vec<Option<f64>>,
+    macd_config: IndicatorLineConfig,
+    signal_config: IndicatorLineConfig,
+    histogram_config: IndicatorLineConfig,
+    location: IndicatorLocation,
+    base: IndicatorBase,
+    // Incremental state
+    fast_ema: EmaState,
+    slow_ema: EmaState,
+    signal_ema: EmaState,
+}
+
+impl MACD {
+    pub fn new(
+        fast_period: usize,
+        slow_period: usize,
+        signal_period: usize,
+        macd_color: Color32,
+        signal_color: Color32,
+        histogram_color: Color32,
+        location: IndicatorLocation,
+    ) -> Self {
+        Self {
+            fast_period,
+            slow_period,
+            signal_period,
+            macd_values: Vec::new(),
+            signal_values: Vec::new(),
+            histogram_values: Vec::new(),
+            macd_config: IndicatorLineConfig {
+                name: "MACD".to_string(),
+                color: macd_color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            signal_config: IndicatorLineConfig {
+                name: "SIGNAL".to_string(),
+                color: signal_color,
+                style: LineStyle::Dashed,
+                width: 1.0,
+            },
+            histogram_config: IndicatorLineConfig {
+                name: "HIST".to_string(),
+                color: histogram_color,
+                style: LineStyle::Solid,
+                width: 1.0,
+            },
+            location,
+            base: IndicatorBase::new("MACD", location),
+            fast_ema: EmaState::new(fast_period),
+            slow_ema: EmaState::new(slow_period),
+            signal_ema: EmaState::new(signal_period),
+        }
+    }
+}
+
+impl Indicator for MACD {
+    fn name(&self) -> &str {
+        "MACD"
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        let close = bar.close_price;
+
+        let fast_val = self.fast_ema.update_raw(close);
+        let slow_val = self.slow_ema.update_raw(close);
+
+        // MACD line = fast EMA - slow EMA
+        let macd_val = match (fast_val, slow_val) {
+            (Some(f), Some(s)) => Some(f - s),
+            _ => None,
+        };
+
+        // Signal line = EMA of MACD values
+        let signal_val = match macd_val {
+            Some(mv) => self.signal_ema.update_raw(mv),
+            None => None,
+        };
+
+        // Histogram = MACD - Signal
+        let hist_val = match (macd_val, signal_val) {
+            (Some(m), Some(s)) => Some(m - s),
+            _ => None,
+        };
+
+        self.macd_values.push(macd_val);
+        self.signal_values.push(signal_val);
+        self.histogram_values.push(hist_val);
+
+        if macd_val.is_some() {
+            self.base.check_initialized(self.slow_period + self.signal_period);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.macd_values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.macd_values.clear();
+        self.signal_values.clear();
+        self.histogram_values.clear();
+        self.fast_ema.reset();
+        self.slow_ema.reset();
+        self.signal_ema.reset();
+        self.base.reset_base();
+    }
+
+    fn series_count(&self) -> usize {
+        3 // MACD line, Signal line, Histogram
+    }
+
+    fn get_value(&self, bar_index: usize, series_index: usize) -> Option<f64> {
+        match series_index {
+            0 => self.macd_values.get(bar_index).and_then(|v| *v),
+            1 => self.signal_values.get(bar_index).and_then(|v| *v),
+            2 => self.histogram_values.get(bar_index).and_then(|v| *v),
+            _ => None,
+        }
+    }
+
+    fn get_line_config(&self, series_index: usize) -> Option<&IndicatorLineConfig> {
+        match series_index {
+            0 => Some(&self.macd_config),
+            1 => Some(&self.signal_config),
+            2 => Some(&self.histogram_config),
+            _ => None,
+        }
+    }
+
+    fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
+        IndicatorBase::get_y_range_for_multi_series(
+            &[&self.macd_values, &self.signal_values, &self.histogram_values],
+            min_ix,
+            max_ix,
+        )
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("fast_period".to_string(), self.fast_period as f64);
+        params.insert("slow_period".to_string(), self.slow_period as f64);
+        params.insert("signal_period".to_string(), self.signal_period as f64);
+        params
+    }
+}
+
+/// Average True Range (ATR)
+pub struct ATR {
+    period: usize,
+    values: Vec<Option<f64>>,
+    config: IndicatorLineConfig,
+    location: IndicatorLocation,
+    base: IndicatorBase,
+    // Incremental state
+    prev_close: Option<f64>,
+    tr_window: VecDeque<f64>,
+    atr_value: Option<f64>,
+}
+
+impl ATR {
+    pub fn new(period: usize, color: Color32, location: IndicatorLocation) -> Self {
+        Self {
+            period,
+            values: Vec::new(),
+            config: IndicatorLineConfig {
+                name: format!("ATR{}", period),
+                color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            location,
+            base: IndicatorBase::new(&format!("ATR{}", period), location),
+            prev_close: None,
+            tr_window: VecDeque::new(),
+            atr_value: None,
+        }
+    }
+}
+
+impl Indicator for ATR {
+    fn name(&self) -> &str {
+        &self.config.name
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        // Calculate True Range
+        let tr = match self.prev_close {
+            Some(pc) => {
+                let high_low = bar.high_price - bar.low_price;
+                let high_close = (bar.high_price - pc).abs();
+                let low_close = (bar.low_price - pc).abs();
+                high_low.max(high_close).max(low_close)
+            }
+            None => bar.high_price - bar.low_price,
+        };
+
+        self.prev_close = Some(bar.close_price);
+
+        // Use Wilder's smoothing for ATR
+        if self.atr_value.is_some() {
+            // Already initialized: Wilder's smoothing
+            self.atr_value = Some(
+                (self.atr_value.unwrap_or_default() * (self.period as f64 - 1.0) + tr) / self.period as f64,
+            );
+            self.values.push(self.atr_value);
+            self.base.initialized = true;
+        } else {
+            // Accumulate for initial SMA
+            self.tr_window.push_back(tr);
+            if self.tr_window.len() >= self.period {
+                let sum: f64 = self.tr_window.iter().sum();
+                self.atr_value = Some(sum / self.period as f64);
+                self.values.push(self.atr_value);
+                self.base.check_initialized(self.period);
+            } else {
+                self.values.push(None);
+            }
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.prev_close = None;
+        self.tr_window.clear();
+        self.atr_value = None;
+        self.base.reset_base();
+    }
+
+    fn series_count(&self) -> usize {
+        1
+    }
+
+    fn get_value(&self, bar_index: usize, _series_index: usize) -> Option<f64> {
+        self.values.get(bar_index).and_then(|v| *v)
+    }
+
+    fn get_line_config(&self, _series_index: usize) -> Option<&IndicatorLineConfig> {
+        Some(&self.config)
+    }
+
+    fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params
+    }
+}
+
+/// KDJ Indicator (Stochastic with K, D, J lines)
+pub struct KDJ {
+    k_period: usize,
+    d_period: usize,
+    j_multiplier: f64,
+    k_values: Vec<Option<f64>>,
+    d_values: Vec<Option<f64>>,
+    j_values: Vec<Option<f64>>,
+    k_config: IndicatorLineConfig,
+    d_config: IndicatorLineConfig,
+    j_config: IndicatorLineConfig,
+    location: IndicatorLocation,
+    base: IndicatorBase,
+    // Incremental state: running windows for high/low
+    high_window: VecDeque<f64>,
+    low_window: VecDeque<f64>,
+    prev_k: f64,
+    prev_d: f64,
+}
+
+impl KDJ {
+    pub fn new(
+        k_period: usize,
+        d_period: usize,
+        k_color: Color32,
+        d_color: Color32,
+        j_color: Color32,
+        location: IndicatorLocation,
+    ) -> Self {
+        Self {
+            k_period,
+            d_period,
+            j_multiplier: 3.0,
+            k_values: Vec::new(),
+            d_values: Vec::new(),
+            j_values: Vec::new(),
+            k_config: IndicatorLineConfig {
+                name: "K".to_string(),
+                color: k_color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            d_config: IndicatorLineConfig {
+                name: "D".to_string(),
+                color: d_color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            j_config: IndicatorLineConfig {
+                name: "J".to_string(),
+                color: j_color,
+                style: LineStyle::Dashed,
+                width: 1.0,
+            },
+            location,
+            base: IndicatorBase::new("KDJ", location),
+            high_window: VecDeque::new(),
+            low_window: VecDeque::new(),
+            prev_k: 50.0,
+            prev_d: 50.0,
+        }
+    }
+}
+
+impl Indicator for KDJ {
+    fn name(&self) -> &str {
+        "KDJ"
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        self.high_window.push_back(bar.high_price);
+        self.low_window.push_back(bar.low_price);
+
+        if self.high_window.len() > self.k_period {
+            self.high_window.pop_front();
+            self.low_window.pop_front();
+        }
+
+        if self.high_window.len() >= self.k_period {
+            let highest = self.high_window.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let lowest = self.low_window.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+            let range = highest - lowest;
+
+            let rsv = if range.abs() < 1e-10 {
+                50.0
+            } else {
+                (bar.close_price - lowest) / range * 100.0
+            };
+
+            // K = 2/3 * prev_K + 1/3 * RSV (SMA smoothing)
+            let k = 2.0 / 3.0 * self.prev_k + 1.0 / 3.0 * rsv;
+            // D = 2/3 * prev_D + 1/3 * K
+            let d = 2.0 / 3.0 * self.prev_d + 1.0 / 3.0 * k;
+            // J = 3*K - 2*D
+            let j = self.j_multiplier * k - 2.0 * d;
+
+            self.k_values.push(Some(k));
+            self.d_values.push(Some(d));
+            self.j_values.push(Some(j));
+
+            self.prev_k = k;
+            self.prev_d = d;
+
+            self.base.check_initialized(self.k_period);
+        } else {
+            self.k_values.push(None);
+            self.d_values.push(None);
+            self.j_values.push(None);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.k_values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.k_values.clear();
+        self.d_values.clear();
+        self.j_values.clear();
+        self.high_window.clear();
+        self.low_window.clear();
+        self.prev_k = 50.0;
+        self.prev_d = 50.0;
+        self.base.reset_base();
+    }
+
+    fn series_count(&self) -> usize {
+        3 // K, D, J
+    }
+
+    fn get_value(&self, bar_index: usize, series_index: usize) -> Option<f64> {
+        match series_index {
+            0 => self.k_values.get(bar_index).and_then(|v| *v),
+            1 => self.d_values.get(bar_index).and_then(|v| *v),
+            2 => self.j_values.get(bar_index).and_then(|v| *v),
+            _ => None,
+        }
+    }
+
+    fn get_line_config(&self, series_index: usize) -> Option<&IndicatorLineConfig> {
+        match series_index {
+            0 => Some(&self.k_config),
+            1 => Some(&self.d_config),
+            2 => Some(&self.j_config),
+            _ => None,
+        }
+    }
+
+    fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
+        IndicatorBase::get_y_range_for_multi_series(
+            &[&self.k_values, &self.d_values, &self.j_values],
+            min_ix,
+            max_ix,
+        )
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.k_period as f64);
+        params.insert("signal_period".to_string(), self.d_period as f64);
+        params
+    }
+}
+
+/// Commodity Channel Index (CCI)
+pub struct CCI {
+    period: usize,
+    values: Vec<Option<f64>>,
+    config: IndicatorLineConfig,
+    location: IndicatorLocation,
+    base: IndicatorBase,
+    // Incremental state: window for typical prices
+    tp_window: VecDeque<f64>,
+}
+
+impl CCI {
+    pub fn new(period: usize, color: Color32, location: IndicatorLocation) -> Self {
+        Self {
+            period,
+            values: Vec::new(),
+            config: IndicatorLineConfig {
+                name: format!("CCI{}", period),
+                color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            location,
+            base: IndicatorBase::new(&format!("CCI{}", period), location),
+            tp_window: VecDeque::new(),
+        }
+    }
+}
+
+impl Indicator for CCI {
+    fn name(&self) -> &str {
+        &self.config.name
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        let tp = (bar.high_price + bar.low_price + bar.close_price) / 3.0;
+
+        self.tp_window.push_back(tp);
+        if self.tp_window.len() > self.period {
+            self.tp_window.pop_front();
+        }
+
+        if self.tp_window.len() >= self.period {
+            let sma: f64 = self.tp_window.iter().sum::<f64>() / self.period as f64;
+            let mean_dev: f64 = self.tp_window.iter().map(|v| (v - sma).abs()).sum::<f64>() / self.period as f64;
+
+            let cci = if mean_dev < 1e-10 {
+                0.0
+            } else {
+                (tp - sma) / (0.015 * mean_dev)
+            };
+            self.values.push(Some(cci));
+            self.base.check_initialized(self.period);
+        } else {
+            self.values.push(None);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.tp_window.clear();
+        self.base.reset_base();
+    }
+
+    fn series_count(&self) -> usize {
+        1
+    }
+
+    fn get_value(&self, bar_index: usize, _series_index: usize) -> Option<f64> {
+        self.values.get(bar_index).and_then(|v| *v)
+    }
+
+    fn get_line_config(&self, _series_index: usize) -> Option<&IndicatorLineConfig> {
+        Some(&self.config)
+    }
+
+    fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params
+    }
+}
+
+/// Money Flow Index (MFI)
+pub struct MFI {
+    period: usize,
+    values: Vec<Option<f64>>,
+    config: IndicatorLineConfig,
+    location: IndicatorLocation,
+    base: IndicatorBase,
+    // Incremental state
+    positive_flow_window: VecDeque<f64>,
+    negative_flow_window: VecDeque<f64>,
+    prev_tp: Option<f64>,
+}
+
+impl MFI {
+    pub fn new(period: usize, color: Color32, location: IndicatorLocation) -> Self {
+        Self {
+            period,
+            values: Vec::new(),
+            config: IndicatorLineConfig {
+                name: format!("MFI{}", period),
+                color,
+                style: LineStyle::Solid,
+                width: 1.5,
+            },
+            location,
+            base: IndicatorBase::new(&format!("MFI{}", period), location),
+            positive_flow_window: VecDeque::new(),
+            negative_flow_window: VecDeque::new(),
+            prev_tp: None,
+        }
+    }
+}
+
+impl Indicator for MFI {
+    fn name(&self) -> &str {
+        &self.config.name
+    }
+
+    fn location(&self) -> IndicatorLocation {
+        self.location
+    }
+
+    fn update(&mut self, bar: &BarData) -> bool {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+
+        let tp = (bar.high_price + bar.low_price + bar.close_price) / 3.0;
+        let mf = tp * bar.volume; // money flow
+
+        let (pos_flow, neg_flow) = match self.prev_tp {
+            Some(prev_tp) => {
+                if tp > prev_tp {
+                    (mf, 0.0)
+                } else if tp < prev_tp {
+                    (0.0, mf)
+                } else {
+                    (0.0, 0.0)
+                }
+            }
+            None => (0.0, 0.0),
+        };
+
+        self.prev_tp = Some(tp);
+
+        self.positive_flow_window.push_back(pos_flow);
+        self.negative_flow_window.push_back(neg_flow);
+
+        if self.positive_flow_window.len() > self.period {
+            self.positive_flow_window.pop_front();
+            self.negative_flow_window.pop_front();
+        }
+
+        if self.positive_flow_window.len() >= self.period {
+            let pos_sum: f64 = self.positive_flow_window.iter().sum();
+            let neg_sum: f64 = self.negative_flow_window.iter().sum();
+
+            let mfi_val = if neg_sum < 1e-10 {
+                100.0
+            } else {
+                100.0 - 100.0 / (1.0 + pos_sum / neg_sum)
+            };
+            self.values.push(Some(mfi_val));
+            self.base.check_initialized(self.period);
+        } else {
+            self.values.push(None);
+        }
+
+        self.base.initialized
+    }
+
+    fn is_ready(&self) -> bool {
+        self.base.initialized
+    }
+
+    fn current_value(&self) -> Option<f64> {
+        self.values.last().and_then(|v| *v)
+    }
+
+    fn reset(&mut self) {
+        self.values.clear();
+        self.positive_flow_window.clear();
+        self.negative_flow_window.clear();
+        self.prev_tp = None;
+        self.base.reset_base();
+    }
+
+    fn series_count(&self) -> usize {
+        1
+    }
+
+    fn get_value(&self, bar_index: usize, _series_index: usize) -> Option<f64> {
+        self.values.get(bar_index).and_then(|v| *v)
+    }
+
+    fn get_line_config(&self, _series_index: usize) -> Option<&IndicatorLineConfig> {
+        Some(&self.config)
+    }
+
+    fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
+        IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn get_parameters(&self) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        params.insert("period".to_string(), self.period as f64);
+        params
+    }
+}
+
 /// Indicator type enum for UI selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IndicatorType {
     MA,
     EMA,
@@ -2011,6 +2840,12 @@ pub enum IndicatorType {
     TRIX,
     SAR,
     SUPER,
+    RSI,
+    MACD,
+    ATR,
+    KDJ,
+    CCI,
+    MFI,
 }
 
 impl IndicatorType {
@@ -2025,6 +2860,12 @@ impl IndicatorType {
             IndicatorType::TRIX => "TRIX - 三重指数平滑移动平均线",
             IndicatorType::SAR => "SAR - 抛物线转向指标",
             IndicatorType::SUPER => "SUPER - SUPERTREND",
+            IndicatorType::RSI => "RSI - 相对强弱指标",
+            IndicatorType::MACD => "MACD - 指数平滑异同移动平均线",
+            IndicatorType::ATR => "ATR - 真实波动幅度",
+            IndicatorType::KDJ => "KDJ - 随机指标",
+            IndicatorType::CCI => "CCI - 商品通道指标",
+            IndicatorType::MFI => "MFI - 资金流量指标",
         }
     }
 
@@ -2039,6 +2880,12 @@ impl IndicatorType {
             IndicatorType::TRIX,
             IndicatorType::SAR,
             IndicatorType::SUPER,
+            IndicatorType::RSI,
+            IndicatorType::MACD,
+            IndicatorType::ATR,
+            IndicatorType::KDJ,
+            IndicatorType::CCI,
+            IndicatorType::MFI,
         ]
     }
 }
