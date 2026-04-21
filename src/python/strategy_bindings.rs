@@ -262,7 +262,7 @@ impl PyStrategyEngine {
             pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create runtime: {}", e))
         })?;
 
-        let main_engine = Arc::new(crate::trader::MainEngine::new());
+        let main_engine = crate::trader::MainEngine::new();
         let event_engine = Arc::new(crate::event::EventEngine::new(1));
 
         Ok(Self {

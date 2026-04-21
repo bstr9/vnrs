@@ -394,6 +394,14 @@ impl StrategyTemplate for PythonStrategyAdapter {
         });
     }
 
+    fn on_timer(&mut self, timer_id: &str) {
+        Python::attach(|py| {
+            if let Err(e) = self.call_py_method_with_str("on_timer", py, timer_id) {
+                warn!("策略 {} on_timer 错误: {}", self.strategy_name, e);
+            }
+        });
+    }
+
     fn drain_pending_orders(&mut self) -> Vec<OrderRequest> {
         // Drain from the shared Arc<Mutex<Vec<PendingOrder>>> (set during from_py_object)
         let pending: Vec<PendingOrder> = if let Some(ref queue) = self.pending_orders {
@@ -448,6 +456,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
+                    gateway_name: String::new(),
                 }
             })
             .collect()

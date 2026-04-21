@@ -309,54 +309,57 @@ impl BracketOrderEngine {
         let close_dir = Self::close_direction(req.direction);
 
         let entry_request = OrderRequest {
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            direction: req.direction,
-            order_type: req.entry_type,
-            volume: req.entry_volume,
-            price: req.entry_price,
-            offset: req.offset,
-            reference: if req.reference.is_empty() { format!("BRACKET_{}_ENTRY", id) } else { req.reference.clone() },
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    direction: req.direction,
+                    order_type: req.entry_type,
+                    volume: req.entry_volume,
+                    price: req.entry_price,
+                    offset: req.offset,
+                    reference: if req.reference.is_empty() { format!("BRACKET_{}_ENTRY", id) } else { req.reference.clone() },
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: req.gateway_name.clone(),
+                };
         let entry_child = ChildOrder {
             role: OrderRole::Entry, request: entry_request.clone(),
             vt_orderid: None, status: Status::Submitting, filled_volume: 0.0, avg_fill_price: 0.0,
         };
 
         let tp_request = OrderRequest {
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            direction: close_dir,
-            order_type: OrderType::Limit,
-            volume: req.entry_volume,
-            price: req.tp_price,
-            offset: req.offset,
-            reference: format!("BRACKET_{}_TP", id),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    direction: close_dir,
+                    order_type: OrderType::Limit,
+                    volume: req.entry_volume,
+                    price: req.tp_price,
+                    offset: req.offset,
+                    reference: format!("BRACKET_{}_TP", id),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: req.gateway_name.clone(),
+                };
         let tp_child = ChildOrder {
             role: OrderRole::TakeProfit, request: tp_request,
             vt_orderid: None, status: Status::Submitting, filled_volume: 0.0, avg_fill_price: 0.0,
         };
 
         let sl_request = OrderRequest {
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            direction: close_dir,
-            order_type: req.sl_type,
-            volume: req.entry_volume,
-            price: if req.sl_type == OrderType::Stop || req.sl_type == OrderType::StopLimit { req.sl_price } else { 0.0 },
-            offset: req.offset,
-            reference: format!("BRACKET_{}_SL", id),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    direction: close_dir,
+                    order_type: req.sl_type,
+                    volume: req.entry_volume,
+                    price: if req.sl_type == OrderType::Stop || req.sl_type == OrderType::StopLimit { req.sl_price } else { 0.0 },
+                    offset: req.offset,
+                    reference: format!("BRACKET_{}_SL", id),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: req.gateway_name.clone(),
+                };
         let sl_child = ChildOrder {
             role: OrderRole::StopLoss, request: sl_request,
             vt_orderid: None, status: Status::Submitting, filled_volume: 0.0, avg_fill_price: 0.0,
@@ -387,31 +390,33 @@ impl BracketOrderEngine {
         let vt_symbol = format!("{}.{}", req.symbol, req.exchange.value());
 
         let a_req = OrderRequest {
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            direction: req.direction,
-            order_type: req.order_a_type,
-            volume: req.volume,
-            price: req.order_a_price,
-            offset: req.offset,
-            reference: if req.reference.is_empty() { format!("OCO_{}_A", id) } else { req.reference.clone() },
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    direction: req.direction,
+                    order_type: req.order_a_type,
+                    volume: req.volume,
+                    price: req.order_a_price,
+                    offset: req.offset,
+                    reference: if req.reference.is_empty() { format!("OCO_{}_A", id) } else { req.reference.clone() },
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: req.gateway_name.clone(),
+                };
         let b_req = OrderRequest {
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            direction: req.direction,
-            order_type: req.order_b_type,
-            volume: req.volume,
-            price: req.order_b_price,
-            offset: req.offset,
-            reference: format!("OCO_{}_B", id),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    direction: req.direction,
+                    order_type: req.order_b_type,
+                    volume: req.volume,
+                    price: req.order_b_price,
+                    offset: req.offset,
+                    reference: format!("OCO_{}_B", id),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: req.gateway_name.clone(),
+                };
 
         let child_a = ChildOrder {
             role: OrderRole::OrderA, request: a_req.clone(),
@@ -452,31 +457,33 @@ impl BracketOrderEngine {
         let vt_symbol = format!("{}.{}", req.symbol, req.exchange.value());
 
         let p_req = OrderRequest {
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            direction: req.primary_direction,
-            order_type: req.primary_type,
-            volume: req.primary_volume,
-            price: req.primary_price,
-            offset: req.offset,
-            reference: if req.reference.is_empty() { format!("OTO_{}_PRIMARY", id) } else { req.reference.clone() },
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    direction: req.primary_direction,
+                    order_type: req.primary_type,
+                    volume: req.primary_volume,
+                    price: req.primary_price,
+                    offset: req.offset,
+                    reference: if req.reference.is_empty() { format!("OTO_{}_PRIMARY", id) } else { req.reference.clone() },
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: req.gateway_name.clone(),
+                };
         let s_req = OrderRequest {
-            symbol: req.symbol.clone(),
-            exchange: req.exchange,
-            direction: req.secondary_direction,
-            order_type: req.secondary_type,
-            volume: req.secondary_volume,
-            price: req.secondary_price,
-            offset: req.offset,
-            reference: format!("OTO_{}_SECONDARY", id),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: req.symbol.clone(),
+                    exchange: req.exchange,
+                    direction: req.secondary_direction,
+                    order_type: req.secondary_type,
+                    volume: req.secondary_volume,
+                    price: req.secondary_price,
+                    offset: req.offset,
+                    reference: format!("OTO_{}_SECONDARY", id),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: req.gateway_name.clone(),
+                };
 
         let p_child = ChildOrder {
             role: OrderRole::Primary, request: p_req.clone(),
@@ -615,18 +622,18 @@ impl BracketOrderEngine {
         let cb = self.cancel_order_callback.read().unwrap_or_else(|e| e.into_inner());
         if let Some(ref cancel) = *cb {
             let orderid = vt_orderid.rsplit_once('.').map(|(_, id)| id).unwrap_or(vt_orderid);
-            let (symbol, exchange) = {
+            let (symbol, exchange, gateway_name) = {
                 let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
                 let oid_map = self.orderid_to_group.read().unwrap_or_else(|e| e.into_inner());
                 if let Some(gid) = oid_map.get(vt_orderid) {
                     if let Some(group) = groups.get(gid) {
                         if let Some(child) = group.orders.values().find(|c| c.vt_orderid.as_deref() == Some(vt_orderid)) {
-                            (child.request.symbol.clone(), child.request.exchange)
+                            (child.request.symbol.clone(), child.request.exchange, group.gateway_name.clone())
                         } else { return; }
                     } else { return; }
                 } else { return; }
             };
-            let cancel_req = CancelRequest { orderid: orderid.to_string(), symbol, exchange };
+            let cancel_req = CancelRequest { orderid: orderid.to_string(), symbol, exchange, gateway_name };
             match cancel(&cancel_req) {
                 Ok(()) => info!("[BracketOrderEngine] 委托撤单 {}", vt_orderid),
                 Err(e) => warn!("[BracketOrderEngine] 委托撤单失败 {}: {}", vt_orderid, e),

@@ -148,18 +148,19 @@ impl GridStrategy {
         
         for (idx, level) in levels {
             let req = OrderRequest {
-                symbol: self.vt_symbol.split('.').next().unwrap_or(&self.vt_symbol).to_string(),
-                exchange: self.get_exchange(),
-                direction: level.direction,
-                order_type: crate::trader::constant::OrderType::Limit,
-                volume: level.volume,
-                price: level.price,
-                offset: Offset::None,
-                reference: self.base.strategy_name.clone(),
-                post_only: false,
-                reduce_only: false,
-                expire_time: None,
-            };
+                        symbol: self.vt_symbol.split('.').next().unwrap_or(&self.vt_symbol).to_string(),
+                        exchange: self.get_exchange(),
+                        direction: level.direction,
+                        order_type: crate::trader::constant::OrderType::Limit,
+                        volume: level.volume,
+                        price: level.price,
+                        offset: Offset::None,
+                        reference: self.base.strategy_name.clone(),
+                        post_only: false,
+                        reduce_only: false,
+                        expire_time: None,
+                        gateway_name: String::new(),
+                    };
             self.base.pending_orders
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())

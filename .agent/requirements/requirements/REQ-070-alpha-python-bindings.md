@@ -1,12 +1,12 @@
 ---
 id: REQ-070
-title: "Alpha 模块 Python 绑定——量化研究平台 Python API"
+title: "Alpha 模块暴露——Python API + GUI 量化研究面板"
 status: active
 created_at: "2026-04-22T20:00:00"
-updated_at: "2026-04-22T20:00:00"
-priority: P2
+updated_at: "2026-04-22T21:00:00"
+priority: P3
 level: story
-cluster: Python-API
+cluster: Alpha
 relations:
   supersedes: []
   conflicts_with: []
@@ -19,9 +19,15 @@ versions:
   - version: 1
     date: "2026-04-22T20:00:00"
     author: ai
-    context: "集成审计发现 Alpha 模块（src/alpha/）实现了 ML 模型库（LinearRegression/Ridge/Lasso/随机森林/XGBoost）和因子分析，但 Python 绑定完全无暴露。Python 用户无法使用任何 Alpha 研究功能。"
+    context: "集成审计发现 Alpha 模块 Python 绑定完全无暴露。"
     reason: "录入 Alpha 模块 Python 暴露需求"
     snapshot: "Python 通过 PyAlphaModule 访问 ML 模型训练、因子分析和回测集成"
+  - version: 2
+    date: "2026-04-22T21:00:00"
+    author: user
+    context: "用户确认全覆盖——Alpha 研究也需要 GUI 面板。优先级 P3（专业量化研究员功能，可后置）。"
+    reason: "补充 GUI 量化研究面板需求"
+    snapshot: "Python API + GUI 量化研究面板（模型训练、因子分析、Alpha 组合）"
 ---
 
 # Alpha 模块 Python 绑定——量化研究平台 Python API
@@ -53,8 +59,16 @@ Alpha 模块（`src/alpha/`）是 vnrs 的量化研究平台，包含：
 - [ ] Python 可从 Alpha 模型输出直接创建策略信号
 - [ ] Python 可将因子分析结果传递给回测引擎
 
+### GUI 量化研究面板
+- [ ] 新增"Alpha 研究"标签页
+- [ ] 模型训练面板：选择模型类型、配置超参数、开始训练、显示训练进度
+- [ ] 因子分析面板：选择因子、运行截面分析、显示因子分布图
+- [ ] Alpha 组合面板：查看组合权重、回测 Alpha 信号
+- [ ] 模型管理：保存/加载/删除已训练模型
+
 ## 影响范围
 
 - `src/python/bindings.rs` — 添加 PyAlphaModule 类
 - `src/python/` — 可能需要新增 `alpha.rs` 绑定文件
 - `src/alpha/` — 可能需要添加 Python 友好的接口
+- `src/trader/ui/` — 新增 Alpha 研究 GUI 面板

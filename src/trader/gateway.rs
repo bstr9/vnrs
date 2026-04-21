@@ -13,6 +13,15 @@ use super::object::{
     TickData, TradeData,
 };
 
+/// Timer fire event data (for live-mode timer dispatch)
+#[derive(Debug, Clone)]
+pub struct TimerFire {
+    /// Strategy name that owns the timer
+    pub strategy_name: String,
+    /// Timer identifier
+    pub timer_id: String,
+}
+
 /// Event data that can be sent from gateway
 #[derive(Debug, Clone)]
 pub enum GatewayEvent {
@@ -26,6 +35,8 @@ pub enum GatewayEvent {
     Contract(ContractData),
     Log(LogData),
     DepthBook(DepthData),
+    Alert(super::alert::AlertMessage),
+    Timer(TimerFire),
 }
 
 /// Gateway setting value types

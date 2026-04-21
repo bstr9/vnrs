@@ -349,6 +349,7 @@ impl PyBacktestingEngine {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
 
         // Risk manager check
@@ -409,6 +410,7 @@ impl PyBacktestingEngine {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -434,6 +436,7 @@ impl PyBacktestingEngine {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -459,6 +462,7 @@ impl PyBacktestingEngine {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {
@@ -484,6 +488,7 @@ impl PyBacktestingEngine {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         let vt_orderid = engine.send_limit_order(req);
         if vt_orderid.is_empty() {

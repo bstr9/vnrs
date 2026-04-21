@@ -1714,6 +1714,7 @@ impl MainWindow {
                     reference: "MCP".to_string(),
                     post_only: false,
                     reduce_only: false,
+                    expire_time: None,
                 };
                 self.trading.set_order_request(req, &gateway_name);
                 tracing::info!("MCP: 下单请求");

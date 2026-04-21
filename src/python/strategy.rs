@@ -423,6 +423,34 @@ impl Strategy {
         Ok(())
     }
 
+    /// Handle timer callback. Override in subclass.
+    fn on_timer(&self, _py: Python, _timer_id: String) -> PyResult<()> {
+        Ok(())
+    }
+
+    /// Schedule a timer. `seconds` is the delay (and interval if `repeat=True`).
+    #[pyo3(signature = (timer_id, seconds, repeat=false))]
+    fn schedule_timer(&self, timer_id: &str, seconds: f64, repeat: bool) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let strategy_name = self.strategy_name.clone();
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "schedule_timer", (strategy_name, timer_id, seconds, repeat));
+            });
+        }
+        Ok(())
+    }
+
+    /// Cancel a scheduled timer.
+    fn cancel_timer(&self, timer_id: &str) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let strategy_name = self.strategy_name.clone();
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "cancel_timer", (strategy_name, timer_id));
+            });
+        }
+        Ok(())
+    }
+
     /// Cancel stop order.
     fn cancel_stop_order(&self, stop_orderid: &str) -> PyResult<()> {
         if let Some(ref engine) = self.engine {

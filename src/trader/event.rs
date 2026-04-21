@@ -32,3 +32,6 @@ pub const EVENT_LOG: &str = "eLog";
 
 /// Depth/Order book event type (with optional symbol suffix)
 pub const EVENT_DEPTH: &str = "eDepth.";
+
+/// Alert event type (with optional symbol suffix)
+pub const EVENT_ALERT: &str = "eAlert.";

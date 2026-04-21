@@ -113,6 +113,7 @@ impl FuturesStrategy {
                 post_only: false,
                 reduce_only: false,
                 expire_time: None,
+                gateway_name: String::new(),
             };
             self.base.pending_orders
                 .lock()
@@ -144,6 +145,7 @@ impl FuturesStrategy {
                 post_only: false,
                 reduce_only: false,
                 expire_time: None,
+                gateway_name: String::new(),
             };
             self.base.pending_orders
                 .lock()
@@ -188,6 +190,7 @@ impl FuturesStrategy {
                             post_only: false,
                             reduce_only: false,
                             expire_time: None,
+                            gateway_name: String::new(),
                         };
             self.base.pending_orders
                 .lock()
@@ -213,6 +216,7 @@ impl FuturesStrategy {
                             post_only: false,
                             reduce_only: false,
                             expire_time: None,
+                            gateway_name: String::new(),
                         };
             self.base.pending_orders
                 .lock()
@@ -249,6 +253,7 @@ impl FuturesStrategy {
                             post_only: false,
                             reduce_only: false,
                             expire_time: None,
+                            gateway_name: String::new(),
                         };
             self.base.pending_orders
                 .lock()
@@ -274,6 +279,7 @@ impl FuturesStrategy {
                             post_only: false,
                             reduce_only: false,
                             expire_time: None,
+                            gateway_name: String::new(),
                         };
             self.base.pending_orders
                 .lock()

@@ -559,6 +559,7 @@ mod tests {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         }
     }
 
@@ -674,6 +675,7 @@ mod tests {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         let result = rm.check_order(&open_req);
         assert!(matches!(result, RiskCheckResult::Rejected(_)));
@@ -691,6 +693,7 @@ mod tests {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         let result = rm.check_order(&close_req);
         assert!(matches!(result, RiskCheckResult::Approved));

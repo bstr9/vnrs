@@ -12,10 +12,12 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use super::constant::Status;
 use super::engine::BaseEngine;
+use super::event::EVENT_ALERT;
 use super::gateway::GatewayEvent;
 use super::object::{LogData, OrderData, TradeData};
 
@@ -307,6 +309,8 @@ pub struct AlertEngine {
     channels: RwLock<Vec<Arc<dyn AlertChannel>>>,
     running: AtomicBool,
     enabled: AtomicBool,
+    /// Channel to publish EVENT_ALERT events to MainEngine's event pipeline
+    event_tx: RwLock<Option<mpsc::UnboundedSender<(String, GatewayEvent)>>>,
 }
 
 impl AlertEngine {
@@ -323,6 +327,7 @@ impl AlertEngine {
             channels: RwLock::new(vec![Arc::new(LogAlertChannel::new())]),
             running: AtomicBool::new(false),
             enabled: AtomicBool::new(true),
+            event_tx: RwLock::new(None),
         };
         engine
     }
@@ -373,6 +378,12 @@ impl AlertEngine {
         self.config.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Set the event_tx channel for publishing EVENT_ALERT events
+    pub fn set_event_tx(&self, tx: mpsc::UnboundedSender<(String, GatewayEvent)>) {
+        let mut slot = self.event_tx.write().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(tx);
+    }
+
     /// Send an alert through all registered channels
     pub fn send_alert(&self, alert: AlertMessage) {
         if !self.enabled.load(Ordering::Relaxed) {
@@ -382,6 +393,12 @@ impl AlertEngine {
         let channels = self.channels.read().unwrap_or_else(|e| e.into_inner());
         for channel in channels.iter() {
             channel.send(&alert);
+        }
+
+        // Publish EVENT_ALERT to event pipeline
+        let tx = self.event_tx.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(ref tx) = *tx {
+            let _ = tx.send((EVENT_ALERT.to_string(), GatewayEvent::Alert(alert)));
         }
     }
 

@@ -430,6 +430,7 @@ impl OrderData {
             orderid: self.orderid.clone(),
             symbol: self.symbol.clone(),
             exchange: self.exchange,
+            gateway_name: String::new(),
         }
     }
 }
@@ -821,6 +822,7 @@ impl QuoteData {
             orderid: self.quoteid.clone(),
             symbol: self.symbol.clone(),
             exchange: self.exchange,
+            gateway_name: String::new(),
         }
     }
 }
@@ -885,6 +887,11 @@ pub struct OrderRequest {
     /// Specifies the date/time when the order should be automatically cancelled if not filled.
     #[serde(default)]
     pub expire_time: Option<DateTime<Utc>>,
+    /// Gateway name for routing the order to the correct exchange connection.
+    /// When set, callbacks (StopOrder/Emulator/Bracket) use this instead of
+    /// looking up the exchange-to-gateway mapping.
+    #[serde(default)]
+    pub gateway_name: String,
 }
 
 impl OrderRequest {
@@ -908,6 +915,7 @@ impl OrderRequest {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         }
     }
 
@@ -939,6 +947,9 @@ pub struct CancelRequest {
     pub orderid: String,
     pub symbol: String,
     pub exchange: Exchange,
+    /// Gateway name for routing the cancel to the correct exchange connection.
+    #[serde(default)]
+    pub gateway_name: String,
 }
 
 impl CancelRequest {
@@ -948,6 +959,7 @@ impl CancelRequest {
             orderid,
             symbol,
             exchange,
+            gateway_name: String::new(),
         }
     }
 
@@ -1248,18 +1260,19 @@ mod tests {
     #[test]
     fn test_order_request_create_order_data() {
         let req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Market,
-            volume: 1.5,
-            price: 42000.0,
-            offset: Offset::Open,
-            reference: "test_ref".to_string(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Market,
+                    volume: 1.5,
+                    price: 42000.0,
+                    offset: Offset::Open,
+                    reference: "test_ref".to_string(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let order = req.create_order_data("OID1".to_string(), "binance".to_string());
         assert_eq!(order.gateway_name, "binance");
         assert_eq!(order.symbol, "BTCUSDT");

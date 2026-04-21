@@ -377,6 +377,8 @@ fn test_gateway_event_variants() {
             GatewayEvent::Log(_) => "Log",
             GatewayEvent::Quote(_) => "Quote",
             GatewayEvent::DepthBook(_) => "DepthBook",
+            GatewayEvent::Alert(_) => "Alert",
+            GatewayEvent::Timer(_) => "Timer",
         };
         variants_found.push(variant);
     }

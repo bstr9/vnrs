@@ -56,8 +56,8 @@ impl TradeEngineApp {
         
         // Create the main engine with database persistence (#10, #11)
         let db = Arc::new(FileDatabase::with_default_dir());
-        let main_engine = Arc::new(MainEngine::new_with_database(db));
-        info!("✅ 主引擎已创建 (含数据库持久化)");
+        let main_engine = MainEngine::new_with_database(db);
+        info!("✅ 主引擎已创建 (含数据库持久化, 回调已自动初始化)");
         
         // Get event sender for gateways
         let event_sender = main_engine.get_event_sender();
@@ -406,7 +406,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Run in MCP stdio mode (for Claude Desktop)
         let event_engine = Arc::new(EventEngine::new(10));
         let db = Arc::new(FileDatabase::with_default_dir());
-        let main_engine = Arc::new(MainEngine::new_with_database(db));
+        let main_engine = MainEngine::new_with_database(db);
         
         // Register Binance gateways
         let binance_spot = Arc::new(BinanceSpotGateway::new("BINANCE_SPOT"));

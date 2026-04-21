@@ -7,7 +7,7 @@ use crate::trader::{
     SubscribeRequest, CancelRequest, HistoryRequest,
     Direction, Interval, Exchange, Offset, Status, BaseEngine, GatewayEvent,
     BarSynthesizer,
-    EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE, EVENT_DEPTH,
+    EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE, EVENT_DEPTH, EVENT_TIMER,
 };
 use crate::trader::database::BaseDatabase;
 use crate::event::EventEngine;
@@ -19,6 +19,19 @@ use super::base::{
 };
 #[cfg(feature = "python")]
 use crate::python::strategy_adapter::PythonStrategyAdapter;
+
+/// A scheduled timer entry
+#[derive(Debug, Clone)]
+pub struct TimerEntry {
+    /// Strategy name that owns this timer
+    pub strategy_name: String,
+    /// Timer identifier (unique per strategy)
+    pub timer_id: String,
+    /// Next fire time (UTC)
+    pub next_fire: chrono::DateTime<Utc>,
+    /// Interval between fires (None = one-shot)
+    pub interval: Option<chrono::Duration>,
+}
 
 // Event type constants for strategy
 pub const EVENT_STRATEGY_TICK: &str = "eStrategyTick";
@@ -84,6 +97,9 @@ pub struct StrategyEngine {
     strategy_risk_configs: Arc<RwLock<HashMap<String, StrategyRiskConfig>>>,
     /// Optional database for loading historical data
     database: Option<Arc<dyn BaseDatabase>>,
+
+    /// Scheduled timers: key = "{strategy_name}.{timer_id}"
+    timers: Arc<RwLock<HashMap<String, TimerEntry>>>,
 }
 
 /// Tracks a close order for frozen volume management
@@ -130,6 +146,7 @@ impl StrategyEngine {
             order_close_info: Arc::new(RwLock::new(HashMap::new())),
             strategy_risk_configs: Arc::new(RwLock::new(HashMap::new())),
             database,
+            timers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -173,6 +190,11 @@ impl StrategyEngine {
             depth_type if depth_type.starts_with(EVENT_DEPTH) => {
                 if let GatewayEvent::DepthBook(depth) = event {
                     self.process_depth_event(depth);
+                }
+            }
+            EVENT_TIMER => {
+                if let GatewayEvent::Timer(timer_fire) = event {
+                    self.process_timer_event(&timer_fire.strategy_name, &timer_fire.timer_id);
                 }
             }
             _ => {}
@@ -1057,6 +1079,9 @@ impl StrategyEngine {
         // Remove risk config for this strategy
         self.remove_strategy_risk_config(strategy_name);
 
+        // Cancel all timers for this strategy
+        self.cancel_all_timers(strategy_name);
+
         tracing::info!("Strategy {} removed", strategy_name);
         Ok(())
     }
@@ -1715,6 +1740,86 @@ impl StrategyEngine {
             .map(|s| s.get_position(vt_symbol))
             .unwrap_or(0.0)
     }
+
+    // ========================================================================
+    // Timer scheduling
+    // ========================================================================
+
+    /// Schedule a timer for a strategy
+    /// - `timer_id`: unique identifier within the strategy
+    /// - `seconds`: delay until first fire (and interval if `repeat=true`)
+    /// - `repeat`: whether the timer repeats
+    pub fn schedule_timer(&self, strategy_name: &str, timer_id: &str, seconds: f64, repeat: bool) {
+        let key = format!("{}.{}", strategy_name, timer_id);
+        let now = Utc::now();
+        let delay = Duration::milliseconds((seconds * 1000.0) as i64);
+        let next_fire = now + delay;
+        let interval = if repeat { Some(delay) } else { None };
+
+        let entry = TimerEntry {
+            strategy_name: strategy_name.to_string(),
+            timer_id: timer_id.to_string(),
+            next_fire,
+            interval,
+        };
+
+        self.timers.write().unwrap_or_else(|e| e.into_inner())
+            .insert(key, entry);
+
+        tracing::debug!("Scheduled timer {} for strategy {} ({}s, repeat={})", 
+            timer_id, strategy_name, seconds, repeat);
+    }
+
+    /// Cancel a timer for a strategy
+    pub fn cancel_timer(&self, strategy_name: &str, timer_id: &str) {
+        let key = format!("{}.{}", strategy_name, timer_id);
+        self.timers.write().unwrap_or_else(|e| e.into_inner())
+            .remove(&key);
+
+        tracing::debug!("Cancelled timer {} for strategy {}", timer_id, strategy_name);
+    }
+
+    /// Cancel all timers for a strategy
+    pub fn cancel_all_timers(&self, strategy_name: &str) {
+        let mut timers = self.timers.write().unwrap_or_else(|e| e.into_inner());
+        timers.retain(|_, entry| entry.strategy_name != strategy_name);
+
+        tracing::debug!("Cancelled all timers for strategy {}", strategy_name);
+    }
+
+    /// Check timers and return list of (strategy_name, timer_id) pairs that have fired
+    /// Used by BacktestingEngine before each bar/tick callback
+    pub fn check_timers(&self, current_time: chrono::DateTime<Utc>) -> Vec<(String, String)> {
+        let mut timers = self.timers.write().unwrap_or_else(|e| e.into_inner());
+        let mut fired: Vec<(String, String)> = Vec::new();
+
+        for (_, entry) in timers.iter_mut() {
+            if entry.next_fire <= current_time {
+                fired.push((entry.strategy_name.clone(), entry.timer_id.clone()));
+
+                if let Some(interval) = entry.interval {
+                    // Repeating timer: schedule next fire
+                    entry.next_fire = current_time + interval;
+                } else {
+                    // One-shot timer: mark for removal
+                    entry.next_fire = chrono::DateTime::UNIX_EPOCH;
+                }
+            }
+        }
+
+        // Remove one-shot timers that have fired
+        timers.retain(|_, entry| entry.next_fire != chrono::DateTime::UNIX_EPOCH);
+
+        fired
+    }
+
+    /// Process a timer event (dispatched from MainEngine in live mode)
+    fn process_timer_event(&self, strategy_name: &str, timer_id: &str) {
+        let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(strategy) = strategies.get_mut(strategy_name) {
+            strategy.on_timer(timer_id);
+        }
+    }
 }
 
 /// Implement BaseEngine for StrategyEngine so it can receive events directly from MainEngine
@@ -1753,6 +1858,7 @@ impl Clone for StrategyEngine {
             order_close_info: self.order_close_info.clone(),
             strategy_risk_configs: self.strategy_risk_configs.clone(),
             database: self.database.clone(),
+            timers: self.timers.clone(),
         }
     }
 }
@@ -1766,7 +1872,7 @@ mod tests {
     use crate::{StrategyType, BarData};
 
     fn create_strategy_engine() -> StrategyEngine {
-        let main_engine = Arc::new(MainEngine::new());
+        let main_engine = MainEngine::new();
         let event_engine = Arc::new(EventEngine::new(1));
         StrategyEngine::new(main_engine, event_engine)
     }

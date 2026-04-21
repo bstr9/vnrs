@@ -513,6 +513,7 @@ impl OrderEmulator {
                 orderid: real_id.clone(),
                 symbol: order.symbol.clone(),
                 exchange: order.exchange,
+                gateway_name: order.gateway_name.clone(),
             };
             let cb = self.cancel_callback.read().unwrap_or_else(|e| e.into_inner());
             if let Some(ref cancel_fn) = *cb {
@@ -947,6 +948,7 @@ impl OrderEmulator {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: order.gateway_name.clone(),
         };
 
         let cb = self.send_callback.read().unwrap_or_else(|e| e.into_inner());
@@ -989,6 +991,7 @@ impl OrderEmulator {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: order.gateway_name.clone(),
         })
     }
 }

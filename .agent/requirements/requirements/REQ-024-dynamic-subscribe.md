@@ -1,7 +1,7 @@
----
+﻿---
 id: REQ-024
 title: "运行时动态订阅/退订行情"
-status: active
+status: completed
 created_at: "2026-04-19T12:00:00"
 updated_at: "2026-04-19T12:00:00"
 priority: P2

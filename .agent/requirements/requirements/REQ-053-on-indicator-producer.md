@@ -1,7 +1,7 @@
----
+﻿---
 id: REQ-053
 title: "on_indicator() 回调无事件生产者"
-status: active
+status: completed
 created_at: "2026-04-20T16:00:00"
 updated_at: "2026-04-20T16:00:00"
 priority: P2

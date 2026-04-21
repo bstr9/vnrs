@@ -195,6 +195,7 @@ impl TestStrategy {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         self.pending_orders.lock().unwrap().push(req);
     }
@@ -214,6 +215,7 @@ impl TestStrategy {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
         self.pending_orders.lock().unwrap().push(req);
     }

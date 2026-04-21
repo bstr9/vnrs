@@ -34,15 +34,18 @@ pub trait StrategyIndicator: Send + Sync {
 #[cfg(feature = "gui")]
 impl StrategyIndicator for Box<dyn crate::chart::Indicator> {
     fn name(&self) -> &str {
-        crate::chart::Indicator::name(self)
+        let indicator: &dyn crate::chart::Indicator = self.as_ref();
+        indicator.name()
     }
 
     fn update(&mut self, bar: &BarData) -> bool {
-        crate::chart::Indicator::update(self, bar)
+        let indicator: &mut dyn crate::chart::Indicator = self.as_mut();
+        indicator.update(bar)
     }
 
     fn current_value(&self) -> Option<f64> {
-        crate::chart::Indicator::current_value(self)
+        let indicator: &dyn crate::chart::Indicator = self.as_ref();
+        indicator.current_value()
     }
 }
 
@@ -365,6 +368,9 @@ pub trait StrategyTemplate: Send + Sync {
     /// Called when a registered indicator updates (optional override)
     fn on_indicator(&mut self, _indicator_name: &str, _value: f64) {}
 
+    /// Called when a scheduled timer fires (optional override)
+    fn on_timer(&mut self, _timer_id: &str) {}
+
     #[cfg(feature = "gui")]
     fn register_indicator_for_bars(
         &self,
@@ -372,7 +378,10 @@ pub trait StrategyTemplate: Send + Sync {
         vt_symbol: &str,
         indicator: Box<dyn crate::chart::Indicator>,
     ) -> IndicatorRef {
-        context.register_indicator(vt_symbol, indicator)
+        // Box<dyn chart::Indicator> implements StrategyIndicator via the adapter above,
+        // so we can coerce it to Box<dyn StrategyIndicator>.
+        let strategy_indicator: Box<dyn StrategyIndicator> = Box::new(indicator);
+        context.register_indicator(vt_symbol, strategy_indicator)
     }
 }
 
@@ -520,6 +529,7 @@ impl BaseStrategy {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         }
     }
 

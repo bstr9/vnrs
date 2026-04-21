@@ -852,18 +852,19 @@ mod tests {
 
         // Close order - should split into CloseToday and CloseYesterday
         let req = OrderRequest {
-            symbol: "au2312".to_string(),
-            exchange: Exchange::Shfe,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 10.0,
-            price: 400.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "au2312".to_string(),
+                    exchange: Exchange::Shfe,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 10.0,
+                    price: 400.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let result = holding.convert_order_request_shfe(&req);
 
@@ -915,6 +916,7 @@ mod tests {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
 
         let result = holding.convert_order_request_net(&req);

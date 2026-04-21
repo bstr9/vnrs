@@ -6,6 +6,8 @@ use std::sync::{Arc, RwLock, atomic::{AtomicBool, AtomicU64, Ordering}};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+use chrono;
+
 use super::app::BaseApp;
 use super::constant::Exchange;
 use super::contract_manager::ContractManager;
@@ -15,8 +17,11 @@ use super::database::{BaseDatabase, EventRecord};
 use super::portfolio::PortfolioManager;
 use super::recorder::{DataRecorder, RecordStatus, RecorderConfig};
 use super::risk::RiskManager;
-use super::bracket_order::BracketOrderEngine;
-use super::stop_order::StopOrderEngine;
+use super::alert::AlertEngine;
+use super::algo::AlgoEngine;
+use super::toast::ToastManager;
+use super::bracket_order::{BracketOrderEngine, OrderGroup};
+use super::stop_order::{StopOrderEngine, StopOrder};
 use super::order_emulator::OrderEmulator;
 use super::order_book::OrderBookManager;
 use super::reconciliation::ReconciliationEngine;
@@ -612,8 +617,9 @@ pub struct MainEngine {
     oms_engine: Arc<OmsEngine>,
     log_engine: Arc<LogEngine>,
     risk_manager: Arc<RiskManager>,
-    alert_engine: Arc<super::alert::AlertEngine>,
-    algo_engine: Arc<super::algo::AlgoEngine>,
+    alert_engine: Arc<AlertEngine>,
+    algo_engine: Arc<AlgoEngine>,
+    toast_manager: Arc<ToastManager>,
     data_download_manager: Arc<DataDownloadManager>,
     portfolio_manager: Arc<PortfolioManager>,
     stop_order_engine: Arc<StopOrderEngine>,
@@ -649,13 +655,19 @@ pub struct MainEngine {
 
 impl MainEngine {
     /// Create a new MainEngine without database persistence
-    pub fn new() -> Self {
-        Self::new_internal(None)
+    pub fn new() -> Arc<Self> {
+        let engine = Self::new_internal(None);
+        let arc = Arc::new(engine);
+        arc.init_callbacks();
+        arc
     }
 
     /// Create a new MainEngine with database persistence for event journaling and crash recovery
-    pub fn new_with_database(database: Arc<dyn BaseDatabase>) -> Self {
-        Self::new_internal(Some(database))
+    pub fn new_with_database(database: Arc<dyn BaseDatabase>) -> Arc<Self> {
+        let engine = Self::new_internal(Some(database));
+        let arc = Arc::new(engine);
+        arc.init_callbacks();
+        arc
     }
 
     /// Create a new MainEngine with SQLite database auto-loaded from the default path.
@@ -664,7 +676,7 @@ impl MainEngine {
     /// If the file doesn't exist, it will be created automatically.
     /// Requires the `sqlite` feature flag.
     #[cfg(feature = "sqlite")]
-    pub fn new_with_sqlite() -> Result<Self, String> {
+    pub fn new_with_sqlite() -> Result<Arc<Self>, String> {
         let db_path = super::utility::TRADER_DIR.join("trade_engine.db");
         let db = super::sqlite_database::SqliteDatabase::new(
             db_path.to_str().ok_or("Invalid database path")?
@@ -676,7 +688,7 @@ impl MainEngine {
     ///
     /// Requires the `sqlite` feature flag.
     #[cfg(feature = "sqlite")]
-    pub fn new_with_sqlite_at(path: &str) -> Result<Self, String> {
+    pub fn new_with_sqlite_at(path: &str) -> Result<Arc<Self>, String> {
         let db = super::sqlite_database::SqliteDatabase::new(path)?;
         Ok(Self::new_with_database(Arc::new(db)))
     }
@@ -686,11 +698,15 @@ impl MainEngine {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (persist_tx, persist_rx) = mpsc::channel(4096);
         
+        // Clone event_tx before it's moved into the struct
+        let event_tx_for_alert = event_tx.clone();
+        
         let oms_engine = Arc::new(OmsEngine::new());
         let log_engine = Arc::new(LogEngine::new());
         let risk_manager = Arc::new(RiskManager::new());
-        let alert_engine = Arc::new(super::alert::AlertEngine::new());
-        let algo_engine = Arc::new(super::algo::AlgoEngine::new());
+        let alert_engine = Arc::new(AlertEngine::new());
+        let algo_engine = Arc::new(AlgoEngine::new());
+        let toast_manager = Arc::new(ToastManager::new());
         let data_download_manager = Arc::new(DataDownloadManager::new());
         let portfolio_manager = Arc::new(PortfolioManager::new());
         let stop_order_engine = Arc::new(StopOrderEngine::new());
@@ -706,6 +722,9 @@ impl MainEngine {
             oms_for_converter.get_contract(vt_symbol)
         }));
         
+        // NOTE: Callbacks are NOT wired here because we need Arc<Self>.
+        // They are wired in init_callbacks() which is called after wrapping in Arc.
+
         let engine = Self {
             gateways: RwLock::new(HashMap::new()),
             engines: RwLock::new(HashMap::new()),
@@ -716,6 +735,7 @@ impl MainEngine {
             risk_manager,
             alert_engine,
             algo_engine,
+            toast_manager,
             data_download_manager,
             portfolio_manager,
             stop_order_engine,
@@ -728,7 +748,7 @@ impl MainEngine {
             data_engine: RwLock::new(None),
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
-            event_tx,
+            event_tx: event_tx.clone(),
             event_rx: RwLock::new(Some(event_rx)),
             handlers: RwLock::new(HashMap::new()),
             running: AtomicBool::new(false),
@@ -739,6 +759,9 @@ impl MainEngine {
             persist_sent_count: AtomicU64::new(0),
             persist_overflowed_count: AtomicU64::new(0),
         };
+        
+        // Wire AlertEngine to the event pipeline
+        engine.alert_engine.set_event_tx(event_tx_for_alert);
         
         // Register OMS engine, log engine, risk manager, alert engine, and new engines
         {
@@ -756,9 +779,143 @@ impl MainEngine {
             engines.insert("ContractManager".to_string(), engine.contract_manager.clone());
             engines.insert("TradingSessionManager".to_string(), engine.session_manager.clone());
             engines.insert("OrderBookManager".to_string(), engine.order_book_manager.clone());
+            engines.insert("ToastManager".to_string(), engine.toast_manager.clone());
         }
         
         engine
+    }
+
+    /// Wire all sub-engine callbacks to go through MainEngine.send_order()/cancel_order().
+    ///
+    /// This MUST be called after the MainEngine is wrapped in Arc.
+    /// All callback-wired orders go through risk checks and offset conversion.
+    pub fn init_callbacks(self: &Arc<Self>) {
+        // --- StopOrderEngine callback ---
+        let me = self.clone();
+        self.stop_order_engine.register_callback(Box::new(move |stop_order: &StopOrder, req: OrderRequest| {
+            let gateway_name = if !req.gateway_name.is_empty() {
+                req.gateway_name.clone()
+            } else {
+                stop_order.gateway_name.clone()
+            };
+            let stop_order_id = stop_order.id;
+            let me = me.clone();
+            tokio::spawn(async move {
+                match me.send_order(req, &gateway_name).await {
+                    Ok(vt_orderid) => {
+                        info!("[StopOrderEngine] 止损单触发下单成功: stop_orderid={}, vt_orderid={}", stop_order_id, vt_orderid);
+                    }
+                    Err(e) => {
+                        warn!("[StopOrderEngine] 止损单触发下单失败: stop_orderid={}, 错误={}", stop_order_id, e);
+                    }
+                }
+            });
+        }));
+
+        // --- OrderEmulator send callback ---
+        let me = self.clone();
+        self.order_emulator.set_send_order_callback(Box::new(move |req: &OrderRequest| {
+            let gateway_name = if !req.gateway_name.is_empty() {
+                req.gateway_name.clone()
+            } else {
+                match me.find_gateway_name_for_exchange(req.exchange) {
+                    Some(name) => name,
+                    None => return Err(format!("找不到交易所 {:?} 对应的接口", req.exchange)),
+                }
+            };
+            let vt_orderid = format!("EMULATOR.{}.{}", req.symbol, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+            let me = me.clone();
+            let req = req.clone();
+            let vt_orderid_clone = vt_orderid.clone();
+            tokio::spawn(async move {
+                match me.send_order(req, &gateway_name).await {
+                    Ok(real_vt_orderid) => {
+                        let _ = real_vt_orderid;
+                    }
+                    Err(e) => {
+                        warn!("[OrderEmulator] 模拟委托下单失败: 预测vt_orderid={}, 错误={}", vt_orderid_clone, e);
+                    }
+                }
+            });
+            Ok(vt_orderid)
+        }));
+
+        // --- OrderEmulator cancel callback ---
+        let me = self.clone();
+        self.order_emulator.set_cancel_order_callback(Box::new(move |req: &CancelRequest| {
+            let gateway_name = if !req.gateway_name.is_empty() {
+                req.gateway_name.clone()
+            } else {
+                match me.find_gateway_name_for_exchange(req.exchange) {
+                    Some(name) => name,
+                    None => return Err(format!("找不到交易所 {:?} 对应的接口", req.exchange)),
+                }
+            };
+            let me = me.clone();
+            let req = req.clone();
+            tokio::spawn(async move {
+                if let Err(e) = me.cancel_order(req, &gateway_name).await {
+                    warn!("[OrderEmulator] 模拟委托撤单失败: {}", e);
+                }
+            });
+            Ok(())
+        }));
+
+        // --- BracketOrderEngine send callback ---
+        let me = self.clone();
+        self.bracket_order_engine.set_send_order_callback(Box::new(move |req: &OrderRequest| {
+            let gateway_name = if !req.gateway_name.is_empty() {
+                req.gateway_name.clone()
+            } else {
+                match me.find_gateway_name_for_exchange(req.exchange) {
+                    Some(name) => name,
+                    None => return Err(format!("找不到交易所 {:?} 对应的接口", req.exchange)),
+                }
+            };
+            let vt_orderid = format!("BRACKET.{}.{}", req.symbol, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+            let me = me.clone();
+            let req = req.clone();
+            let vt_orderid_clone = vt_orderid.clone();
+            tokio::spawn(async move {
+                match me.send_order(req, &gateway_name).await {
+                    Ok(real_vt_orderid) => { let _ = real_vt_orderid; }
+                    Err(e) => {
+                        warn!("[BracketOrderEngine] 组合委托下单失败: 预测vt_orderid={}, 错误={}", vt_orderid_clone, e);
+                    }
+                }
+            });
+            Ok(vt_orderid)
+        }));
+
+        // --- BracketOrderEngine cancel callback ---
+        let me = self.clone();
+        self.bracket_order_engine.set_cancel_order_callback(Box::new(move |req: &CancelRequest| {
+            let gateway_name = if !req.gateway_name.is_empty() {
+                req.gateway_name.clone()
+            } else {
+                match me.find_gateway_name_for_exchange(req.exchange) {
+                    Some(name) => name,
+                    None => return Err(format!("找不到交易所 {:?} 对应的接口", req.exchange)),
+                }
+            };
+            let me = me.clone();
+            let req = req.clone();
+            tokio::spawn(async move {
+                if let Err(e) = me.cancel_order(req, &gateway_name).await {
+                    warn!("[BracketOrderEngine] 组合委托撤单失败: {}", e);
+                }
+            });
+            Ok(())
+        }));
+
+        // --- BracketOrderEngine state change callback ---
+        let me = self.clone();
+        self.bracket_order_engine.set_state_change_callback(Box::new(move |group: &OrderGroup| {
+            me.write_log(
+                format!("委托组 #{} 状态变更: {} -> {:?}", group.id, group.contingency_type, group.state),
+                "BracketOrderEngine"
+            );
+        }));
     }
 
     /// Start the main engine event loop
@@ -898,6 +1055,12 @@ impl MainEngine {
             GatewayEvent::DepthBook(_) => {
                 // Handled by OrderBookManager via sub-engine dispatch below
             }
+            GatewayEvent::Alert(_) => {
+                // Handled by ToastManager via sub-engine dispatch below
+            }
+            GatewayEvent::Timer(_) => {
+                // Timer events are dispatched to StrategyEngine via sub-engine dispatch below
+            }
         }
 
         // Persist order/trade/position to database for crash recovery (#10)
@@ -941,8 +1104,9 @@ impl MainEngine {
                     | GatewayEvent::Order(_)
                     | GatewayEvent::Trade(_)
                     | GatewayEvent::Position(_)
+                    | GatewayEvent::Alert(_)
+                    | GatewayEvent::Timer(_)
             ) {
-                let event_id = self.event_id_counter.fetch_add(1, Ordering::Relaxed);
                 let gateway_name = match event {
                     GatewayEvent::Tick(t) => t.gateway_name.clone(),
                     GatewayEvent::Bar(b) => b.gateway_name.clone(),
@@ -954,9 +1118,12 @@ impl MainEngine {
                     GatewayEvent::Quote(q) => q.gateway_name.clone(),
                     GatewayEvent::Log(l) => l.gateway_name.clone(),
                     GatewayEvent::DepthBook(d) => d.gateway_name.clone(),
+                    GatewayEvent::Alert(a) => a.source.clone(),
+                    GatewayEvent::Timer(_) => String::new(),
                 };
                 // Store a summary payload since GatewayEvent doesn't implement Serialize
                 let payload = format!("{:?}", event);
+                let event_id = self.event_id_counter.fetch_add(1, Ordering::Relaxed);
                 let record = EventRecord::new(event_id, event_type.to_string(), gateway_name, payload);
                 persist_with_overflow(
                     &self.persist_tx,
@@ -1117,6 +1284,8 @@ impl MainEngine {
 
     /// Send an order (with risk check and offset conversion)
     pub async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String> {
+        // Use req.gateway_name if the parameter is empty
+        let gateway_name = if gateway_name.is_empty() { &req.gateway_name } else { gateway_name };
         // Pre-trade risk check (with gateway context for balance check)
         match self.risk_manager.check_order_with_gateway(&req, gateway_name) {
             super::risk::RiskCheckResult::Approved => {}
@@ -1183,6 +1352,8 @@ impl MainEngine {
 
     /// Cancel an order
     pub async fn cancel_order(&self, req: CancelRequest, gateway_name: &str) -> Result<(), String> {
+        // Use req.gateway_name if the parameter is empty
+        let gateway_name = if gateway_name.is_empty() { &req.gateway_name } else { gateway_name };
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("委托撤单 -> {}：{:?}", gateway_name, req), "MainEngine");
             gateway.cancel_order(req).await
@@ -1237,8 +1408,13 @@ impl MainEngine {
     }
 
     /// Get algo engine
-    pub fn algo_engine(&self) -> &Arc<super::algo::AlgoEngine> {
+    pub fn algo_engine(&self) -> &Arc<AlgoEngine> {
         &self.algo_engine
+    }
+
+    /// Get toast manager
+    pub fn toast_manager(&self) -> &Arc<ToastManager> {
+        &self.toast_manager
     }
 
     /// Get data download manager
@@ -1660,7 +1836,8 @@ impl MainEngine {
 
 impl Default for MainEngine {
     fn default() -> Self {
-        Self::new()
+        // new() returns Arc<Self>, so we use new_internal directly
+        Self::new_internal(None)
     }
 }
 

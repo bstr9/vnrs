@@ -398,6 +398,7 @@ impl StopOrderEngine {
             reference: if order.reference.is_empty() { format!("STOP_{}", order.id) } else { order.reference.clone() },
             post_only: false, reduce_only: false,
             expire_time: None,
+            gateway_name: order.gateway_name.clone(),
         }
     }
 

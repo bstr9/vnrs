@@ -1,7 +1,7 @@
----
+﻿---
 id: REQ-023
 title: "Instrument 元数据类（Python 端）"
-status: active
+status: completed
 created_at: "2026-04-19T12:00:00"
 updated_at: "2026-04-19T12:00:00"
 priority: P1

@@ -425,6 +425,7 @@ impl AlgoEngine {
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
+                    gateway_name: state.gateway_name.clone(),
                 };
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound
@@ -527,6 +528,7 @@ impl AlgoEngine {
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
+                    gateway_name: state.gateway_name.clone(),
                 };
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound

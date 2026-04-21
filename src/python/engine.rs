@@ -313,6 +313,7 @@ impl PythonEngine {
             post_only: false,
             reduce_only: false,
             expire_time: None,
+            gateway_name: String::new(),
         };
 
         let gateway_name = match exchange {
@@ -385,6 +386,7 @@ impl PythonEngine {
                 orderid,
                 symbol: order.symbol.clone(),
                 exchange: order.exchange,
+                gateway_name: String::new(),
             };
 
             match tokio::runtime::Handle::try_current() {
@@ -434,7 +436,7 @@ impl PythonEngine {
     #[new]
     fn new_py(_main_engine: Py<PyAny>) -> Self {
         PythonEngine {
-            main_engine: Arc::new(MainEngine::new()),
+            main_engine: MainEngine::new(),
             strategy_engine: None,
             strategies: HashMap::new(),
             symbol_strategy_map: HashMap::new(),

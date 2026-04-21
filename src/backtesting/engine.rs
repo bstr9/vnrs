@@ -24,6 +24,7 @@ use crate::trader::database::BaseDatabase;
 use crate::strategy::{
     StrategyTemplate, StrategyContext,
     StopOrder, StopOrderStatus,
+    TimerEntry,
 };
 use super::base::{BacktestingMode, DailyResult, BacktestingResult, BacktestingStatistics};
 use super::statistics::calculate_statistics;
@@ -191,6 +192,9 @@ pub struct BacktestingEngine {
     /// This enables configurable fee models (maker/taker), latency simulation,
     /// and per-instrument matching engines (nautilus_trader pattern).
     simulated_exchange: Option<SimulatedExchange>,
+
+    /// Scheduled timers for the strategy (key: timer_id)
+    timers: HashMap<String, TimerEntry>,
 }
 
 impl BacktestingEngine {
@@ -242,6 +246,7 @@ impl BacktestingEngine {
             bracket_groups: HashMap::new(),
             active_bracket_groups: HashMap::new(),
             simulated_exchange: None,
+            timers: HashMap::new(),
         }
     }
 
@@ -273,6 +278,7 @@ impl BacktestingEngine {
         self.bracket_groups.clear();
         self.active_bracket_groups.clear();
         self.simulated_exchange = None;
+        self.timers.clear();
     }
 
     /// Enable the SimulatedExchange for this backtest.
@@ -764,6 +770,14 @@ impl BacktestingEngine {
             // 5b. Update indicators and dispatch on_indicator callbacks
             let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, bar);
             
+            // 5c. Check timers and dispatch on_timer callbacks (before on_bar)
+            let timer_fired = self.check_timers(bar.datetime.into());
+            for timer_id in &timer_fired {
+                if let Some(strategy) = &mut self.strategy {
+                    strategy.on_timer(timer_id);
+                }
+            }
+            
             // 6. Call strategy on_bar AFTER fills are settled
             //    Orders placed here won't be evaluated until next bar's step 3-5
             let pending = if let Some(strategy) = &mut self.strategy {
@@ -850,6 +864,14 @@ impl BacktestingEngine {
             
             // Update indicators and dispatch on_indicator callbacks
             let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
+            
+            // Check timers and dispatch on_timer callbacks (before on_tick)
+            let timer_fired = self.check_timers(tick.datetime.into());
+            for timer_id in &timer_fired {
+                if let Some(strategy) = &mut self.strategy {
+                    strategy.on_timer(timer_id);
+                }
+            }
             
             // Call strategy on_tick AFTER fills are settled
             let pending = if let Some(strategy) = &mut self.strategy {
@@ -1439,18 +1461,19 @@ impl BacktestingEngine {
         // If SimulatedExchange is enabled, submit order there
         if let Some(ref mut sim_exchange) = self.simulated_exchange {
             let sim_req = OrderRequest {
-                symbol: req.symbol,
-                exchange: req.exchange,
-                direction: req.direction,
-                order_type: req.order_type,
-                volume: req.volume,
-                price: req.price,
-                offset: req.offset,
-                reference: req.reference,
-                post_only: false,
-                reduce_only: false,
-                expire_time: None,
-            };
+                        symbol: req.symbol,
+                        exchange: req.exchange,
+                        direction: req.direction,
+                        order_type: req.order_type,
+                        volume: req.volume,
+                        price: req.price,
+                        offset: req.offset,
+                        reference: req.reference,
+                        post_only: false,
+                        reduce_only: false,
+                        expire_time: None,
+                        gateway_name: String::new(),
+                    };
             if let Ok(sim_order) = sim_exchange.submit_order(
                 sim_req, self.exchange, req.direction, req.offset, self.clock.as_ref(),
             ) {
@@ -1547,18 +1570,19 @@ impl BacktestingEngine {
         // If SimulatedExchange is enabled, submit stop order there
         if let Some(ref mut sim_exchange) = self.simulated_exchange {
             let sim_req = OrderRequest {
-                symbol: req.symbol.clone(),
-                exchange: req.exchange,
-                direction: req.direction,
-                order_type: req.order_type,
-                volume: req.volume,
-                price: req.price,
-                offset: req.offset,
-                reference: req.reference.clone(),
-                post_only: false,
-                reduce_only: false,
-                expire_time: None,
-            };
+                        symbol: req.symbol.clone(),
+                        exchange: req.exchange,
+                        direction: req.direction,
+                        order_type: req.order_type,
+                        volume: req.volume,
+                        price: req.price,
+                        offset: req.offset,
+                        reference: req.reference.clone(),
+                        post_only: false,
+                        reduce_only: false,
+                        expire_time: None,
+                        gateway_name: String::new(),
+                    };
             let dir = req.direction;
             let off = req.offset;
             if let Ok(sim_stop) = sim_exchange.submit_stop_order(
@@ -2210,18 +2234,19 @@ impl BacktestingEngine {
 
                 // Submit the generated order
                 let req = OrderRequest {
-                    symbol: order.symbol.clone(),
-                    exchange: order.exchange,
-                    direction: trigger_direction,
-                    order_type: trigger_order_type,
-                    volume: trigger_volume,
-                    price: trigger_price,
-                    offset: trigger_offset,
-                    reference: format!("EMULATED_{}", id),
-                    post_only: false,
-                    reduce_only: false,
-                    expire_time: None,
-                };
+                            symbol: order.symbol.clone(),
+                            exchange: order.exchange,
+                            direction: trigger_direction,
+                            order_type: trigger_order_type,
+                            volume: trigger_volume,
+                            price: trigger_price,
+                            offset: trigger_offset,
+                            reference: format!("EMULATED_{}", id),
+                            post_only: false,
+                            reduce_only: false,
+                            expire_time: None,
+                            gateway_name: String::new(),
+                        };
 
                 self.send_limit_order(req);
 
@@ -2743,6 +2768,56 @@ impl BacktestingEngine {
     pub fn set_annual_days(&mut self, annual_days: u32) {
         self.annual_days = annual_days;
     }
+
+    // ========================================================================
+    // Timer scheduling (backtesting mode)
+    // ========================================================================
+
+    /// Schedule a timer for the strategy
+    pub fn schedule_timer(&mut self, timer_id: &str, seconds: f64, repeat: bool) {
+        let now: DateTime<Utc> = self.clock.now();
+        let delay = Duration::milliseconds((seconds * 1000.0) as i64);
+        let next_fire = now + delay;
+        let interval = if repeat { Some(delay) } else { None };
+
+        let entry = TimerEntry {
+            strategy_name: String::new(), // not used in backtesting (single strategy)
+            timer_id: timer_id.to_string(),
+            next_fire,
+            interval,
+        };
+
+        self.timers.insert(timer_id.to_string(), entry);
+    }
+
+    /// Cancel a timer
+    pub fn cancel_timer(&mut self, timer_id: &str) {
+        self.timers.remove(timer_id);
+    }
+
+    /// Check timers and return list of timer_ids that have fired
+    fn check_timers(&mut self, current_time: DateTime<Utc>) -> Vec<String> {
+        let mut fired: Vec<String> = Vec::new();
+
+        for (_, entry) in self.timers.iter_mut() {
+            if entry.next_fire <= current_time {
+                fired.push(entry.timer_id.clone());
+
+                if let Some(interval) = entry.interval {
+                    // Repeating timer: schedule next fire
+                    entry.next_fire = current_time + interval;
+                } else {
+                    // One-shot timer: mark for removal
+                    entry.next_fire = chrono::DateTime::UNIX_EPOCH;
+                }
+            }
+        }
+
+        // Remove one-shot timers that have fired
+        self.timers.retain(|_, entry| entry.next_fire != chrono::DateTime::UNIX_EPOCH);
+
+        fired
+    }
 }
 
 impl Default for BacktestingEngine {
@@ -3093,18 +3168,19 @@ mod tests {
 
         // Place a buy limit order at 50000
         let req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 50000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 50000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let orderid = engine.send_limit_order(req);
 
         // Create a bar where low_price <= order price (should cross)
@@ -3153,18 +3229,19 @@ mod tests {
 
         // Place a sell limit order at 50000
         let req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 50000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 50000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let orderid = engine.send_limit_order(req);
 
         // Create a bar where high_price >= order price (should cross)
@@ -3199,18 +3276,19 @@ mod tests {
 
         // Place a buy limit order at 49000 (below the bar's low)
         let req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 49000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 49000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let orderid = engine.send_limit_order(req);
 
         // Bar low is 49900, above our buy price of 49000 - should NOT cross
@@ -3253,18 +3331,19 @@ mod tests {
 
         // Place a buy stop order at 50500
         let req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Stop,
-            volume: 1.0,
-            price: 50500.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Stop,
+                    volume: 1.0,
+                    price: 50500.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let stop_orderid = engine.send_stop_order(req);
 
         // Create a bar where high >= stop price (should trigger)
@@ -3312,18 +3391,19 @@ mod tests {
 
         // Place a sell stop order at 49500
         let req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Stop,
-            volume: 1.0,
-            price: 49500.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Stop,
+                    volume: 1.0,
+                    price: 49500.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let stop_orderid = engine.send_stop_order(req);
 
         // Create a bar where low <= stop price (should trigger)
@@ -3839,44 +3919,47 @@ mod tests {
         engine.exchange = Exchange::Binance;
 
         let entry_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 50000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 50000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let tp_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 51000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 51000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let sl_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Stop,
-            volume: 1.0,
-            price: 49000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Stop,
+                    volume: 1.0,
+                    price: 49000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
         assert_eq!(group_id, 1);
@@ -3913,44 +3996,47 @@ mod tests {
         );
 
         let entry_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 50000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 50000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let tp_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 51000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 51000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let sl_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Stop,
-            volume: 1.0,
-            price: 49000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Stop,
+                    volume: 1.0,
+                    price: 49000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
 
@@ -4004,44 +4090,47 @@ mod tests {
         );
 
         let entry_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 50000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 50000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let tp_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 51000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 51000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let sl_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Stop,
-            volume: 1.0,
-            price: 49000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Stop,
+                    volume: 1.0,
+                    price: 49000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let group_id = engine.send_bracket_order(entry_req, tp_req, sl_req);
 
@@ -4103,31 +4192,33 @@ mod tests {
         engine.exchange = Exchange::Binance;
 
         let order_a_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 51000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 51000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let order_b_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 49000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 49000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let group_id = engine.send_oco_order(order_a_req, order_b_req);
         assert_eq!(group_id, 1);
@@ -4158,31 +4249,33 @@ mod tests {
         );
 
         let order_a_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 51000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 51000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let order_b_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 49000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 49000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let group_id = engine.send_oco_order(order_a_req, order_b_req);
 
@@ -4223,31 +4316,33 @@ mod tests {
         engine.exchange = Exchange::Binance;
 
         let primary_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 50000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 50000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let secondary_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 51000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 51000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let group_id = engine.send_oto_order(primary_req, secondary_req);
         assert_eq!(group_id, 1);
@@ -4277,31 +4372,33 @@ mod tests {
         );
 
         let primary_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Long,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 50000.0,
-            offset: Offset::Open,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Long,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 50000.0,
+                    offset: Offset::Open,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
         let secondary_req = OrderRequest {
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            direction: Direction::Short,
-            order_type: OrderType::Limit,
-            volume: 1.0,
-            price: 51000.0,
-            offset: Offset::Close,
-            reference: String::new(),
-            post_only: false,
-            reduce_only: false,
-            expire_time: None,
-        };
+                    symbol: "BTCUSDT".to_string(),
+                    exchange: Exchange::Binance,
+                    direction: Direction::Short,
+                    order_type: OrderType::Limit,
+                    volume: 1.0,
+                    price: 51000.0,
+                    offset: Offset::Close,
+                    reference: String::new(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
 
         let group_id = engine.send_oto_order(primary_req, secondary_req);
 

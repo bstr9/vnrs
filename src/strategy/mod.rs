@@ -14,6 +14,7 @@ pub use template::{StrategyTemplate, StrategyContext};
 #[cfg(feature = "gui")]
 pub use template::IndicatorRef;
 pub use engine::StrategyEngine;
+pub use engine::TimerEntry;
 pub use base::{StrategyType, StrategyState, StrategySetting, StopOrder, StopOrderStatus, StopOrderRequest, CancelRequestType, StrategyRiskConfig};
 pub use volatility::VolatilityStrategy;
 pub use futures_template::{FuturesStrategy, OffsetMode};

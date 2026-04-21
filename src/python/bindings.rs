@@ -1,6 +1,7 @@
 use crate::python::{OrderFactory, PyInstrument, PyOrder, PythonEngine, PythonEngineBridge, PyStrategyContext, Strategy};
 use crate::strategy::StrategyEngine;
 use crate::trader::constant::{Direction, Offset, OrderType};
+use crate::trader::alert::AlertLevel;
 use crate::trader::MainEngine;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -127,6 +128,7 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OrderFactory>()?;
     m.add_class::<PyInstrument>()?;
     m.add_class::<PyStrategyContext>()?;
+    m.add_class::<PyAlertMessage>()?;
     m.add_function(wrap_pyfunction!(create_main_engine, m)?)?;
     m.add_function(wrap_pyfunction!(run_event_loop, m)?)?;
     m.add_function(wrap_pyfunction!(add_strategy_live, m)?)?;
@@ -184,6 +186,55 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+/// Python-accessible alert message
+#[pyclass]
+#[derive(Clone)]
+pub struct PyAlertMessage {
+    /// Alert severity level (Info, Warning, Critical)
+    #[pyo3(get)]
+    pub level: String,
+    /// Short title/summary
+    #[pyo3(get)]
+    pub title: String,
+    /// Detailed message body
+    #[pyo3(get)]
+    pub body: String,
+    /// Source engine/gateway
+    #[pyo3(get)]
+    pub source: String,
+    /// ISO 8601 timestamp
+    #[pyo3(get)]
+    pub timestamp: String,
+    /// Related trading symbol (if any)
+    #[pyo3(get)]
+    pub vt_symbol: Option<String>,
+}
+
+impl PyAlertMessage {
+    fn from_toast(toast: &crate::trader::Toast) -> Self {
+        let level = match toast.level {
+            AlertLevel::Info => "Info",
+            AlertLevel::Warning => "Warning",
+            AlertLevel::Critical => "Critical",
+        };
+        Self {
+            level: level.to_string(),
+            title: toast.title.clone(),
+            body: toast.body.clone(),
+            source: toast.source.clone(),
+            timestamp: toast.timestamp.to_rfc3339(),
+            vt_symbol: toast.vt_symbol.clone(),
+        }
+    }
+}
+
+#[pymethods]
+impl PyAlertMessage {
+    fn __repr__(&self) -> String {
+        format!("AlertMessage(level='{}', title='{}', source='{}')", self.level, self.title, self.source)
+    }
+}
+
 /// Wrapper for PythonEngine to make it compatible with PyO3
 #[pyclass]
 pub struct PythonEngineWrapper {
@@ -204,7 +255,7 @@ impl PythonEngineWrapper {
         let rt = Runtime::new()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyException, _>(e.to_string()))?;
 
-        let main_engine = Arc::new(MainEngine::new());
+        let main_engine = MainEngine::new();
         let python_engine = PythonEngine::new_from_arc(main_engine.clone());
         let inner = Arc::new(Mutex::new(python_engine));
 
@@ -490,5 +541,57 @@ impl PythonEngineWrapper {
             });
         }
         Ok(())
+    }
+
+    /// Schedule a timer for a strategy.
+    ///
+    /// Args:
+    ///     strategy_name: Name of the strategy
+    ///     timer_id: Unique timer identifier within the strategy
+    ///     seconds: Delay until first fire (and interval if repeat=True)
+    ///     repeat: Whether the timer repeats
+    #[pyo3(signature = (strategy_name, timer_id, seconds, repeat=false))]
+    fn schedule_timer(&self, strategy_name: String, timer_id: String, seconds: f64, repeat: bool) -> PyResult<()> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(se) = inner.get_strategy_engine() {
+            let se: Arc<StrategyEngine> = (*se).clone();
+            se.schedule_timer(&strategy_name, &timer_id, seconds, repeat);
+        }
+        Ok(())
+    }
+
+    /// Cancel a timer for a strategy.
+    ///
+    /// Args:
+    ///     strategy_name: Name of the strategy
+    ///     timer_id: Timer identifier to cancel
+    fn cancel_timer(&self, strategy_name: String, timer_id: String) -> PyResult<()> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(se) = inner.get_strategy_engine() {
+            let se: Arc<StrategyEngine> = (*se).clone();
+            se.cancel_timer(&strategy_name, &timer_id);
+        }
+        Ok(())
+    }
+
+    /// Get all active (undismissed) toast alerts.
+    ///
+    /// Returns a list of PyAlertMessage objects representing alerts
+    /// that have been triggered but not yet dismissed by the user.
+    fn get_active_toasts(&self) -> PyResult<Vec<PyAlertMessage>> {
+        let toasts = self.main_engine.toast_manager().get_active_toasts();
+        Ok(toasts.iter().map(PyAlertMessage::from_toast).collect())
+    }
+
+    /// Get recent toast alerts.
+    ///
+    /// Args:
+    ///     limit: Maximum number of toasts to return (default 20)
+    ///
+    /// Returns a list of PyAlertMessage objects in reverse chronological order.
+    #[pyo3(signature = (limit=20))]
+    fn get_recent_toasts(&self, limit: usize) -> PyResult<Vec<PyAlertMessage>> {
+        let toasts = self.main_engine.toast_manager().get_recent_toasts(limit);
+        Ok(toasts.iter().map(PyAlertMessage::from_toast).collect())
     }
 }

@@ -1,7 +1,7 @@
----
+﻿---
 id: REQ-003
 title: "Prometheus 指标监控"
-status: active
+status: completed
 created_at: "2026-04-19T00:00:00"
 updated_at: "2026-04-19T00:00:00"
 priority: P1

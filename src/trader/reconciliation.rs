@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn test_reconciliation_engine_auto_reconcile() {
         let engine = MainEngine::new();
-        let recon = ReconciliationEngine::new(Arc::new(engine));
+        let recon = ReconciliationEngine::new(engine);
 
         assert!(recon.is_auto_reconcile());
         recon.set_auto_reconcile(false);
@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn test_reconciliation_engine_drift_threshold() {
         let engine = MainEngine::new();
-        let recon = ReconciliationEngine::new(Arc::new(engine));
+        let recon = ReconciliationEngine::new(engine);
 
         assert!((recon.drift_threshold() - 5.0).abs() < 1e-10);
         recon.set_drift_threshold(10.0);
@@ -712,20 +712,20 @@ mod tests {
     #[test]
     fn test_reconciliation_engine_last_result_initially_none() {
         let engine = MainEngine::new();
-        let recon = ReconciliationEngine::new(Arc::new(engine));
+        let recon = ReconciliationEngine::new(engine);
         assert!(recon.last_result().is_none());
     }
 
     #[test]
     fn test_reconciliation_engine_base_engine() {
         let engine = MainEngine::new();
-        let recon = ReconciliationEngine::new(Arc::new(engine));
+        let recon = ReconciliationEngine::new(engine);
         assert_eq!(recon.engine_name(), "ReconciliationEngine");
     }
 
     #[test]
     fn test_detect_position_drift_with_snapshot() {
-        let engine = Arc::new(MainEngine::new());
+        let engine = MainEngine::new();
         let recon = ReconciliationEngine::new(engine.clone());
 
         // Manually populate snapshot
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn test_detect_order_drift_missing_on_venue() {
         let engine = MainEngine::new();
-        let recon = ReconciliationEngine::new(Arc::new(engine));
+        let recon = ReconciliationEngine::new(engine);
 
         // Add an order to the snapshot
         {
@@ -773,7 +773,7 @@ mod tests {
 
     #[test]
     fn test_detect_order_drift_new_on_venue() {
-        let engine = Arc::new(MainEngine::new());
+        let engine = MainEngine::new();
         let recon = ReconciliationEngine::new(engine.clone());
 
         // Empty snapshot, but OmsEngine has an active order
@@ -815,7 +815,7 @@ mod tests {
     #[test]
     fn test_close_disables_auto_reconcile() {
         let engine = MainEngine::new();
-        let recon = ReconciliationEngine::new(Arc::new(engine));
+        let recon = ReconciliationEngine::new(engine);
         assert!(recon.is_auto_reconcile());
         recon.close();
         assert!(!recon.is_auto_reconcile());
