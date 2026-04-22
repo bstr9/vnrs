@@ -16,6 +16,7 @@ use std::sync::RwLock;
 use super::constant::{Exchange, Interval};
 use super::database::{BarOverview, BaseDatabase, EventRecord, TickOverview};
 use super::object::{BarData, OrderData, PositionData, TickData, TradeData};
+use crate::error::DatabaseError;
 
 // ---------------------------------------------------------------------------
 // Helper: Exchange / Interval from string
@@ -428,7 +429,7 @@ impl ParquetDatabase {
 impl BaseDatabase for ParquetDatabase {
     // ----- Bar data -----
 
-    async fn save_bar_data(&self, bars: Vec<BarData>, _stream: bool) -> Result<bool, String> {
+    async fn save_bar_data(&self, bars: Vec<BarData>, _stream: bool) -> Result<bool, DatabaseError> {
         if bars.is_empty() {
             return Ok(true);
         }
@@ -510,7 +511,7 @@ impl BaseDatabase for ParquetDatabase {
         interval: Interval,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<BarData>, String> {
+    ) -> Result<Vec<BarData>, DatabaseError> {
         #[cfg(feature = "alpha")]
         {
             let path = self.bar_path(symbol, exchange, interval);
@@ -546,7 +547,7 @@ impl BaseDatabase for ParquetDatabase {
         }
     }
 
-    async fn delete_bar_data(&self, symbol: &str, exchange: Exchange, interval: Interval) -> Result<i64, String> {
+    async fn delete_bar_data(&self, symbol: &str, exchange: Exchange, interval: Interval) -> Result<i64, DatabaseError> {
         let path = self.bar_path(symbol, exchange, interval);
         if !path.exists() {
             return Ok(0);
@@ -579,7 +580,7 @@ impl BaseDatabase for ParquetDatabase {
 
         Ok(count)
     }
-    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, String> {
+    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError> {
         let bars_dir = self.base_dir.join("bars");
         if !bars_dir.exists() {
             return Ok(Vec::new());
@@ -652,7 +653,7 @@ impl BaseDatabase for ParquetDatabase {
 
     // ----- Tick data -----
 
-    async fn save_tick_data(&self, ticks: Vec<TickData>, _stream: bool) -> Result<bool, String> {
+    async fn save_tick_data(&self, ticks: Vec<TickData>, _stream: bool) -> Result<bool, DatabaseError> {
         if ticks.is_empty() {
             return Ok(true);
         }
@@ -725,7 +726,7 @@ impl BaseDatabase for ParquetDatabase {
         exchange: Exchange,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<TickData>, String> {
+    ) -> Result<Vec<TickData>, DatabaseError> {
         #[cfg(feature = "alpha")]
         {
             let path = self.tick_path(symbol, exchange);
@@ -760,7 +761,7 @@ impl BaseDatabase for ParquetDatabase {
         }
     }
 
-    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, String> {
+    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {
         let path = self.tick_path(symbol, exchange);
         if !path.exists() {
             return Ok(0);
@@ -792,7 +793,7 @@ impl BaseDatabase for ParquetDatabase {
         Ok(count)
     }
 
-    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, String> {
+    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError> {
         let ticks_dir = self.base_dir.join("ticks");
         if !ticks_dir.exists() {
             return Ok(Vec::new());
@@ -862,7 +863,7 @@ impl BaseDatabase for ParquetDatabase {
     }
     // ----- Order data -----
 
-    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String> {
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, DatabaseError> {
         if orders.is_empty() {
             return Ok(true);
         }
@@ -892,7 +893,7 @@ impl BaseDatabase for ParquetDatabase {
 
     // ----- Trade data -----
 
-    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String> {
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, DatabaseError> {
         if trades.is_empty() {
             return Ok(true);
         }
@@ -922,7 +923,7 @@ impl BaseDatabase for ParquetDatabase {
 
     // ----- Position data -----
 
-    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String> {
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, DatabaseError> {
         if positions.is_empty() {
             return Ok(true);
         }
@@ -947,7 +948,7 @@ impl BaseDatabase for ParquetDatabase {
 
     // ----- Event data -----
 
-    async fn save_event(&self, event: EventRecord) -> Result<bool, String> {
+    async fn save_event(&self, event: EventRecord) -> Result<bool, DatabaseError> {
         let path = self.event_file_path();
         let mut events: Vec<EventRecord> = Self::load_json(&path)?;
         events.push(event);
@@ -960,7 +961,7 @@ impl BaseDatabase for ParquetDatabase {
 
     // ----- Load methods -----
 
-    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, DatabaseError> {
         match gateway_name {
             Some(gw) => {
                 let path = self.order_file_path(gw);
@@ -973,7 +974,7 @@ impl BaseDatabase for ParquetDatabase {
         }
     }
 
-    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, DatabaseError> {
         match gateway_name {
             Some(gw) => {
                 let path = self.trade_file_path(gw);
@@ -986,7 +987,7 @@ impl BaseDatabase for ParquetDatabase {
         }
     }
 
-    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, DatabaseError> {
         match gateway_name {
             Some(gw) => {
                 let path = self.position_file_path(gw);

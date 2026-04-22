@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, atomic::{AtomicBool, AtomicU64, Ordering}};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, broadcast};
 use tracing::{debug, error, info, warn};
 
 use chrono;
@@ -37,6 +37,7 @@ use super::object::{
     TickData, TradeData,
 };
 use super::setting::SETTINGS;
+use crate::strategy::StrategyEngine;
 
 
 /// Event handler type
@@ -634,10 +635,14 @@ pub struct MainEngine {
     data_engine: RwLock<Option<Arc<DataEngine>>>,
     offset_converter: RwLock<OffsetConverter>,
     recorder: RwLock<Option<Arc<DataRecorder>>>,
+    strategy_engine: RwLock<Option<Arc<StrategyEngine>>>,
     
     event_tx: mpsc::UnboundedSender<(String, GatewayEvent)>,
     event_rx: RwLock<Option<mpsc::UnboundedReceiver<(String, GatewayEvent)>>>,
     
+    /// Broadcast sender for external event subscribers (e.g., RPC event forwarding)
+    event_broadcaster: broadcast::Sender<(String, GatewayEvent)>,
+
     handlers: RwLock<HashMap<String, Vec<EventHandler>>>,
     running: AtomicBool,
 
@@ -701,6 +706,7 @@ impl MainEngine {
     fn new_internal(database: Option<Arc<dyn BaseDatabase>>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (persist_tx, persist_rx) = mpsc::channel(4096);
+        let (event_broadcaster, _) = broadcast::channel(4096);
         
         // Clone event_tx before it's moved into the struct
         let event_tx_for_alert = event_tx.clone();
@@ -754,8 +760,10 @@ impl MainEngine {
             data_engine: RwLock::new(None),
             offset_converter: RwLock::new(offset_converter),
             recorder: RwLock::new(None),
+            strategy_engine: RwLock::new(None),
             event_tx: event_tx.clone(),
             event_rx: RwLock::new(Some(event_rx)),
+            event_broadcaster,
             handlers: RwLock::new(HashMap::new()),
             running: AtomicBool::new(false),
             database,
@@ -1182,6 +1190,10 @@ impl MainEngine {
                 }
             }
         }
+        drop(handlers);
+
+        // Broadcast event to external subscribers (e.g., RPC event forwarding)
+        let _ = self.event_broadcaster.send((event_type.to_string(), event.clone()));
     }
 
     /// Add a gateway
@@ -1247,7 +1259,7 @@ impl MainEngine {
     pub async fn connect(&self, setting: GatewaySettings, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("连接登录 -> {}", gateway_name), "MainEngine");
-            gateway.connect(setting).await
+            gateway.connect(setting).await.map_err(|e| e.to_string())
         } else {
             Err(format!("找不到底层接口：{}", gateway_name))
         }
@@ -1274,7 +1286,7 @@ impl MainEngine {
     pub async fn subscribe(&self, req: SubscribeRequest, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("订阅行情 -> {}：{:?}", gateway_name, req), "MainEngine");
-            gateway.subscribe(req).await
+            gateway.subscribe(req).await.map_err(|e| e.to_string())
         } else {
             Err(format!("找不到底层接口：{}", gateway_name))
         }
@@ -1284,7 +1296,7 @@ impl MainEngine {
     pub async fn unsubscribe(&self, req: SubscribeRequest, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("退订行情 -> {}：{:?}", gateway_name, req), "MainEngine");
-            gateway.unsubscribe(req).await
+            gateway.unsubscribe(req).await.map_err(|e| e.to_string())
         } else {
             Err(format!("找不到底层接口：{}", gateway_name))
         }
@@ -1412,7 +1424,7 @@ impl MainEngine {
             // No conversion needed — single request with same offset
             if let Some(gateway) = self.get_gateway(gateway_name) {
                 self.write_log(format!("委托下单 -> {}：{:?}", gateway_name, req), "MainEngine");
-                let vt_orderid = gateway.send_order(req).await?;
+                let vt_orderid = gateway.send_order(req).await.map_err(|e| e.to_string())?;
 
                 // Update offset converter with the new order request
                 {
@@ -1433,7 +1445,7 @@ impl MainEngine {
                         format!("委托下单(偏移转换) -> {}：offset={:?} vol={}", gateway_name, sub_req.offset, sub_req.volume),
                         "MainEngine",
                     );
-                    let vt_orderid = gateway.send_order(sub_req.clone()).await?;
+                    let vt_orderid = gateway.send_order(sub_req.clone()).await.map_err(|e| e.to_string())?;
 
                     // Update offset converter
                     {
@@ -1456,7 +1468,7 @@ impl MainEngine {
         let gateway_name = if gateway_name.is_empty() { &req.gateway_name } else { gateway_name };
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("委托撤单 -> {}：{:?}", gateway_name, req), "MainEngine");
-            gateway.cancel_order(req).await
+            gateway.cancel_order(req).await.map_err(|e| e.to_string())
         } else {
             Err(format!("找不到底层接口：{}", gateway_name))
         }
@@ -1466,7 +1478,7 @@ impl MainEngine {
     pub async fn send_quote(&self, req: QuoteRequest, gateway_name: &str) -> Result<String, String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("报价下单 -> {}：{:?}", gateway_name, req), "MainEngine");
-            gateway.send_quote(req).await
+            gateway.send_quote(req).await.map_err(|e| e.to_string())
         } else {
             Err(format!("找不到底层接口：{}", gateway_name))
         }
@@ -1476,7 +1488,7 @@ impl MainEngine {
     pub async fn cancel_quote(&self, req: CancelRequest, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("报价撤单 -> {}：{:?}", gateway_name, req), "MainEngine");
-            gateway.cancel_quote(req).await
+            gateway.cancel_quote(req).await.map_err(|e| e.to_string())
         } else {
             Err(format!("找不到底层接口：{}", gateway_name))
         }
@@ -1486,7 +1498,7 @@ impl MainEngine {
     pub async fn query_history(&self, req: HistoryRequest, gateway_name: &str) -> Result<Vec<BarData>, String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
             self.write_log(format!("查询K线 -> {}：{:?}", gateway_name, req), "MainEngine");
-            gateway.query_history(req).await
+            gateway.query_history(req).await.map_err(|e| e.to_string())
         } else {
             Err(format!("找不到底层接口：{}", gateway_name))
         }
@@ -1631,6 +1643,32 @@ impl MainEngine {
         self.data_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Set the StrategyEngine reference for strategy control RPC functions
+    pub fn set_strategy_engine(&self, engine: Arc<StrategyEngine>) {
+        *self.strategy_engine.write().unwrap_or_else(|e| e.into_inner()) = Some(engine);
+    }
+
+    /// Get the StrategyEngine if one has been set
+    pub fn strategy_engine(&self) -> Option<Arc<StrategyEngine>> {
+        self.strategy_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Start a strategy by name (delegates to StrategyEngine)
+    pub async fn start_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        match self.strategy_engine() {
+            Some(se) => se.start_strategy(strategy_name),
+            None => Err("StrategyEngine not configured".to_string()),
+        }
+    }
+
+    /// Stop a strategy by name (delegates to StrategyEngine)
+    pub async fn stop_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        match self.strategy_engine() {
+            Some(se) => se.stop_strategy(strategy_name).await,
+            None => Err("StrategyEngine not configured".to_string()),
+        }
+    }
+
     /// Get tick data
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
         self.oms_engine.get_tick(vt_symbol)
@@ -1751,6 +1789,15 @@ impl MainEngine {
         self.event_tx.clone()
     }
 
+    /// Subscribe to MainEngine events for external consumers (e.g., RPC event broadcasting).
+    ///
+    /// Returns a `broadcast::Receiver` that yields `(event_type, GatewayEvent)` tuples.
+    /// The receiver capacity is 4096; slow consumers will miss messages on overflow
+    /// (reported via `RecvError::Lagged`).
+    pub fn subscribe_events(&self) -> broadcast::Receiver<(String, GatewayEvent)> {
+        self.event_broadcaster.subscribe()
+    }
+
     /// Restore engine state from database after crash (#11)
     ///
     /// Loads orders, trades, and positions from the database and re-populates
@@ -1766,9 +1813,9 @@ impl MainEngine {
         };
 
         // Load in dependency order: orders first, then trades, then positions
-        let orders = db.load_orders(None).await?;
-        let trades = db.load_trades(None).await?;
-        let positions = db.load_positions(None).await?;
+        let orders = db.load_orders(None).await.map_err(|e| e.to_string())?;
+        let trades = db.load_trades(None).await.map_err(|e| e.to_string())?;
+        let positions = db.load_positions(None).await.map_err(|e| e.to_string())?;
 
         let order_count = orders.len();
         let trade_count = trades.len();

@@ -454,6 +454,46 @@ pub async fn register_trading_functions(engine: Arc<MainEngine>, server: &RpcSer
         })
         .await;
 
+    // ========================================================================
+    // Strategy control
+    // ========================================================================
+
+    let e = engine.clone();
+    server
+        .register("start_strategy".to_string(), move |args, _kwargs| {
+            let strategy_name = arg_str(&args, 0, "strategy_name")?;
+            let e_clone = e.clone();
+            let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+            tokio::spawn(async move {
+                let result = e_clone.start_strategy(&strategy_name).await;
+                let _ = tx.send(result);
+            });
+            match rx.recv() {
+                Ok(Ok(())) => Ok(json!("started")),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err("start_strategy 内部通信失败".to_string()),
+            }
+        })
+        .await;
+
+    let e = engine.clone();
+    server
+        .register("stop_strategy".to_string(), move |args, _kwargs| {
+            let strategy_name = arg_str(&args, 0, "strategy_name")?;
+            let e_clone = e.clone();
+            let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+            tokio::spawn(async move {
+                let result = e_clone.stop_strategy(&strategy_name).await;
+                let _ = tx.send(result);
+            });
+            match rx.recv() {
+                Ok(Ok(())) => Ok(json!("stopped")),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err("stop_strategy 内部通信失败".to_string()),
+            }
+        })
+        .await;
+
     info!("已注册所有交易RPC函数");
 }
 

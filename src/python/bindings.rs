@@ -197,6 +197,9 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register stop order engine module
     crate::python::stop_order_engine::register_stop_order_engine_module(m)?;
 
+    // Register bracket order engine module
+    crate::python::bracket_order_engine::register_bracket_order_engine_module(m)?;
+
     // Register order emulator module
     crate::python::order_emulator::register_order_emulator_module(m)?;
 
@@ -666,6 +669,21 @@ impl PythonEngineWrapper {
     fn get_stop_order_engine(&self) -> crate::python::stop_order_engine::PyStopOrderEngine {
         crate::python::stop_order_engine::PyStopOrderEngine::new(
             self.main_engine.stop_order_engine().clone(),
+        )
+    }
+
+    /// Get the BracketOrderEngine for managing bracket/OCO/OTO orders.
+    ///
+    /// The BracketOrderEngine manages groups of contingent orders:
+    /// - Bracket: entry + take-profit + stop-loss
+    /// - OCO: one-cancels-other order pairs
+    /// - OTO: one-triggers-other order pairs
+    ///
+    /// Returns:
+    ///     BracketOrderEngine instance
+    fn get_bracket_order_engine(&self) -> crate::python::bracket_order_engine::PyBracketOrderEngine {
+        crate::python::bracket_order_engine::PyBracketOrderEngine::new(
+            self.main_engine.bracket_order_engine().clone(),
         )
     }
 

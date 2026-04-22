@@ -17,6 +17,7 @@ use super::strategy_panel::StrategyPanel;
 use super::indicator_panel::IndicatorPanel;
 use super::bracket_panel::BracketOrderPanel;
 use super::advanced_orders_panel::AdvancedOrdersPanel;
+use super::rpc_panel::RpcPanel;
 #[cfg(feature = "alpha")]
 use super::alpha_panel::AlphaPanel;
 use std::sync::{Arc, Mutex};
@@ -75,6 +76,7 @@ pub enum CentralTab {
     Alert,
     AdvancedOrders,
     BracketOrder,
+    RpcMonitor,
     #[cfg(feature = "alpha")]
     AlphaResearch,
 }
@@ -123,6 +125,7 @@ pub struct MainWindow {
     pub indicator_panel: IndicatorPanel,
     pub advanced_orders_panel: AdvancedOrdersPanel,
     pub bracket_panel: BracketOrderPanel,
+    pub rpc_panel: RpcPanel,
     #[cfg(feature = "alpha")]
     pub alpha_panel: super::alpha_panel::AlphaPanel,
     
@@ -201,6 +204,7 @@ impl MainWindow {
             indicator_panel: IndicatorPanel::new(),
             bracket_panel: BracketOrderPanel::new(),
             advanced_orders_panel: AdvancedOrdersPanel::new(),
+            rpc_panel: RpcPanel::new(),
             #[cfg(feature = "alpha")]
             alpha_panel: AlphaPanel::new(),
             connect_dialogs: Vec::new(),
@@ -1012,6 +1016,7 @@ impl MainWindow {
             ui.selectable_value(&mut self.central_tab, CentralTab::Alert, "告警");
             ui.selectable_value(&mut self.central_tab, CentralTab::AdvancedOrders, "高级委托");
             ui.selectable_value(&mut self.central_tab, CentralTab::BracketOrder, "组合单");
+            ui.selectable_value(&mut self.central_tab, CentralTab::RpcMonitor, "远程监控");
             #[cfg(feature = "alpha")]
             ui.selectable_value(&mut self.central_tab, CentralTab::AlphaResearch, "量化研究");
         });
@@ -1087,6 +1092,15 @@ impl MainWindow {
             }
             CentralTab::AdvancedOrders => {
                 self.advanced_orders_panel.show(ui, &mut self.toast_manager);
+            }
+            CentralTab::RpcMonitor => {
+                // Update RPC panel state from environment
+                let rpc_port: u16 = std::env::var("VNRS_RPC_PORT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(5555);
+                self.rpc_panel.set_rpc_port(rpc_port);
+                self.rpc_panel.show(ui);
             }
             #[cfg(feature = "alpha")]
             CentralTab::AlphaResearch => {

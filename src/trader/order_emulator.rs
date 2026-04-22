@@ -689,6 +689,12 @@ impl OrderEmulator {
                 // Update trailing stop levels
                 self.update_trailing(order, tick.last_price);
 
+                // Update pegged order prices based on best bid/ask
+                if order.order_type == EmulatedOrderType::PeggedBest {
+                    self.update_pegged_price(order, tick);
+                    continue; // PeggedBest doesn't use trigger logic
+                }
+
                 // Check trigger conditions
                 if self.check_trigger(order, tick.last_price) {
                     self.trigger_order(order);
@@ -749,7 +755,7 @@ impl OrderEmulator {
                                 bar.low_price <= order.trigger_price.unwrap_or(f64::MAX)
                             }
                             EmulatedOrderType::Iceberg => false, // Iceberg doesn't trigger on bars
-                            EmulatedOrderType::PeggedBest => false, // PeggedBest needs bid/ask from ticks, not bars
+                            EmulatedOrderType::PeggedBest => false, // PeggedBest uses tick bid/ask, updated in process_tick_internal
                         }
                     }
                     Direction::Short => {
@@ -773,7 +779,7 @@ impl OrderEmulator {
                                 bar.high_price >= order.trigger_price.unwrap_or(0.0)
                             }
                             EmulatedOrderType::Iceberg => false,
-                            EmulatedOrderType::PeggedBest => false, // PeggedBest needs bid/ask from ticks, not bars
+                            EmulatedOrderType::PeggedBest => false, // PeggedBest uses tick bid/ask, updated in process_tick_internal
                         }
                     }
                     Direction::Net => false, // Net position not supported for emulated orders
@@ -945,7 +951,7 @@ impl OrderEmulator {
                 }
             }
             EmulatedOrderType::Iceberg => false, // Iceberg doesn't trigger on price
-            EmulatedOrderType::PeggedBest => false, // PeggedBest not yet fully implemented
+            EmulatedOrderType::PeggedBest => false, // PeggedBest managed by update_pegged_price, not trigger logic
         }
     }
 
@@ -1025,6 +1031,90 @@ impl OrderEmulator {
             }
         } else {
             Err("未设置下单回调".to_string())
+        }
+    }
+
+    /// Update pegged order price based on best bid/ask from tick data.
+    /// If the price changed, cancel the old real order and submit a new one.
+    fn update_pegged_price(&self, order: &mut EmulatedOrder, tick: &TickData) {
+        let pegged_offset = match order.pegged_offset {
+            Some(off) => off,
+            None => return,
+        };
+
+        // Compute new pegged price
+        let new_price = match order.direction {
+            Direction::Long => {
+                if tick.bid_price_1 <= 0.0 { return; }
+                tick.bid_price_1 + pegged_offset
+            }
+            Direction::Short => {
+                if tick.ask_price_1 <= 0.0 { return; }
+                tick.ask_price_1 - pegged_offset
+            }
+            Direction::Net => return,
+        };
+
+        // If price hasn't changed, nothing to do
+        if let Some(current) = order.pegged_price {
+            if (new_price - current).abs() < f64::EPSILON {
+                return;
+            }
+        }
+
+        // Cancel existing real order if any
+        if let Some(ref real_orderid) = order.real_order_id {
+            let cancel_req = CancelRequest {
+                orderid: real_orderid.clone(),
+                symbol: order.symbol.clone(),
+                exchange: order.exchange,
+                gateway_name: order.gateway_name.clone(),
+            };
+            let cancel_cb = self.cancel_callback.read().unwrap_or_else(|e| e.into_inner());
+            if let Some(ref cancel_fn) = *cancel_cb {
+                if let Err(e) = cancel_fn(&cancel_req) {
+                    warn!("撤销钉住单旧委托失败: id={}, 错误={}", order.id, e);
+                }
+            }
+
+            // Remove old real order from index
+            let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+            real_index.remove(real_orderid);
+        }
+
+        // Update pegged price
+        order.pegged_price = Some(new_price);
+
+        // Submit new limit order at the pegged price
+        let order_req = match self.create_order_request(order) {
+            Some(mut req) => {
+                req.price = new_price;
+                req
+            }
+            None => {
+                warn!("无法创建钉住单委托: id={}", order.id);
+                return;
+            }
+        };
+
+        let cb = self.send_callback.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(ref send_fn) = *cb {
+            match send_fn(&order_req) {
+                Ok(real_orderid) => {
+                    // Update real order index
+                    let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+                    real_index.insert(real_orderid.clone(), order.id);
+                    order.real_order_id = Some(real_orderid.clone());
+                    order.status = EmulatedOrderStatus::Triggered;
+                    info!(
+                        "钉住单价格更新: id={}, 新价格={}, 真实委托={}",
+                        order.id, new_price, real_orderid
+                    );
+                }
+                Err(e) => {
+                    warn!("钉住单提交失败: id={}, 错误={}", order.id, e);
+                }
+            }
         }
     }
 

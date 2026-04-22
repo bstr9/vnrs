@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use tokio::sync::mpsc;
 
+use crate::error::GatewayError;
 use super::constant::Exchange;
 use super::event::*;
 use super::object::{
@@ -136,17 +137,17 @@ pub trait BaseGateway: Send + Sync {
     ///   - orders of account: on_order
     ///   - trades of account: on_trade
     /// - Write log if any query fails
-    async fn connect(&self, setting: GatewaySettings) -> Result<(), String>;
+    async fn connect(&self, setting: GatewaySettings) -> Result<(), GatewayError>;
 
     /// Close gateway connection.
     async fn close(&self);
 
     /// Subscribe tick data update.
-    async fn subscribe(&self, req: SubscribeRequest) -> Result<(), String>;
+    async fn subscribe(&self, req: SubscribeRequest) -> Result<(), GatewayError>;
 
     /// Unsubscribe tick data update.
     /// Default no-op implementation for backward compatibility.
-    async fn unsubscribe(&self, req: SubscribeRequest) -> Result<(), String> {
+    async fn unsubscribe(&self, req: SubscribeRequest) -> Result<(), GatewayError> {
         let _ = req;
         Ok(())
     }
@@ -161,29 +162,29 @@ pub trait BaseGateway: Send + Sync {
     ///   - If request failed, OrderData.status should be set to Status::Rejected
     /// - Response on_order
     /// - Return vt_orderid
-    async fn send_order(&self, req: OrderRequest) -> Result<String, String>;
+    async fn send_order(&self, req: OrderRequest) -> Result<String, GatewayError>;
 
     /// Cancel an existing order.
-    async fn cancel_order(&self, req: CancelRequest) -> Result<(), String>;
+    async fn cancel_order(&self, req: CancelRequest) -> Result<(), GatewayError>;
 
     /// Send a new two-sided quote to server.
-    async fn send_quote(&self, _req: QuoteRequest) -> Result<String, String> {
+    async fn send_quote(&self, _req: QuoteRequest) -> Result<String, GatewayError> {
         Ok(String::new())
     }
 
     /// Cancel an existing quote.
-    async fn cancel_quote(&self, _req: CancelRequest) -> Result<(), String> {
+    async fn cancel_quote(&self, _req: CancelRequest) -> Result<(), GatewayError> {
         Ok(())
     }
 
     /// Query account balance.
-    async fn query_account(&self) -> Result<(), String>;
+    async fn query_account(&self) -> Result<(), GatewayError>;
 
     /// Query holding positions.
-    async fn query_position(&self) -> Result<(), String>;
+    async fn query_position(&self) -> Result<(), GatewayError>;
 
     /// Query bar history data.
-    async fn query_history(&self, _req: HistoryRequest) -> Result<Vec<BarData>, String> {
+    async fn query_history(&self, _req: HistoryRequest) -> Result<Vec<BarData>, GatewayError> {
         Ok(Vec::new())
     }
 

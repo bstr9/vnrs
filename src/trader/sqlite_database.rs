@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use std::sync::{Arc, Mutex};
 
+use crate::error::DatabaseError;
 use super::constant::{Direction, Exchange, Interval, Offset, OrderType, Status};
 use super::database::{BaseDatabase, BarOverview, TickOverview, EventRecord};
 use super::object::{BarData, TickData, OrderData, TradeData, PositionData};
@@ -408,7 +409,7 @@ impl SqliteDatabase {
 
 #[async_trait]
 impl BaseDatabase for SqliteDatabase {
-    async fn save_bar_data(&self, bars: Vec<BarData>, _stream: bool) -> Result<bool, String> {
+    async fn save_bar_data(&self, bars: Vec<BarData>, _stream: bool) -> Result<bool, DatabaseError> {
         if bars.is_empty() {
             return Ok(true);
         }
@@ -417,10 +418,10 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let mut conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let tx = conn.transaction()
-                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
 
             for bar in bars {
                 let exchange_str = format!("{:?}", bar.exchange);
@@ -448,15 +449,15 @@ impl BaseDatabase for SqliteDatabase {
                         bar.open_interest,
                         bar.gateway_name,
                     ],
-                ).map_err(|e| format!("Failed to insert bar: {}", e))?;
+                ).map_err(|e| DatabaseError::InsertFailed { table: "dbbardata".to_string(), reason: e.to_string() })?;
             }
 
-            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            tx.commit().map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
             Ok(true)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn save_tick_data(&self, ticks: Vec<TickData>, _stream: bool) -> Result<bool, String> {
+    async fn save_tick_data(&self, ticks: Vec<TickData>, _stream: bool) -> Result<bool, DatabaseError> {
         if ticks.is_empty() {
             return Ok(true);
         }
@@ -465,10 +466,10 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let mut conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let tx = conn.transaction()
-                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
 
             for tick in ticks {
                 let exchange_str = format!("{:?}", tick.exchange);
@@ -496,12 +497,12 @@ impl BaseDatabase for SqliteDatabase {
                         tick.ask_volume_1,
                         tick.gateway_name,
                     ],
-                ).map_err(|e| format!("Failed to insert tick: {}", e))?;
+                ).map_err(|e| DatabaseError::InsertFailed { table: "dbtickdata".to_string(), reason: e.to_string() })?;
             }
 
-            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            tx.commit().map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
             Ok(true)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
     async fn load_bar_data(
@@ -511,7 +512,7 @@ impl BaseDatabase for SqliteDatabase {
         interval: Interval,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<BarData>, String> {
+    ) -> Result<Vec<BarData>, DatabaseError> {
         let conn = self.conn.clone();
 
         let symbol = symbol.to_string();
@@ -522,7 +523,7 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let mut stmt = conn.prepare(
                 r#"
@@ -533,7 +534,7 @@ impl BaseDatabase for SqliteDatabase {
                       AND datetime >= ?4 AND datetime <= ?5
                 ORDER BY datetime ASC
                 "#
-            ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
 
             let bars = stmt.query_map(
                 params![symbol, exchange_str, interval_str, start_str, end_str],
@@ -577,12 +578,12 @@ impl BaseDatabase for SqliteDatabase {
                         extra: None,
                     })
                 },
-            ).map_err(|e| format!("Failed to query bars: {}", e))?
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query bars: {}", e)))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to collect bars: {}", e))?;
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect bars: {}", e)))?;
 
             Ok(bars)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
     async fn load_tick_data(
@@ -591,7 +592,7 @@ impl BaseDatabase for SqliteDatabase {
         exchange: Exchange,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<TickData>, String> {
+    ) -> Result<Vec<TickData>, DatabaseError> {
         let conn = self.conn.clone();
 
         let symbol = symbol.to_string();
@@ -601,7 +602,7 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let mut stmt = conn.prepare(
                 r#"
@@ -611,7 +612,7 @@ impl BaseDatabase for SqliteDatabase {
                 WHERE symbol = ?1 AND exchange = ?2 AND datetime >= ?3 AND datetime <= ?4
                 ORDER BY datetime ASC
                 "#
-            ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
 
             let ticks = stmt.query_map(
                 params![symbol, exchange_str, start_str, end_str],
@@ -670,12 +671,12 @@ impl BaseDatabase for SqliteDatabase {
                         extra: None,
                     })
                 },
-            ).map_err(|e| format!("Failed to query ticks: {}", e))?
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query ticks: {}", e)))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to collect ticks: {}", e))?;
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect ticks: {}", e)))?;
 
             Ok(ticks)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
     async fn delete_bar_data(
@@ -683,7 +684,7 @@ impl BaseDatabase for SqliteDatabase {
         symbol: &str,
         exchange: Exchange,
         interval: Interval,
-    ) -> Result<i64, String> {
+    ) -> Result<i64, DatabaseError> {
         let conn = self.conn.clone();
 
         let symbol = symbol.to_string();
@@ -692,7 +693,7 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let count: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM dbbardata WHERE symbol = ?1 AND exchange = ?2 AND interval = ?3",
@@ -703,13 +704,13 @@ impl BaseDatabase for SqliteDatabase {
             conn.execute(
                 "DELETE FROM dbbardata WHERE symbol = ?1 AND exchange = ?2 AND interval = ?3",
                 params![symbol, exchange_str, interval_str],
-            ).map_err(|e| format!("Failed to delete bars: {}", e))?;
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to delete bars: {}", e)))?;
 
             Ok(count)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, String> {
+    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {
         let conn = self.conn.clone();
 
         let symbol = symbol.to_string();
@@ -717,7 +718,7 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let count: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM dbtickdata WHERE symbol = ?1 AND exchange = ?2",
@@ -728,18 +729,18 @@ impl BaseDatabase for SqliteDatabase {
             conn.execute(
                 "DELETE FROM dbtickdata WHERE symbol = ?1 AND exchange = ?2",
                 params![symbol, exchange_str],
-            ).map_err(|e| format!("Failed to delete ticks: {}", e))?;
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to delete ticks: {}", e)))?;
 
             Ok(count)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, String> {
+    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError> {
         let conn = self.conn.clone();
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let mut stmt = conn.prepare(
                 r#"
@@ -747,7 +748,7 @@ impl BaseDatabase for SqliteDatabase {
                 FROM dbbardata
                 GROUP BY symbol, exchange, interval
                 "#
-            ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
 
             let overviews = stmt.query_map([], |row| {
                 let exchange_str: String = row.get(1)?;
@@ -787,20 +788,20 @@ impl BaseDatabase for SqliteDatabase {
                     start,
                     end,
                 })
-            }).map_err(|e| format!("Failed to query bar overview: {}", e))?
+            }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query bar overview: {}", e)))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to collect bar overview: {}", e))?;
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect bar overview: {}", e)))?;
 
             Ok(overviews)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, String> {
+    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError> {
         let conn = self.conn.clone();
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let mut stmt = conn.prepare(
                 r#"
@@ -808,7 +809,7 @@ impl BaseDatabase for SqliteDatabase {
                 FROM dbtickdata
                 GROUP BY symbol, exchange
                 "#
-            ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
 
             let overviews = stmt.query_map([], |row| {
                 let exchange_str: String = row.get(1)?;
@@ -837,15 +838,15 @@ impl BaseDatabase for SqliteDatabase {
                     start,
                     end,
                 })
-            }).map_err(|e| format!("Failed to query tick overview: {}", e))?
+            }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query tick overview: {}", e)))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to collect tick overview: {}", e))?;
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect tick overview: {}", e)))?;
 
             Ok(overviews)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String> {
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, DatabaseError> {
         if orders.is_empty() {
             return Ok(true);
         }
@@ -854,10 +855,10 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let mut conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let tx = conn.transaction()
-                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
 
             for order in orders {
                 let exchange_str = format!("{:?}", order.exchange);
@@ -886,15 +887,15 @@ impl BaseDatabase for SqliteDatabase {
                         order.post_only as i32,
                         order.reduce_only as i32,
                     ],
-                ).map_err(|e| format!("Failed to insert order: {}", e))?;
+                ).map_err(|e| DatabaseError::InsertFailed { table: "dborderdata".to_string(), reason: e.to_string() })?;
             }
 
-            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            tx.commit().map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
             Ok(true)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String> {
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, DatabaseError> {
         if trades.is_empty() {
             return Ok(true);
         }
@@ -903,10 +904,10 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let mut conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let tx = conn.transaction()
-                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
 
             for trade in trades {
                 let exchange_str = format!("{:?}", trade.exchange);
@@ -928,15 +929,15 @@ impl BaseDatabase for SqliteDatabase {
                         datetime_str,
                         trade.gateway_name,
                     ],
-                ).map_err(|e| format!("Failed to insert trade: {}", e))?;
+                ).map_err(|e| DatabaseError::InsertFailed { table: "dbtradedata".to_string(), reason: e.to_string() })?;
             }
 
-            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            tx.commit().map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
             Ok(true)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String> {
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, DatabaseError> {
         if positions.is_empty() {
             return Ok(true);
         }
@@ -945,10 +946,10 @@ impl BaseDatabase for SqliteDatabase {
 
         tokio::task::spawn_blocking(move || {
             let mut conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let tx = conn.transaction()
-                .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin transaction: {}", e)))?;
 
             for position in positions {
                 let exchange_str = format!("{:?}", position.exchange);
@@ -967,20 +968,20 @@ impl BaseDatabase for SqliteDatabase {
                         position.yd_volume,
                         position.gateway_name,
                     ],
-                ).map_err(|e| format!("Failed to insert position: {}", e))?;
+                ).map_err(|e| DatabaseError::InsertFailed { table: "dbpositiondata".to_string(), reason: e.to_string() })?;
             }
 
-            tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+            tx.commit().map_err(|e| DatabaseError::QueryFailed(format!("Failed to commit transaction: {}", e)))?;
             Ok(true)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn save_event(&self, event: EventRecord) -> Result<bool, String> {
+    async fn save_event(&self, event: EventRecord) -> Result<bool, DatabaseError> {
         let conn = self.conn.clone();
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             conn.execute(
                 r#"
@@ -994,19 +995,19 @@ impl BaseDatabase for SqliteDatabase {
                     event.timestamp.to_rfc3339(),
                     event.payload,
                 ],
-            ).map_err(|e| format!("Failed to insert event: {}", e))?;
+            ).map_err(|e| DatabaseError::InsertFailed { table: "dbeventdata".to_string(), reason: e.to_string() })?;
 
             Ok(true)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, DatabaseError> {
         let conn = self.conn.clone();
         let gateway_filter = gateway_name.map(|g| g.to_string());
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let sql = if gateway_filter.is_some() {
                 "SELECT orderid, symbol, exchange, direction, order_type, offset, price, volume, traded, status, datetime, reference, gateway_name, post_only, reduce_only FROM dborderdata WHERE gateway_name = ?1"
@@ -1015,33 +1016,33 @@ impl BaseDatabase for SqliteDatabase {
             };
 
             let mut stmt = conn.prepare(sql)
-                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
 
             let orders = if let Some(gw) = &gateway_filter {
                 stmt.query_map(params![gw], |row| {
                     Self::row_to_order(row)
-                }).map_err(|e| format!("Failed to query orders: {}", e))?
+                }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query orders: {}", e)))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Failed to collect orders: {}", e))?
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect orders: {}", e)))?
             } else {
                 stmt.query_map([], |row| {
                     Self::row_to_order(row)
-                }).map_err(|e| format!("Failed to query orders: {}", e))?
+                }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query orders: {}", e)))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Failed to collect orders: {}", e))?
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect orders: {}", e)))?
             };
 
             Ok(orders)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, DatabaseError> {
         let conn = self.conn.clone();
         let gateway_filter = gateway_name.map(|g| g.to_string());
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let sql = if gateway_filter.is_some() {
                 "SELECT tradeid, orderid, symbol, exchange, direction, offset, price, volume, datetime, gateway_name FROM dbtradedata WHERE gateway_name = ?1"
@@ -1050,33 +1051,33 @@ impl BaseDatabase for SqliteDatabase {
             };
 
             let mut stmt = conn.prepare(sql)
-                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
 
             let trades = if let Some(gw) = &gateway_filter {
                 stmt.query_map(params![gw], |row| {
                     Self::row_to_trade(row)
-                }).map_err(|e| format!("Failed to query trades: {}", e))?
+                }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query trades: {}", e)))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Failed to collect trades: {}", e))?
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect trades: {}", e)))?
             } else {
                 stmt.query_map([], |row| {
                     Self::row_to_trade(row)
-                }).map_err(|e| format!("Failed to query trades: {}", e))?
+                }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query trades: {}", e)))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Failed to collect trades: {}", e))?
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect trades: {}", e)))?
             };
 
             Ok(trades)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
-    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, DatabaseError> {
         let conn = self.conn.clone();
         let gateway_filter = gateway_name.map(|g| g.to_string());
 
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock()
-                .map_err(|e| format!("Failed to acquire database lock: {}", e))?;
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
 
             let sql = if gateway_filter.is_some() {
                 "SELECT symbol, exchange, direction, volume, frozen, price, pnl, yd_volume, gateway_name FROM dbpositiondata WHERE gateway_name = ?1"
@@ -1085,24 +1086,24 @@ impl BaseDatabase for SqliteDatabase {
             };
 
             let mut stmt = conn.prepare(sql)
-                .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
 
             let positions = if let Some(gw) = &gateway_filter {
                 stmt.query_map(params![gw], |row| {
                     Self::row_to_position(row)
-                }).map_err(|e| format!("Failed to query positions: {}", e))?
+                }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query positions: {}", e)))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Failed to collect positions: {}", e))?
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect positions: {}", e)))?
             } else {
                 stmt.query_map([], |row| {
                     Self::row_to_position(row)
-                }).map_err(|e| format!("Failed to query positions: {}", e))?
+                }).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query positions: {}", e)))?
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Failed to collect positions: {}", e))?
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect positions: {}", e)))?
             };
 
             Ok(positions)
-        }).await.map_err(|e| format!("spawn_blocking error: {}", e))?
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 }
 

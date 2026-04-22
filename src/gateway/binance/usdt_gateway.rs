@@ -22,6 +22,7 @@ use crate::trader::{
     PositionData, Product, Status, SubscribeRequest, TickData, TradeData,
 };
 use crate::trader::gateway::BaseGateway;
+use crate::error::GatewayError;
 
 fn format_price(value: f64) -> String {
     if value == 0.0 { return "0".to_string(); }
@@ -674,7 +675,7 @@ impl BaseGateway for BinanceUsdtGateway {
 
     fn exchanges() -> Vec<Exchange> { vec![Exchange::Binance] }
 
-    async fn connect(&self, setting: GatewaySettings) -> Result<(), String> {
+    async fn connect(&self, setting: GatewaySettings) -> Result<(), GatewayError> {
         // Load existing config or use provided settings
         let mut configs = BinanceConfigs::load();
         let config = BinanceGatewayConfig::from_settings(&setting);
@@ -1114,10 +1115,10 @@ impl BaseGateway for BinanceUsdtGateway {
         self.write_log("Gateway已关闭").await;
     }
 
-    async fn subscribe(&self, req: SubscribeRequest) -> Result<(), String> {
+    async fn subscribe(&self, req: SubscribeRequest) -> Result<(), GatewayError> {
         let symbol = req.symbol.to_lowercase();
         if !self.contracts.read().await.contains_key(&symbol) {
-            return Err(format!("找不到该合约代码: {}", symbol));
+            return Err(format!("找不到该合约代码: {}", symbol).into());
         }
         if self.ticks.read().await.contains_key(&symbol) { return Ok(()); }
 
@@ -1130,7 +1131,7 @@ impl BaseGateway for BinanceUsdtGateway {
         Ok(())
     }
 
-    async fn unsubscribe(&self, req: SubscribeRequest) -> Result<(), String> {
+    async fn unsubscribe(&self, req: SubscribeRequest) -> Result<(), GatewayError> {
         let symbol = req.symbol.to_lowercase();
 
         // Remove from ticks cache
@@ -1145,7 +1146,7 @@ impl BaseGateway for BinanceUsdtGateway {
         Ok(())
     }
 
-    async fn send_order(&self, req: OrderRequest) -> Result<String, String> {
+    async fn send_order(&self, req: OrderRequest) -> Result<String, GatewayError> {
         let orderid = self.new_order_id();
         let order = req.create_order_data(orderid.clone(), self.gateway_name.clone());
         self.on_order(order.clone()).await;
@@ -1191,26 +1192,26 @@ impl BaseGateway for BinanceUsdtGateway {
                 // Remove from tracking on rejection
                 self.order_submit_times.write().await.remove(&orderid);
                 self.write_log(&format!("委托失败: {}", e)).await;
-                Err(e)
+                Err(e.into())
             }
         }
     }
 
-    async fn cancel_order(&self, req: CancelRequest) -> Result<(), String> {
+    async fn cancel_order(&self, req: CancelRequest) -> Result<(), GatewayError> {
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), req.symbol.to_uppercase());
         params.insert("origClientOrderId".to_string(), req.orderid.clone());
 
         match self.rest_client.delete("/fapi/v1/order", &params, Security::Signed).await {
             Ok(_) => { self.write_log(&format!("撤单成功: {}", req.orderid)).await; Ok(()) }
-            Err(e) => { self.write_log(&format!("撤单失败: {}", e)).await; Err(e) }
+            Err(e) => { self.write_log(&format!("撤单失败: {}", e)).await; Err(e.into()) }
         }
     }
 
-    async fn query_account(&self) -> Result<(), String> { self.query_account_impl().await }
-    async fn query_position(&self) -> Result<(), String> { self.query_position_impl().await }
+    async fn query_account(&self) -> Result<(), GatewayError> { self.query_account_impl().await.map_err(Into::into) }
+    async fn query_position(&self) -> Result<(), GatewayError> { self.query_position_impl().await.map_err(Into::into) }
 
-    async fn query_history(&self, req: HistoryRequest) -> Result<Vec<BarData>, String> {
+    async fn query_history(&self, req: HistoryRequest) -> Result<Vec<BarData>, GatewayError> {
         let mut history = Vec::new();
         let limit = 1500;
         let mut start_time = req.start.timestamp() * 1000;

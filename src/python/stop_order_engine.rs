@@ -6,7 +6,8 @@
 
 use pyo3::prelude::*;
 
-use crate::trader::stop_order::{StopOrder, StopOrderEngine, StopOrderStatus, StopOrderType};
+use crate::trader::constant::{Direction, Offset};
+use crate::trader::stop_order::{StopOrder, StopOrderEngine, StopOrderRequest, StopOrderStatus, StopOrderType};
 use crate::trader::utility::extract_vt_symbol;
 use std::sync::Arc;
 
@@ -183,13 +184,18 @@ impl PyStopOrder {
 
 /// Python wrapper for StopOrderEngine.
 ///
-/// Provides read-only access to stop order state and cancellation methods.
-/// Stop orders are created through strategy methods or MainEngine, not here.
+/// Provides stop order management including creation, querying, and cancellation.
 ///
 /// Usage::
 ///
 ///     engine = create_main_engine()
 ///     stop_engine = engine.get_stop_order_engine()
+///
+///     # Add a stop-market order
+///     stop_orderid = stop_engine.add_stop_order(
+///         "BTCUSDT.BINANCE", "LONG", "StopMarket",
+///         stop_price=50000.0, volume=1.0,
+///     )
 ///
 ///     # Get all active stop orders
 ///     active_orders = stop_engine.get_active_stop_orders()
@@ -279,6 +285,127 @@ impl PyStopOrderEngine {
                 ))
             })?;
         Ok(self.inner.cancel_orders_for_symbol(&symbol, exchange))
+    }
+
+    /// Add a new stop order.
+    ///
+    /// Args:
+    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     direction: "LONG", "SHORT", or "NET"
+    ///     stop_type: "StopMarket", "StopLimit", "TakeProfit", "TrailingStopPct", or "TrailingStopAbs"
+    ///     stop_price: Trigger price (for StopMarket, StopLimit, TakeProfit)
+    ///     volume: Order volume (must be > 0)
+    ///     limit_price: Limit price for StopLimit orders (default 0.0)
+    ///     offset: Order offset - "NONE", "OPEN", "CLOSE", "CLOSETODAY", "CLOSEYESTERDAY" (default "NONE")
+    ///     trail_pct: Trailing percentage for TrailingStopPct, in (0, 1) (default 0.0)
+    ///     trail_abs: Trailing absolute distance for TrailingStopAbs (default 0.0)
+    ///     gateway_name: Gateway name (default "MAIN")
+    ///     tag: Optional tag string (default "")
+    ///
+    /// Returns:
+    ///     The stop order ID on success
+    ///
+    /// Raises:
+    ///     ValueError: If parameters are invalid (volume <= 0, bad stop_type, etc.)
+    #[pyo3(signature = (vt_symbol, direction, stop_type, stop_price, volume, limit_price=0.0, offset="NONE", trail_pct=0.0, trail_abs=0.0, gateway_name="MAIN", tag=""))]
+    fn add_stop_order(
+        &self,
+        vt_symbol: &str,
+        direction: &str,
+        stop_type: &str,
+        stop_price: f64,
+        volume: f64,
+        limit_price: f64,
+        offset: &str,
+        trail_pct: f64,
+        trail_abs: f64,
+        gateway_name: &str,
+        tag: &str,
+    ) -> PyResult<u64> {
+        let (symbol, exchange) = extract_vt_symbol(vt_symbol).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Invalid vt_symbol format: {}",
+                vt_symbol
+            ))
+        })?;
+
+        let dir = parse_direction(direction)?;
+        let st = parse_stop_order_type(stop_type)?;
+        let off = parse_offset(offset)?;
+
+        let mut req = match st {
+            StopOrderType::StopMarket => {
+                StopOrderRequest::stop_market(&symbol, exchange, dir, stop_price, volume, gateway_name)
+            }
+            StopOrderType::StopLimit => {
+                let mut r = StopOrderRequest::stop_market(&symbol, exchange, dir, stop_price, volume, gateway_name);
+                r.stop_type = StopOrderType::StopLimit;
+                r.limit_price = limit_price;
+                r
+            }
+            StopOrderType::TakeProfit => {
+                StopOrderRequest::take_profit(&symbol, exchange, dir, stop_price, volume, gateway_name)
+            }
+            StopOrderType::TrailingStopPct => {
+                StopOrderRequest::trailing_stop_pct(&symbol, exchange, dir, trail_pct, volume, gateway_name)
+            }
+            StopOrderType::TrailingStopAbs => {
+                StopOrderRequest::trailing_stop_abs(&symbol, exchange, dir, trail_abs, volume, gateway_name)
+            }
+        };
+
+        req.offset = off;
+        if !tag.is_empty() {
+            req.tag = tag.to_string();
+        }
+
+        self.inner
+            .add_stop_order(req)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------------
+
+fn parse_direction(s: &str) -> PyResult<Direction> {
+    match s.to_uppercase().as_str() {
+        "LONG" => Ok(Direction::Long),
+        "SHORT" => Ok(Direction::Short),
+        "NET" => Ok(Direction::Net),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid direction '{}': expected LONG, SHORT, or NET",
+            s
+        ))),
+    }
+}
+
+fn parse_stop_order_type(s: &str) -> PyResult<StopOrderType> {
+    match s {
+        "StopMarket" => Ok(StopOrderType::StopMarket),
+        "StopLimit" => Ok(StopOrderType::StopLimit),
+        "TakeProfit" => Ok(StopOrderType::TakeProfit),
+        "TrailingStopPct" => Ok(StopOrderType::TrailingStopPct),
+        "TrailingStopAbs" => Ok(StopOrderType::TrailingStopAbs),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid stop_type '{}': expected StopMarket, StopLimit, TakeProfit, TrailingStopPct, or TrailingStopAbs",
+            s
+        ))),
+    }
+}
+
+fn parse_offset(s: &str) -> PyResult<Offset> {
+    match s.to_uppercase().as_str() {
+        "NONE" => Ok(Offset::None),
+        "OPEN" => Ok(Offset::Open),
+        "CLOSE" => Ok(Offset::Close),
+        "CLOSETODAY" => Ok(Offset::CloseToday),
+        "CLOSEYESTERDAY" => Ok(Offset::CloseYesterday),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Invalid offset '{}': expected NONE, OPEN, CLOSE, CLOSETODAY, or CLOSEYESTERDAY",
+            s
+        ))),
     }
 }
 

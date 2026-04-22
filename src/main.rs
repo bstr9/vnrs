@@ -516,6 +516,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         
         // Start the main engine event loop
         let engine = main_engine.clone();
+        let engine_for_rpc = main_engine.clone();
         runtime.spawn(async move {
             engine.start().await;
         });
@@ -534,19 +535,49 @@ fn main() -> Result<(), Box<dyn Error>> {
         
         let rpc_server = Arc::new(RpcServer::with_config(server_config));
         
-        // Register a basic ping function so the RPC server is useful out of the box
+        // Register all trading RPC functions (queries, orders, gateway management)
         let rpc_server_clone = rpc_server.clone();
         runtime.block_on(async {
-            rpc_server_clone.register("ping".to_string(), |args, _kwargs| {
-                let msg = args.first().and_then(|v| v.as_str()).unwrap_or("pong");
-                Ok(serde_json::json!({ "result": msg }))
-            }).await;
+            trade_engine::rpc::trading_service::register_trading_functions(engine_for_rpc.clone(), &rpc_server_clone).await;
             
             if let Err(e) = rpc_server_clone.start().await {
                 tracing::error!("❌ RPC Server 启动失败: {}", e);
                 return;
             }
             info!("✅ RPC Server 已启动 (REP: :{}, PUB: :{})", rpc_port, rpc_port + 1);
+        });
+
+        // Subscribe to MainEngine events and broadcast via RPC PUB socket
+        let event_receiver = main_engine.subscribe_events();
+        let rpc_for_events = rpc_server.clone();
+        runtime.spawn(async move {
+            let mut rx = event_receiver;
+            loop {
+                match rx.recv().await {
+                    Ok((event_type, event)) => {
+                        let topic = event_type.clone();
+                        let data = match &event {
+                            trade_engine::trader::gateway::GatewayEvent::Tick(t) => serde_json::to_value(t).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Bar(b) => serde_json::to_value(b).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Trade(t) => serde_json::to_value(t).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Order(o) => serde_json::to_value(o).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Position(p) => serde_json::to_value(p).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Account(a) => serde_json::to_value(a).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Contract(c) => serde_json::to_value(c).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Quote(q) => serde_json::to_value(q).ok(),
+                            trade_engine::trader::gateway::GatewayEvent::Log(l) => serde_json::to_value(l).ok(),
+                            _ => None,
+                        };
+                        if let Some(data) = data {
+                            let _ = rpc_for_events.publish(topic, data).await;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("RPC event broadcast lagged by {} messages", n);
+                    }
+                    Err(_) => break,
+                }
+            }
         });
         
         // Wait for shutdown signal

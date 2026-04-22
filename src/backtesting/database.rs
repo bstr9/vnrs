@@ -79,7 +79,7 @@ impl DatabaseLoader {
     ) -> Result<Vec<BarData>, String> {
         // Try SQLite first
         if let Some(db) = &self.sqlite_db {
-            let bars = db.load_bar_data(symbol, exchange, interval, start, end).await?;
+            let bars = db.load_bar_data(symbol, exchange, interval, start, end).await.map_err(|e| e.to_string())?;
             if !bars.is_empty() {
                 return Ok(bars);
             }
@@ -204,7 +204,7 @@ impl DatabaseLoader {
     ) -> Result<Vec<TickData>, String> {
         // Try SQLite first
         if let Some(db) = &self.sqlite_db {
-            let ticks = db.load_tick_data(symbol, exchange, start, end).await?;
+            let ticks = db.load_tick_data(symbol, exchange, start, end).await.map_err(|e| e.to_string())?;
             if !ticks.is_empty() {
                 return Ok(ticks);
             }

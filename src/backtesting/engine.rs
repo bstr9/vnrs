@@ -665,7 +665,7 @@ impl BacktestingEngine {
             self.interval,
             self.start,
             self.end,
-        ).await?;
+        ).await.map_err(|e| e.to_string())?;
 
         let count = bars.len();
         self.history_data = bars;
@@ -690,7 +690,7 @@ impl BacktestingEngine {
             self.exchange,
             self.start,
             self.end,
-        ).await?;
+        ).await.map_err(|e| e.to_string())?;
 
         let count = ticks.len();
         self.tick_data = ticks;

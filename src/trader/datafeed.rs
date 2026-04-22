@@ -242,7 +242,7 @@ impl BaseDatafeed for BinanceDatafeed {
                 req.exchange,
                 req.start,
                 end,
-            ).await?;
+            ).await.map_err(|e| e.to_string())?;
 
             if !ticks.is_empty() {
                 tracing::info!(

@@ -32,6 +32,8 @@ pub mod risk_manager;
 #[cfg(feature = "python")]
 pub mod stop_order_engine;
 #[cfg(feature = "python")]
+pub mod bracket_order_engine;
+#[cfg(feature = "python")]
 pub mod order_emulator;
 
 #[cfg(feature = "python")]
@@ -68,6 +70,8 @@ pub use message_bus::{MessageBus, PyMessage};
 pub use risk_manager::{PyRiskManager, PyRiskConfig, PyRiskCheckResult};
 #[cfg(feature = "python")]
 pub use stop_order_engine::{PyStopOrder, PyStopOrderEngine};
+#[cfg(feature = "python")]
+pub use bracket_order_engine::{PyBracketOrderGroup, PyChildOrderInfo, PyBracketOrderEngine};
 #[cfg(feature = "python")]
 pub use order_emulator::{PyEmulatedOrder, PyOrderEmulator};
 #[cfg(feature = "python")]

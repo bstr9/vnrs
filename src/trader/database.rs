@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::error::DatabaseError;
 use super::constant::{Exchange, Interval};
 use super::object::{BarData, TickData, OrderData, TradeData, PositionData};
 use super::setting::SETTINGS;
@@ -60,10 +61,10 @@ impl EventRecord {
 #[async_trait]
 pub trait BaseDatabase: Send + Sync {
     /// Save bar data into database
-    async fn save_bar_data(&self, bars: Vec<BarData>, stream: bool) -> Result<bool, String>;
+    async fn save_bar_data(&self, bars: Vec<BarData>, stream: bool) -> Result<bool, DatabaseError>;
 
     /// Save tick data into database
-    async fn save_tick_data(&self, ticks: Vec<TickData>, stream: bool) -> Result<bool, String>;
+    async fn save_tick_data(&self, ticks: Vec<TickData>, stream: bool) -> Result<bool, DatabaseError>;
 
     /// Load bar data from database
     async fn load_bar_data(
@@ -73,7 +74,7 @@ pub trait BaseDatabase: Send + Sync {
         interval: Interval,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<BarData>, String>;
+    ) -> Result<Vec<BarData>, DatabaseError>;
 
     /// Load tick data from database
     async fn load_tick_data(
@@ -82,7 +83,7 @@ pub trait BaseDatabase: Send + Sync {
         exchange: Exchange,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<TickData>, String>;
+    ) -> Result<Vec<TickData>, DatabaseError>;
 
     /// Delete all bar data with given symbol + exchange + interval
     async fn delete_bar_data(
@@ -90,37 +91,37 @@ pub trait BaseDatabase: Send + Sync {
         symbol: &str,
         exchange: Exchange,
         interval: Interval,
-    ) -> Result<i64, String>;
+    ) -> Result<i64, DatabaseError>;
 
     /// Delete all tick data with given symbol + exchange
-    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, String>;
+    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError>;
 
     /// Return bar data available in database
-    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, String>;
+    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError>;
 
     /// Return tick data available in database
-    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, String>;
+    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError>;
 
     /// Save order data into database
-    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String>;
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, DatabaseError>;
 
     /// Save trade data into database
-    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String>;
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, DatabaseError>;
 
     /// Save position data into database
-    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String>;
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, DatabaseError>;
 
     /// Save an event record into database (event journaling)
-    async fn save_event(&self, event: EventRecord) -> Result<bool, String>;
+    async fn save_event(&self, event: EventRecord) -> Result<bool, DatabaseError>;
 
     /// Load order data from database, optionally filtered by gateway_name
-    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String>;
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, DatabaseError>;
 
     /// Load trade data from database, optionally filtered by gateway_name
-    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String>;
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, DatabaseError>;
 
     /// Load position data from database, optionally filtered by gateway_name
-    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String>;
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, DatabaseError>;
 }
 
 /// In-memory database implementation for testing
@@ -154,8 +155,8 @@ impl Default for MemoryDatabase {
 
 #[async_trait]
 impl BaseDatabase for MemoryDatabase {
-    async fn save_bar_data(&self, bars: Vec<BarData>, _stream: bool) -> Result<bool, String> {
-        let mut data = self.bars.write().map_err(|e| e.to_string())?;
+    async fn save_bar_data(&self, bars: Vec<BarData>, _stream: bool) -> Result<bool, DatabaseError> {
+        let mut data = self.bars.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         // Dedup: collect existing keys for O(1) lookup
         let existing_keys: std::collections::HashSet<(String, Exchange, Option<Interval>, i64)> = data.iter()
             .map(|b| (b.symbol.clone(), b.exchange, b.interval, b.datetime.timestamp()))
@@ -174,8 +175,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(true)
     }
 
-    async fn save_tick_data(&self, ticks: Vec<TickData>, _stream: bool) -> Result<bool, String> {
-        let mut data = self.ticks.write().map_err(|e| e.to_string())?;
+    async fn save_tick_data(&self, ticks: Vec<TickData>, _stream: bool) -> Result<bool, DatabaseError> {
+        let mut data = self.ticks.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         // Dedup: collect existing keys for O(1) lookup
         let existing_keys: std::collections::HashSet<(String, Exchange, i64)> = data.iter()
             .map(|t| (t.symbol.clone(), t.exchange, t.datetime.timestamp()))
@@ -201,8 +202,8 @@ impl BaseDatabase for MemoryDatabase {
         interval: Interval,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<BarData>, String> {
-        let data = self.bars.read().map_err(|e| e.to_string())?;
+    ) -> Result<Vec<BarData>, DatabaseError> {
+        let data = self.bars.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let result: Vec<BarData> = data
             .iter()
             .filter(|bar| {
@@ -223,8 +224,8 @@ impl BaseDatabase for MemoryDatabase {
         exchange: Exchange,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<TickData>, String> {
-        let data = self.ticks.read().map_err(|e| e.to_string())?;
+    ) -> Result<Vec<TickData>, DatabaseError> {
+        let data = self.ticks.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let result: Vec<TickData> = data
             .iter()
             .filter(|tick| {
@@ -243,8 +244,8 @@ impl BaseDatabase for MemoryDatabase {
         symbol: &str,
         exchange: Exchange,
         interval: Interval,
-    ) -> Result<i64, String> {
-        let mut data = self.bars.write().map_err(|e| e.to_string())?;
+    ) -> Result<i64, DatabaseError> {
+        let mut data = self.bars.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let original_len = data.len();
         data.retain(|bar| {
             !(bar.symbol == symbol
@@ -254,15 +255,15 @@ impl BaseDatabase for MemoryDatabase {
         Ok((original_len - data.len()) as i64)
     }
 
-    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, String> {
-        let mut data = self.ticks.write().map_err(|e| e.to_string())?;
+    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {
+        let mut data = self.ticks.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let original_len = data.len();
         data.retain(|tick| !(tick.symbol == symbol && tick.exchange == exchange));
         Ok((original_len - data.len()) as i64)
     }
 
-    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, String> {
-        let data = self.bars.read().map_err(|e| e.to_string())?;
+    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError> {
+        let data = self.bars.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         
         // Group by symbol, exchange, interval
         use std::collections::HashMap;
@@ -292,8 +293,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(overviews)
     }
 
-    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, String> {
-        let data = self.ticks.read().map_err(|e| e.to_string())?;
+    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError> {
+        let data = self.ticks.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         
         // Group by symbol, exchange
         use std::collections::HashMap;
@@ -322,8 +323,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(overviews)
     }
 
-    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String> {
-        let mut data = self.orders.write().map_err(|e| e.to_string())?;
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, DatabaseError> {
+        let mut data = self.orders.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let existing_keys: std::collections::HashSet<String> = data.iter()
             .map(|o| o.vt_orderid())
             .collect();
@@ -340,8 +341,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(true)
     }
 
-    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String> {
-        let mut data = self.trades.write().map_err(|e| e.to_string())?;
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, DatabaseError> {
+        let mut data = self.trades.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let existing_keys: std::collections::HashSet<String> = data.iter()
             .map(|t| t.vt_tradeid())
             .collect();
@@ -358,8 +359,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(true)
     }
 
-    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String> {
-        let mut data = self.positions.write().map_err(|e| e.to_string())?;
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, DatabaseError> {
+        let mut data = self.positions.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         for position in positions {
             let key = position.vt_positionid();
             // Upsert: remove old, insert new
@@ -373,8 +374,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(true)
     }
 
-    async fn save_event(&self, event: EventRecord) -> Result<bool, String> {
-        let mut data = self.events.write().map_err(|e| e.to_string())?;
+    async fn save_event(&self, event: EventRecord) -> Result<bool, DatabaseError> {
+        let mut data = self.events.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         data.push(event);
         if data.len() > 100_000 {
             let excess = data.len() - 100_000;
@@ -383,8 +384,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(true)
     }
 
-    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
-        let data = self.orders.read().map_err(|e| e.to_string())?;
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, DatabaseError> {
+        let data = self.orders.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let result: Vec<OrderData> = data.iter()
             .filter(|o| gateway_name.is_none_or(|gw| o.gateway_name == gw))
             .cloned()
@@ -392,8 +393,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(result)
     }
 
-    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
-        let data = self.trades.read().map_err(|e| e.to_string())?;
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, DatabaseError> {
+        let data = self.trades.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let result: Vec<TradeData> = data.iter()
             .filter(|t| gateway_name.is_none_or(|gw| t.gateway_name == gw))
             .cloned()
@@ -401,8 +402,8 @@ impl BaseDatabase for MemoryDatabase {
         Ok(result)
     }
 
-    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
-        let data = self.positions.read().map_err(|e| e.to_string())?;
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, DatabaseError> {
+        let data = self.positions.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let result: Vec<PositionData> = data.iter()
             .filter(|p| gateway_name.is_none_or(|gw| p.gateway_name == gw))
             .cloned()
@@ -646,7 +647,7 @@ impl FileDatabase {
 
 #[async_trait]
 impl BaseDatabase for FileDatabase {
-    async fn save_bar_data(&self, bars: Vec<BarData>, stream: bool) -> Result<bool, String> {
+    async fn save_bar_data(&self, bars: Vec<BarData>, stream: bool) -> Result<bool, DatabaseError> {
         // Group bars by (symbol, exchange, interval)
         let mut groups: std::collections::HashMap<(String, Exchange, Option<Interval>), Vec<BarData>> =
             std::collections::HashMap::new();
@@ -667,7 +668,7 @@ impl BaseDatabase for FileDatabase {
             let path = self.bar_file_path(&symbol, exchange, interval);
 
             // Load existing data and merge (dedup by timestamp)
-            let mut existing = Self::load_bars_from_file(&path)?;
+            let mut existing = Self::load_bars_from_file(&path).map_err(DatabaseError::from)?;
             let existing_keys: std::collections::HashSet<i64> = existing.iter()
                 .map(|b| b.datetime.timestamp())
                 .collect();
@@ -686,7 +687,7 @@ impl BaseDatabase for FileDatabase {
                 existing.drain(0..existing.len() - 1_000_000);
             }
 
-            Self::save_bars_to_file(&path, &existing)?;
+            Self::save_bars_to_file(&path, &existing).map_err(DatabaseError::from)?;
 
             if stream {
                 tracing::debug!("Streamed {} bars to {:?}", new_bars.len(), path);
@@ -696,7 +697,7 @@ impl BaseDatabase for FileDatabase {
         Ok(true)
     }
 
-    async fn save_tick_data(&self, ticks: Vec<TickData>, stream: bool) -> Result<bool, String> {
+    async fn save_tick_data(&self, ticks: Vec<TickData>, stream: bool) -> Result<bool, DatabaseError> {
         // Group ticks by (symbol, exchange)
         let mut groups: std::collections::HashMap<(String, Exchange), Vec<TickData>> =
             std::collections::HashMap::new();
@@ -711,7 +712,7 @@ impl BaseDatabase for FileDatabase {
             let path = self.tick_file_path(&symbol, exchange);
 
             // Load existing data and merge (dedup by timestamp)
-            let mut existing = Self::load_ticks_from_file(&path)?;
+            let mut existing = Self::load_ticks_from_file(&path).map_err(DatabaseError::from)?;
             let existing_keys: std::collections::HashSet<i64> = existing.iter()
                 .map(|t| t.datetime.timestamp())
                 .collect();
@@ -730,7 +731,7 @@ impl BaseDatabase for FileDatabase {
                 existing.drain(0..existing.len() - 1_000_000);
             }
 
-            Self::save_ticks_to_file(&path, &existing)?;
+            Self::save_ticks_to_file(&path, &existing).map_err(DatabaseError::from)?;
 
             if stream {
                 tracing::debug!("Streamed {} ticks to {:?}", new_ticks.len(), path);
@@ -747,9 +748,9 @@ impl BaseDatabase for FileDatabase {
         interval: Interval,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<BarData>, String> {
+    ) -> Result<Vec<BarData>, DatabaseError> {
         let path = self.bar_file_path(symbol, exchange, interval);
-        let all_bars = Self::load_bars_from_file(&path)?;
+        let all_bars = Self::load_bars_from_file(&path).map_err(DatabaseError::from)?;
 
         let result: Vec<BarData> = all_bars
             .into_iter()
@@ -771,9 +772,9 @@ impl BaseDatabase for FileDatabase {
         exchange: Exchange,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<TickData>, String> {
+    ) -> Result<Vec<TickData>, DatabaseError> {
         let path = self.tick_file_path(symbol, exchange);
-        let all_ticks = Self::load_ticks_from_file(&path)?;
+        let all_ticks = Self::load_ticks_from_file(&path).map_err(DatabaseError::from)?;
 
         let result: Vec<TickData> = all_ticks
             .into_iter()
@@ -793,37 +794,37 @@ impl BaseDatabase for FileDatabase {
         symbol: &str,
         exchange: Exchange,
         interval: Interval,
-    ) -> Result<i64, String> {
+    ) -> Result<i64, DatabaseError> {
         let path = self.bar_file_path(symbol, exchange, interval);
         if !path.exists() {
             return Ok(0);
         }
 
-        let existing = Self::load_bars_from_file(&path)?;
+        let existing = Self::load_bars_from_file(&path).map_err(DatabaseError::from)?;
         let count = existing.len() as i64;
 
         std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to delete {:?}: {}", path, e))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to delete {:?}: {}", path, e)))?;
 
         Ok(count)
     }
 
-    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, String> {
+    async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {
         let path = self.tick_file_path(symbol, exchange);
         if !path.exists() {
             return Ok(0);
         }
 
-        let existing = Self::load_ticks_from_file(&path)?;
+        let existing = Self::load_ticks_from_file(&path).map_err(DatabaseError::from)?;
         let count = existing.len() as i64;
 
         std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to delete {:?}: {}", path, e))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to delete {:?}: {}", path, e)))?;
 
         Ok(count)
     }
 
-    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, String> {
+    async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError> {
         let bars_dir = self.base_dir.join("bars");
         if !bars_dir.exists() {
             return Ok(Vec::new());
@@ -831,17 +832,17 @@ impl BaseDatabase for FileDatabase {
 
         let mut overviews = Vec::new();
         let entries = std::fs::read_dir(&bars_dir)
-            .map_err(|e| format!("Failed to read bars directory: {}", e))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to read bars directory: {}", e)))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let entry = entry.map_err(|e| DatabaseError::Other(format!("Failed to read directory entry: {}", e)))?;
             let path = entry.path();
 
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
 
-            let bars = Self::load_bars_from_file(&path)?;
+            let bars = Self::load_bars_from_file(&path).map_err(DatabaseError::from)?;
             if bars.is_empty() {
                 continue;
             }
@@ -874,7 +875,7 @@ impl BaseDatabase for FileDatabase {
         Ok(overviews)
     }
 
-    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, String> {
+    async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError> {
         let ticks_dir = self.base_dir.join("ticks");
         if !ticks_dir.exists() {
             return Ok(Vec::new());
@@ -882,17 +883,17 @@ impl BaseDatabase for FileDatabase {
 
         let mut overviews = Vec::new();
         let entries = std::fs::read_dir(&ticks_dir)
-            .map_err(|e| format!("Failed to read ticks directory: {}", e))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to read ticks directory: {}", e)))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let entry = entry.map_err(|e| DatabaseError::Other(format!("Failed to read directory entry: {}", e)))?;
             let path = entry.path();
 
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
 
-            let ticks = Self::load_ticks_from_file(&path)?;
+            let ticks = Self::load_ticks_from_file(&path).map_err(DatabaseError::from)?;
             if ticks.is_empty() {
                 continue;
             }
@@ -922,7 +923,7 @@ impl BaseDatabase for FileDatabase {
         Ok(overviews)
     }
 
-    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, String> {
+    async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, DatabaseError> {
         // Group orders by gateway_name
         let mut groups: std::collections::HashMap<String, Vec<OrderData>> = std::collections::HashMap::new();
         for order in orders {
@@ -930,7 +931,7 @@ impl BaseDatabase for FileDatabase {
         }
         for (gw, new_orders) in groups {
             let path = self.order_file_path(&gw);
-            let mut existing = Self::load_orders_from_file(&path)?;
+            let mut existing = Self::load_orders_from_file(&path).map_err(DatabaseError::from)?;
             let existing_keys: std::collections::HashSet<String> = existing.iter()
                 .map(|o| o.vt_orderid())
                 .collect();
@@ -942,12 +943,12 @@ impl BaseDatabase for FileDatabase {
             if existing.len() > 100_000 {
                 existing.drain(0..existing.len() - 100_000);
             }
-            Self::save_orders_to_file(&path, &existing)?;
+            Self::save_orders_to_file(&path, &existing).map_err(DatabaseError::from)?;
         }
         Ok(true)
     }
 
-    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, String> {
+    async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, DatabaseError> {
         // Group trades by gateway_name
         let mut groups: std::collections::HashMap<String, Vec<TradeData>> = std::collections::HashMap::new();
         for trade in trades {
@@ -955,7 +956,7 @@ impl BaseDatabase for FileDatabase {
         }
         for (gw, new_trades) in groups {
             let path = self.trade_file_path(&gw);
-            let mut existing = Self::load_trades_from_file(&path)?;
+            let mut existing = Self::load_trades_from_file(&path).map_err(DatabaseError::from)?;
             let existing_keys: std::collections::HashSet<String> = existing.iter()
                 .map(|t| t.vt_tradeid())
                 .collect();
@@ -967,12 +968,12 @@ impl BaseDatabase for FileDatabase {
             if existing.len() > 100_000 {
                 existing.drain(0..existing.len() - 100_000);
             }
-            Self::save_trades_to_file(&path, &existing)?;
+            Self::save_trades_to_file(&path, &existing).map_err(DatabaseError::from)?;
         }
         Ok(true)
     }
 
-    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, String> {
+    async fn save_position_data(&self, positions: Vec<PositionData>) -> Result<bool, DatabaseError> {
         // Group positions by gateway_name
         let mut groups: std::collections::HashMap<String, Vec<PositionData>> = std::collections::HashMap::new();
         for position in positions {
@@ -980,64 +981,64 @@ impl BaseDatabase for FileDatabase {
         }
         for (gw, new_positions) in groups {
             let path = self.position_file_path(&gw);
-            let mut existing = Self::load_positions_from_file(&path)?;
+            let mut existing = Self::load_positions_from_file(&path).map_err(DatabaseError::from)?;
             // Upsert: replace existing positions with same ID
             for position in &new_positions {
                 let key = position.vt_positionid();
                 existing.retain(|p| p.vt_positionid() != key);
                 existing.push(position.clone());
             }
-            Self::save_positions_to_file(&path, &existing)?;
+            Self::save_positions_to_file(&path, &existing).map_err(DatabaseError::from)?;
         }
         Ok(true)
     }
 
-    async fn save_event(&self, event: EventRecord) -> Result<bool, String> {
+    async fn save_event(&self, event: EventRecord) -> Result<bool, DatabaseError> {
         let path = self.event_file_path();
-        let mut events = Self::load_events_from_file(&path)?;
+        let mut events = Self::load_events_from_file(&path).map_err(DatabaseError::from)?;
         events.push(event);
         if events.len() > 100_000 {
             events.drain(0..events.len() - 100_000);
         }
-        Self::save_events_to_file(&path, &events)?;
+        Self::save_events_to_file(&path, &events).map_err(DatabaseError::from)?;
         Ok(true)
     }
 
-    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, String> {
+    async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, DatabaseError> {
         match gateway_name {
             Some(gw) => {
                 let path = self.order_file_path(gw);
-                Self::load_orders_from_file(&path)
+                Self::load_orders_from_file(&path).map_err(DatabaseError::from)
             }
             None => {
                 let dir = self.base_dir.join("orders");
-                Self::load_all_from_dir(&dir)
+                Self::load_all_from_dir(&dir).map_err(DatabaseError::from)
             }
         }
     }
 
-    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, String> {
+    async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, DatabaseError> {
         match gateway_name {
             Some(gw) => {
                 let path = self.trade_file_path(gw);
-                Self::load_trades_from_file(&path)
+                Self::load_trades_from_file(&path).map_err(DatabaseError::from)
             }
             None => {
                 let dir = self.base_dir.join("trades");
-                Self::load_all_from_dir(&dir)
+                Self::load_all_from_dir(&dir).map_err(DatabaseError::from)
             }
         }
     }
 
-    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, String> {
+    async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, DatabaseError> {
         match gateway_name {
             Some(gw) => {
                 let path = self.position_file_path(gw);
-                Self::load_positions_from_file(&path)
+                Self::load_positions_from_file(&path).map_err(DatabaseError::from)
             }
             None => {
                 let dir = self.base_dir.join("positions");
-                Self::load_all_from_dir(&dir)
+                Self::load_all_from_dir(&dir).map_err(DatabaseError::from)
             }
         }
     }
