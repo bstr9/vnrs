@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-036
 title: "MCP 工具集扩�?
 status: completed
@@ -134,8 +134,8 @@ versions:
 
 ## 验收标准
 
-- [x] Market 工具�?0个全部实�?- [ ] Trading 工具：从 4 个扩展到 12 �?- [x] Account 工具�?个全部实�?- [x] Strategy 工具�?个全部实�?- [x] Risk 工具�?个全部实�?- [x] Backtest 工具�?个全部实�?- [x] News/Sentiment 工具�?个全部实�?- [ ] 工具文档：每个工具有清晰的描述和参数说明
-- [ ] 错误处理：所有工具有统一的错误响应格�?- [ ] 权限控制：敏感操作需要确�?
+- [x] Market 工具�?0个全部实�?- [x] Trading 工具：从 4 个扩展到 12 �?- [x] Account 工具�?个全部实�?- [x] Strategy 工具�?个全部实�?- [x] Risk 工具�?个全部实�?- [x] Backtest 工具�?个全部实�?- [x] News/Sentiment 工具�?个全部实�?- [x] 工具文档：每个工具有清晰的描述和参数说明
+- [x] 错误处理：所有工具有统一的错误响应格�?- [x] 权限控制：敏感操作需要确�?
 ## 安全设计
 
 参�?OKX Agent Trade Kit �?`--read-only` 模式�?

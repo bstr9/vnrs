@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-008
 title: "AsyncStrategy 异步策略接口"
 status: completed
@@ -45,11 +45,11 @@ fn target_weights(&self) -> HashMap<String, f64> {
 
 ## 验收标准
 
-- [ ] 定义 `AsyncStrategy` trait：async on_init/on_bar/on_tick
+- [x] 定义 `AsyncStrategy` trait：async on_init/on_bar/on_tick
 - [x] `target_weights()` 方法：返回组合权重向量（统一 RL/LLM/传统策略接口�?- [x] `drain_decisions()` 方法：返�?`Vec<DecisionRecord>`
 - [x] `DecisionRecord` 类型：timestamp, strategy, signal, confidence, features_used, model_version, inference_latency_us, orders_generated
 - [x] StrategyEngine 改造：支持 async 回调（tokio::spawn�?- [x] 保留现有同步 StrategyTemplate 不变（向后兼容）
-- [ ] 同步/异步策略可共�?
+- [x] 同步/异步策略可共�?
 ## 工作�?
 2-3 �?
 ## 设计参�?

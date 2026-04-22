@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-048
 title: "Gateway 模块零测试覆盖（7 个文件）"
 status: completed
@@ -31,7 +31,7 @@ versions:
 
 ## 验收标准
 - [x] 使用 mock HTTP 响应，不依赖真实交易所连接（MockGateway 实现完成）
-- [ ] `rest_client.rs` 添加签名逻辑单元测试（HMAC 签名验证）
-- [ ] `spot_gateway.rs` 添加订单解析测试（API 响应 → OrderData）
-- [ ] `usdt_gateway.rs` 添加合约订单解析测试
-- [ ] `websocket_client.rs` 添加消息路由测试
+- [x] `rest_client.rs` 添加签名逻辑单元测试（HMAC 签名验证）
+- [x] `spot_gateway.rs` 添加订单解析测试（API 响应 → OrderData）
+- [x] `usdt_gateway.rs` 添加合约订单解析测试
+- [x] `websocket_client.rs` 添加消息路由测试

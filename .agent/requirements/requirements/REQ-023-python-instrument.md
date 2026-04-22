@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-023
 title: "Instrument 元数据类（Python 端）"
 status: completed
@@ -33,12 +33,12 @@ Python 策略当前无法获取合约元信息（如最小价格变动 tick_size
 
 ## 验收标准
 
-- [ ] `PyInstrument` 类：symbol, exchange, name, tick_size, lot_size, min_notional, price_tick, multiplier, margin_rate
-- [ ] 策略可通过 `self.get_instrument(symbol)` 获取 Instrument 信息
-- [ ] Spot 网关：从 `/api/v3/exchangeInfo` 获取并缓存 Instrument
-- [ ] Futures 网关：从 `/fapi/v1/exchangeInfo` 获取并缓存 Instrument
-- [ ] Instrument 信息在网关连接时自动加载
-- [ ] 下单量自动取整辅助方法：`round_price(price)`, `round_volume(volume)`
+- [x] `PyInstrument` 类：symbol, exchange, name, tick_size, lot_size, min_notional, price_tick, multiplier, margin_rate
+- [x] 策略可通过 `self.get_instrument(symbol)` 获取 Instrument 信息
+- [x] Spot 网关：从 `/api/v3/exchangeInfo` 获取并缓存 Instrument
+- [x] Futures 网关：从 `/fapi/v1/exchangeInfo` 获取并缓存 Instrument
+- [x] Instrument 信息在网关连接时自动加载
+- [x] 下单量自动取整辅助方法：`round_price(price)`, `round_volume(volume)`
 
 ## 影响范围
 

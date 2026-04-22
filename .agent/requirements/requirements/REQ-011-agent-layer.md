@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-011
 title: "AI Agent �?
 status: completed
@@ -46,10 +46,10 @@ Agent 层是 AI-Native 架构的最上层，提供标准化�?Agent 接口�?M
 - [x] 新建 `src/agent/` 目录：mod.rs, agent.rs, mcp_bridge.rs, sentiment.rs, risk.rs, types.rs
 - [x] `Agent` trait：agent_name, agent_type, async observe/decide/feedback
 - [x] `AgentType` 枚举：SentimentAnalyst, TechnicalAnalyst, RiskAssessor, RLTrader, DebateParticipant
-- [ ] `McpBridge`：集�?MCP protocol，LLM 工具调用
-- [ ] `SentimentAgent` 示例：异步拉取新�?�?调用 LLM �?写入 FeatureStore
-- [ ] `RiskAssessorAgent` 示例：定期组合风险分�?�?生成风险报告
-- [ ] 可�?feature flag `agent`
+- [x] `McpBridge`：集�?MCP protocol，LLM 工具调用
+- [x] `SentimentAgent` 示例：异步拉取新�?�?调用 LLM �?写入 FeatureStore
+- [x] `RiskAssessorAgent` 示例：定期组合风险分�?�?生成风险报告
+- [x] 可�?feature flag `agent`
 
 ## 工作�?
 3-5 �?

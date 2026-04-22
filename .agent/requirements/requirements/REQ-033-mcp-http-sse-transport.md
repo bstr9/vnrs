@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-033
 title: "MCP HTTP/SSE Transport"
 status: completed
@@ -52,8 +52,8 @@ if std::env::var("MCP_MODE").is_ok() {
 - [x] 添加 HTTP/SSE transport 支持（使�?rmcp 或升级到 rust-mcp-sdk�?- [x] 实现 Streamable HTTP 规范（POST /mcp + SSE response�?- [x] 添加配置选项：transport type (stdio/http/sse)
 - [x] 添加端口配置：HTTP/SSE 监听端口
 - [x] 保持 STDIO 模式向后兼容
-- [ ] Web 客户端可连接并调�?Tools
-- [ ] 资源订阅通过 SSE 推送实时数�?
+- [x] Web 客户端可连接并调�?Tools
+- [x] 资源订阅通过 SSE 推送实时数�?
 ## 技术选项
 
 | SDK | 优势 | 劣势 |

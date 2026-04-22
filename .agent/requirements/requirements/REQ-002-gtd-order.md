@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-002
 title: "GTD (Good-Till-Date) 订单类型支持"
 status: completed
@@ -39,12 +39,12 @@ versions:
 
 - [x] `OrderType` 枚举添加 `Gtd` 变体
 - [x] `OrderRequest` 添加 `expire_time: Option<DateTime<Utc>>` 字段
-- [ ] Spot 网关：`timeInForce=GTD` + `goodTillDate=<timestamp>`
-- [ ] Futures 网关：`timeInForce=GTD` + `goodTillDate=<timestamp>`
-- [ ] 反向映射：Binance 返回的 GTD 订单正确映射回 `OrderType::Gtd`
-- [ ] RiskManager 对 GTD 订单的验证（过期时间必须在未来）
-- [ ] 所有现有 OrderRequest 构造点更新（添加 expire_time: None）
-- [ ] 测试覆盖
+- [x] Spot 网关：`timeInForce=GTD` + `goodTillDate=<timestamp>`
+- [x] Futures 网关：`timeInForce=GTD` + `goodTillDate=<timestamp>`
+- [x] 反向映射：Binance 返回的 GTD 订单正确映射回 `OrderType::Gtd`
+- [x] RiskManager 对 GTD 订单的验证（过期时间必须在未来）
+- [x] 所有现有 OrderRequest 构造点更新（添加 expire_time: None）
+- [x] 测试覆盖
 
 ## 工作量
 

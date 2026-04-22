@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-014
 title: "LMDB/Redis 可选持久化后端"
 status: completed
@@ -29,11 +29,11 @@ versions:
 - **Redis**：分布式、适合多进程部�?
 ## 验收标准
 
-- [ ] `LmdbDatabase` 实现 `BaseDatabase` trait
-- [ ] `RedisDatabase` 实现 `BaseDatabase` trait
-- [ ] 可�?feature flags：`lmdb`, `redis`
-- [ ] `MainEngine` 支持选择不同后端
-- [ ] �?SQLite 后端 API 一�?
+- [x] `LmdbDatabase` 实现 `BaseDatabase` trait
+- [x] `RedisDatabase` 实现 `BaseDatabase` trait
+- [x] 可�?feature flags：`lmdb`, `redis`
+- [x] `MainEngine` 支持选择不同后端
+- [x] �?SQLite 后端 API 一�?
 ## 依赖
 
 - `heed` �?`lmdb-rs` crate（可�?feature `lmdb`�?- `redis` crate（可�?feature `redis`�?- **可避�?*：先完善 SQLite 即可满足大部分需�?

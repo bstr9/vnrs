@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-006
 title: "Pegged 订单支持"
 status: completed
@@ -31,11 +31,11 @@ tesser 实现了：PeggedBest（追踪最优价）、Sniper（等待目标价）
 
 ## 验收标准
 
-- [ ] `OrderType` 枚举添加 Pegged 变体
-- [ ] `OrderRequest` 添加 pegged 相关字段（offset, peg_type）
-- [ ] 通过 `order_emulator.rs` 本地模拟（交易所不原生支持时）
-- [ ] PeggedBest：追踪最优买/卖价 ± offset
-- [ ] 价格变化时自动修改订单价格
+- [x] `OrderType` 枚举添加 Pegged 变体
+- [x] `OrderRequest` 添加 pegged 相关字段（offset, peg_type）
+- [x] 通过 `order_emulator.rs` 本地模拟（交易所不原生支持时）
+- [x] PeggedBest：追踪最优买/卖价 ± offset
+- [x] 价格变化时自动修改订单价格
 
 ## 工作量
 

@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-053
 title: "on_indicator() 回调无事件生产者"
 status: completed
@@ -24,6 +24,6 @@ versions:
 `src/strategy/template.rs:332` 中 `StrategyTemplate::on_indicator()` 方法已定义，但整个代码库中没有任何代码发送 indicator 事件。`StrategyEngine` 不 dispatch indicator 事件，`ArrayManager` 或其他指标计算模块也不产生此类事件。这个回调是死代码。
 
 ## 验收标准
-- [ ] 在 `StrategyEngine` 中添加 indicator 事件 dispatch 逻辑
-- [ ] `ArrayManager` 或指标计算模块在更新指标时发出 indicator 事件
-- [ ] Python 策略可通过 `on_indicator(name, value)` 接收指标更新
+- [x] 在 `StrategyEngine` 中添加 indicator 事件 dispatch 逻辑
+- [x] `ArrayManager` 或指标计算模块在更新指标时发出 indicator 事件
+- [x] Python 策略可通过 `on_indicator(name, value)` 接收指标更新

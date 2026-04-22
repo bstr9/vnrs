@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-003
 title: "Prometheus 指标监控"
 status: completed
@@ -31,8 +31,8 @@ versions:
 
 ## 验收标准
 
-- [ ] 添加 `prometheus` 可选 feature 到 Cargo.toml
-- [ ] 实现核心指标：
+- [x] 添加 `prometheus` 可选 feature 到 Cargo.toml
+- [x] 实现核心指标：
   - `vnrs_orders_total` (Counter, label: gateway, direction)
   - `vnrs_trades_total` (Counter, label: gateway, direction)
   - `vnrs_order_latency_seconds` (Histogram)
@@ -40,9 +40,9 @@ versions:
   - `vnrs_position_value` (Gauge, label: symbol)
   - `vnrs_pnl_total` (Gauge)
   - `vnrs_strategy_active` (Gauge)
-- [ ] MainEngine 添加 `start_metrics_server(addr)` 方法
-- [ ] 指标在订单/成交/tick/仓位更新时自动采集
-- [ ] 不启用 feature 时零开销
+- [x] MainEngine 添加 `start_metrics_server(addr)` 方法
+- [x] 指标在订单/成交/tick/仓位更新时自动采集
+- [x] 不启用 feature 时零开销
 
 ## 依赖
 

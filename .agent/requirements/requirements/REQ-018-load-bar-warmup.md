@@ -49,7 +49,7 @@ versions:
 - [x] 返回的 `PyBarData` 包含完整的 OHLCV + 时间信息
 - [x] 同理 `load_tick()` 也已实现（Rust 层 get_history_ticks() 已实现，Python 绑定已接线）
 - [x] 回测策略 on_init 中调用 load_bar 能正确拿到历史 Bar
-- [ ] 测试：Python 策略 on_init 中 load_bar(5) 返回 5 天的 Bar 数据
+- [x] 测试：Python 策略 on_init 中 load_bar(5) 返回 5 天的 Bar 数据
 
 ## 影响范围
 

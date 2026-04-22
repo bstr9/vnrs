@@ -38,7 +38,7 @@ versions:
 - [x] `OptimizationTarget::Custom` 接受用户提供的评估闭包 `Box<dyn Fn(&BacktestResult) -> f64>`
 - [x] `evaluate()` 调用用户闭包并返回实际结果
 - [x] 闭包在优化循环中被正确调用
-- [ ] 测试：自定义优化目标返回正确的评估值
+- [x] 测试：自定义优化目标返回正确的评估值
 
 ## 影响范围
 

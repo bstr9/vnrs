@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-066
 title: "高级订单类型暴露——Python API + GUI 面板（模拟单/止损单引擎管理）"
 status: completed
@@ -57,21 +57,21 @@ GUI 是用户主要入口，因此除了 Python API，还需要 GUI 管理面板
 ## 验收标准
 
 ### OrderEmulator Python 接口
-- [ ] `PyOrderEmulator` 类暴露 `add_trailing_stop_pct()` 方法
-- [ ] `PyOrderEmulator` 类暴露 `add_trailing_stop_abs()` 方法
-- [ ] `PyOrderEmulator` 类暴露 `add_stop_limit()` 方法
-- [ ] `PyOrderEmulator` 类暴露 `add_iceberg()` 方法
-- [ ] `PyOrderEmulator` 类暴露 `add_mit()` 方法
-- [ ] `PyOrderEmulator` 类暴露 `add_lit()` 方法
-- [ ] `PyOrderEmulator` 类暴露 `cancel_order()` 方法
-- [ ] `PyOrderEmulator` 类暴露 `get_active_orders()` 查询方法
-- [ ] Python 通过 `engine.order_emulator` 访问
+- [x] `PyOrderEmulator` 类暴露 `add_trailing_stop_pct()` 方法
+- [x] `PyOrderEmulator` 类暴露 `add_trailing_stop_abs()` 方法
+- [x] `PyOrderEmulator` 类暴露 `add_stop_limit()` 方法
+- [x] `PyOrderEmulator` 类暴露 `add_iceberg()` 方法
+- [x] `PyOrderEmulator` 类暴露 `add_mit()` 方法
+- [x] `PyOrderEmulator` 类暴露 `add_lit()` 方法
+- [x] `PyOrderEmulator` 类暴露 `cancel_order()` 方法
+- [x] `PyOrderEmulator` 类暴露 `get_active_orders()` 查询方法
+- [x] Python 通过 `engine.order_emulator` 访问
 
 ### StopOrderEngine Python 接口（补充）
-- [ ] `PyStopOrderEngine` 类暴露 `get_active_stop_orders()` 查询
-- [ ] `PyStopOrderEngine` 类暴露 `cancel_stop_order()` 直接管理
-- [ ] `PyStopOrderEngine` 类暴露 `cancel_orders_for_symbol()` 批量撤销
-- [ ] Python 通过 `engine.stop_order_engine` 访问
+- [x] `PyStopOrderEngine` 类暴露 `get_active_stop_orders()` 查询
+- [x] `PyStopOrderEngine` 类暴露 `cancel_stop_order()` 直接管理
+- [x] `PyStopOrderEngine` 类暴露 `cancel_orders_for_symbol()` 批量撤销
+- [x] Python 通过 `engine.stop_order_engine` 访问
 
 ### GUI 模拟单管理面板
 - [x] 新增"模拟订单"标签页，展示所有活跃模拟单
@@ -90,7 +90,7 @@ GUI 是用户主要入口，因此除了 Python API，还需要 GUI 管理面板
 
 ### 集成要求
 - [x] 依赖 REQ-064 完成回调绑定后，Python API 和 GUI 才能正常工作
-- [ ] Python 示例：添加使用 OrderEmulator 的示例
+- [x] Python 示例：添加使用 OrderEmulator 的示例
 
 ## 影响范围
 

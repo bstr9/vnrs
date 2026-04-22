@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-007
 title: "FeatureStore 特征存储"
 status: completed
@@ -33,12 +33,12 @@ versions:
 FeatureStore �?AI-Native 架构的基础层，为模型推理提供统一的特征访问接口�?
 ## 验收标准
 
-- [ ] 新建 `src/feature/` 目录结构：mod.rs, store.rs, online.rs, offline.rs, registry.rs, snapshot.rs, types.rs
-- [ ] `FeatureId` 类型（如 `"btcusdt_close_price_1m"`�?- [ ] `FeatureVector`：entity + timestamp + HashMap<FeatureId, f64>
-- [ ] `FeatureDefinition`：id + expression + version + dependencies + dtype
-- [ ] `OnlineStore`：DashMap<String, FeatureVector>�?1us �?- [ ] `OfflineStore`：Parquet 存储，回测用
-- [ ] `FeatureRegistry`：定义、版本、血缘追�?- [ ] `get_online()`：实时特征获�?- [ ] `get_at()`：时间旅行（回测用）
-- [ ] `materialize()`：从 Bar/Tick 计算并存储特�?- [ ] `snapshot()`：创建快�?- [ ] 可�?feature flag `feature-store`
+- [x] 新建 `src/feature/` 目录结构：mod.rs, store.rs, online.rs, offline.rs, registry.rs, snapshot.rs, types.rs
+- [x] `FeatureId` 类型（如 `"btcusdt_close_price_1m"`�?- [x] `FeatureVector`：entity + timestamp + HashMap<FeatureId, f64>
+- [x] `FeatureDefinition`：id + expression + version + dependencies + dtype
+- [x] `OnlineStore`：DashMap<String, FeatureVector>�?1us �?- [x] `OfflineStore`：Parquet 存储，回测用
+- [x] `FeatureRegistry`：定义、版本、血缘追�?- [x] `get_online()`：实时特征获�?- [x] `get_at()`：时间旅行（回测用）
+- [x] `materialize()`：从 Bar/Tick 计算并存储特�?- [x] `snapshot()`：创建快�?- [x] 可�?feature flag `feature-store`
 
 ## 依赖
 

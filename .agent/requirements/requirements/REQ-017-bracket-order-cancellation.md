@@ -39,7 +39,7 @@ versions:
 - [x] 通过 OmsEngine 或直接调用网关发送取消请求
 - [x] 更新 BracketOrder 状态为 Cancelled
 - [x] 已成交的子订单不可取消（仅取消未成交的）
-- [ ] 测试：取消括号订单后，所有未成交子订单状态变为 Cancelled
+- [x] 测试：取消括号订单后，所有未成交子订单状态变为 Cancelled
 
 ## 影响范围
 

@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-070
 title: "Alpha 模块暴露——Python API + GUI 量化研究面板"
 status: completed
@@ -47,24 +47,24 @@ Alpha 模块（`src/alpha/`）是 vnrs 的量化研究平台，包含：
 - [x] `PyAlphaModel` 基类暴露 `fit(X, y)` 训练方法
 - [x] `PyAlphaModel` 基类暴露 `predict(X)` 预测方法
 - [x] 暴露 LinearRegression / Ridge / Lasso 模型类
-- [ ] 暴露 RandomForest 模型类
+- [x] 暴露 RandomForest 模型类
 - [x] 暴露 XGBoost 模型类（如已实现）
 
 ### 因子分析 Python 接口
-- [ ] 暴露因子计算函数
-- [ ] 暴露截面分析函数
-- [ ] 暴露 Alpha 组合权重计算
+- [x] 暴露因子计算函数
+- [x] 暴露截面分析函数
+- [x] 暴露 Alpha 组合权重计算
 
 ### 集成
-- [ ] Python 可从 Alpha 模型输出直接创建策略信号
-- [ ] Python 可将因子分析结果传递给回测引擎
+- [x] Python 可从 Alpha 模型输出直接创建策略信号
+- [x] Python 可将因子分析结果传递给回测引擎
 
 ### GUI 量化研究面板
-- [ ] 新增"Alpha 研究"标签页
-- [ ] 模型训练面板：选择模型类型、配置超参数、开始训练、显示训练进度
-- [ ] 因子分析面板：选择因子、运行截面分析、显示因子分布图
-- [ ] Alpha 组合面板：查看组合权重、回测 Alpha 信号
-- [ ] 模型管理：保存/加载/删除已训练模型
+- [x] 新增"Alpha 研究"标签页
+- [x] 模型训练面板：选择模型类型、配置超参数、开始训练、显示训练进度
+- [x] 因子分析面板：选择因子、运行截面分析、显示因子分布图
+- [x] Alpha 组合面板：查看组合权重、回测 Alpha 信号
+- [x] 模型管理：保存/加载/删除已训练模型
 
 ## 影响范围
 

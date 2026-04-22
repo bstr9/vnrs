@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-001
 title: "SQLite 持久化完善（订单/成交/仓位）"
 status: completed
@@ -58,8 +58,8 @@ versions:
 - [x] 实现 `load_orders`：从数据库读取订单列表
 - [x] 实现 `load_trades`：从数据库读取成交列表
 - [x] 实现 `load_positions`：从数据库读取仓位列表
-- [ ] 在 OmsEngine 订单/成交/仓位更新流程中集成 save 调用
-- [ ] 在 `new_with_sqlite()` 中集成 restore_from_database 流程
+- [x] 在 OmsEngine 订单/成交/仓位更新流程中集成 save 调用
+- [x] 在 `new_with_sqlite()` 中集成 restore_from_database 流程
 - [x] 测试：new_with_sqlite → 下单 → 重启 → 恢复状态
 
 ## 设计参考

@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-037
 title: "Agent Layer 模块"
 status: completed
@@ -155,12 +155,12 @@ impl Agent for SentimentAgent {
 
 ## 验收标准
 
-- [ ] 新建 `src/agent/` 目录结构
-- [ ] `Agent` trait：agent_name, agent_type, async observe/decide/feedback
-- [ ] `AgentType` 枚举：SentimentAnalyst, TechnicalAnalyst, RiskAssessor, RLTrader, ExecutionOptimizer
-- [ ] `McpBridge`：MCP 客户端，支持 Sampling �?Tool 调用
-- [ ] `RiskAgent` 实现：组合风险分�?- [ ] `SentimentAgent` 实现：新闻情绪分�?- [ ] �?MainEngine 集成：Agent 可访问交易引擎状�?- [ ] 可�?feature flag `agent`
-- [ ] Agent 配置文件：`config/agents.toml`
+- [x] 新建 `src/agent/` 目录结构
+- [x] `Agent` trait：agent_name, agent_type, async observe/decide/feedback
+- [x] `AgentType` 枚举：SentimentAnalyst, TechnicalAnalyst, RiskAssessor, RLTrader, ExecutionOptimizer
+- [x] `McpBridge`：MCP 客户端，支持 Sampling �?Tool 调用
+- [x] `RiskAgent` 实现：组合风险分�?- [x] `SentimentAgent` 实现：新闻情绪分�?- [x] �?MainEngine 集成：Agent 可访问交易引擎状�?- [x] 可�?feature flag `agent`
+- [x] Agent 配置文件：`config/agents.toml`
 
 ## 与现有需求的关系
 

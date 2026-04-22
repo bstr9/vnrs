@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-009
 title: "ModelRegistry 模型注册与服�?
 status: completed
@@ -38,12 +38,12 @@ versions:
 **推荐**: 默认 `ort` 用于结构化模型，`candle` 用于文本/情绪，ZMQ 桥接 Python 研究�?
 ## 验收标准
 
-- [ ] 新建 `src/model/` 目录：mod.rs, registry.rs, server.rs, onnx.rs, candle.rs, grpc.rs, types.rs
-- [ ] `ModelStage` 枚举：Development, Staging, Shadow, Canary, Production, Archived
-- [ ] `ModelEntry`：model_id, version, stage, artifact_path, metrics, feature_ids
-- [ ] `ModelRegistry`：SQLite 后端存储模型元数据，阶段状态机
-- [ ] `ModelServer` trait：async predict, model_info, health
-- [ ] `OnnxModelServer` 实现（需 `ort` crate，可�?feature `ml-inference`�?- [ ] `ZmqModelServer` 实现（利用现�?RPC 基础设施�?- [ ] 可�?feature flags：`ml-inference`, `ml-local`, `ml-tract`, `ml-grpc`, `ml-full`
+- [x] 新建 `src/model/` 目录：mod.rs, registry.rs, server.rs, onnx.rs, candle.rs, grpc.rs, types.rs
+- [x] `ModelStage` 枚举：Development, Staging, Shadow, Canary, Production, Archived
+- [x] `ModelEntry`：model_id, version, stage, artifact_path, metrics, feature_ids
+- [x] `ModelRegistry`：SQLite 后端存储模型元数据，阶段状态机
+- [x] `ModelServer` trait：async predict, model_info, health
+- [x] `OnnxModelServer` 实现（需 `ort` crate，可�?feature `ml-inference`�?- [x] `ZmqModelServer` 实现（利用现�?RPC 基础设施�?- [x] 可�?feature flags：`ml-inference`, `ml-local`, `ml-tract`, `ml-grpc`, `ml-full`
 
 ## 依赖
 

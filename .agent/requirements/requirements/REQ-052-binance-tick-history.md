@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-052
 title: "BinanceDatafeed tick 级历史数据不可用"
 status: completed
@@ -25,5 +25,5 @@ versions:
 
 ## 验收标准
 - [x] 支持从已录制的数据库（SQLite/Parquet）加载 tick 历史数据
-- [ ] 在 `BaseDatafeed::query_tick_history()` 默认实现中查找数据库回退路径
-- [ ] Python 端 `load_tick()` 在回测模式下可返回 tick 数据
+- [x] 在 `BaseDatafeed::query_tick_history()` 默认实现中查找数据库回退路径
+- [x] Python 端 `load_tick()` 在回测模式下可返回 tick 数据

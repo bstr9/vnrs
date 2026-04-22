@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-034
 title: "MCP Sampling 支持"
 status: completed
@@ -83,11 +83,11 @@ async fn suggest_strategy_params(&self, strategy_id: String, metrics: BacktestMe
 
 ## 验收标准
 
-- [ ] 实现 `ctx.session.create_message()` Sampling API
-- [x] 添加 Sampling 参数配置（max_tokens, temperature, model preference�?- [ ] 实现 human-in-the-loop 审批机制
-- [x] 添加 Sampling 调用日志和审�?- [ ] 示例 Tool: `analyze_sentiment` 使用 Sampling
-- [ ] 示例 Tool: `suggest_strategy_params` 使用 Sampling
-- [ ] 错误处理：LLM 不可用时�?fallback
+- [x] 实现 `ctx.session.create_message()` Sampling API
+- [x] 添加 Sampling 参数配置（max_tokens, temperature, model preference�?- [x] 实现 human-in-the-loop 审批机制
+- [x] 添加 Sampling 调用日志和审�?- [x] 示例 Tool: `analyze_sentiment` 使用 Sampling
+- [x] 示例 Tool: `suggest_strategy_params` 使用 Sampling
+- [x] 错误处理：LLM 不可用时�?fallback
 
 ## 安全考虑
 

@@ -39,29 +39,29 @@ ArrayManager（`src/trader/utility.rs`）是 vnrs 的核心技术指标计算模
 ## 验收标准
 
 ### PyArrayManager 类
-- [ ] `PyArrayManager` 类暴露 `update(bar_data)` 方法
-- [ ] `PyArrayManager` 类暴露 `inited` 属性（数据是否足够计算指标）
-- [ ] `PyArrayManager` 类暴露 `size` 属性（已缓存数据条数）
+- [x] `PyArrayManager` 类暴露 `update(bar_data)` 方法
+- [x] `PyArrayManager` 类暴露 `inited` 属性（数据是否足够计算指标）
+- [x] `PyArrayManager` 类暴露 `size` 属性（已缓存数据条数）
 
 ### 趋势指标
-- [ ] `sma(n)` 简单移动平均
-- [ ] `ema(n)` 指数移动平均
-- [ ] `macd(fast, slow, signal)` MACD 指标
-- [ ] `adx(n)` 平均趋向指标
+- [x] `sma(n)` 简单移动平均
+- [x] `ema(n)` 指数移动平均
+- [x] `macd(fast, slow, signal)` MACD 指标
+- [x] `adx(n)` 平均趋向指标
 
 ### 震荡指标
-- [ ] `rsi(n)` 相对强弱指标
-- [ ] `kdj(n, m1, m2)` 随机指标
-- [ ] `cci(n)` 商品通道指标
+- [x] `rsi(n)` 相对强弱指标
+- [x] `kdj(n, m1, m2)` 随机指标
+- [x] `cci(n)` 商品通道指标
 
 ### 波动指标
-- [ ] `atr(n)` 真实波幅
-- [ ] `boll(n, dev)` 布林带（upper, middle, lower）
+- [x] `atr(n)` 真实波幅
+- [x] `boll(n, dev)` 布林带（upper, middle, lower）
 
 ### 集成
-- [ ] Python 策略可通过 StrategyContext 获取 PyArrayManager
-- [ ] PyArrayManager 在 on_bar 中自动更新
-- [ ] 添加 Python 使用 ArrayManager 的示例
+- [x] Python 策略可通过 StrategyContext 获取 PyArrayManager
+- [x] PyArrayManager 在 on_bar 中自动更新
+- [x] 添加 Python 使用 ArrayManager 的示例
 
 ## 影响范围
 

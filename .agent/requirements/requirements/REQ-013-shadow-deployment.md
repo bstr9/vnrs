@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-013
 title: "Shadow Deployment 影子部署"
 status: completed
@@ -30,7 +30,7 @@ versions:
 
 - [x] ModelStage::Shadow 阶段定义
 - [x] Shadow 模式下：模型接收数据 �?产生预测 �?记录�?DecisionAudit �?**不产生交�?*
-- [x] 预测 vs 实际结果的对比分�?- [x] 影子模型性能指标：准确率、夏普、最大回撤（虚拟�?- [ ] �?Shadow �?Canary 的晋升条件（性能达标自动建议�?- [ ] �?ModelRegistry (REQ-009) �?DecisionAudit 集成
+- [x] 预测 vs 实际结果的对比分�?- [x] 影子模型性能指标：准确率、夏普、最大回撤（虚拟�?- [x] �?Shadow �?Canary 的晋升条件（性能达标自动建议�?- [x] �?ModelRegistry (REQ-009) �?DecisionAudit 集成
 
 ## 依赖
 

@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-012
 title: "RL Environment 强化学习环境"
 status: completed
@@ -27,14 +27,14 @@ versions:
 基于现有回测引擎构建 gym 兼容�?RL 训练环境，支�?stable-baselines3 �?ray[rllib]�?
 ## 验收标准
 
-- [ ] 新建 `src/rl/` 目录：mod.rs, env.rs, action.rs, reward.rs, observation.rs, python.rs
-- [ ] `TradingEnv`：reset() �?Observation, step(action) �?(Observation, reward, done, info)
-- [ ] `ActionMapper` trait：离�?连续 action �?Vec<OrderRequest>
-- [ ] `RewardFunction` trait：compute(prev, curr, action) �?f64
+- [x] 新建 `src/rl/` 目录：mod.rs, env.rs, action.rs, reward.rs, observation.rs, python.rs
+- [x] `TradingEnv`：reset() �?Observation, step(action) �?(Observation, reward, done, info)
+- [x] `ActionMapper` trait：离�?连续 action �?Vec<OrderRequest>
+- [x] `RewardFunction` trait：compute(prev, curr, action) �?f64
 - [x] 内置 reward：SharpeReward, PnlReward, RiskAdjustedReward
-- [ ] PyO3 导出：Python 可直接使�?TradingEnv
-- [ ] 兼容 stable-baselines3, ray[rllib]
-- [ ] 可�?feature flag `rl`
+- [x] PyO3 导出：Python 可直接使�?TradingEnv
+- [x] 兼容 stable-baselines3, ray[rllib]
+- [x] 可�?feature flag `rl`
 
 ## 工作�?
 2-3 �?

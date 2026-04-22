@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-035
 title: "MCP Prompts 模板"
 status: completed
@@ -69,13 +69,13 @@ def pre_trade_check(symbol: str, timeframe: str = "1H") -> str:
 
 ## 验收标准
 
-- [ ] 实现 `#[prompt]` 宏或等效 API
-- [ ] 添加 `list_prompts` MCP 方法
-- [ ] 添加 `get_prompt` MCP 方法
-- [ ] 实现 5+ 个交易相�?prompt 模板
-- [ ] 实现 3+ 个策略相�?prompt 模板
-- [ ] 实现 3+ 个风控相�?prompt 模板
-- [x] 支持 prompt 参数化和默认�?- [ ] Prompt 列表可从 Claude Desktop 访问
+- [x] 实现 `#[prompt]` 宏或等效 API
+- [x] 添加 `list_prompts` MCP 方法
+- [x] 添加 `get_prompt` MCP 方法
+- [x] 实现 5+ 个交易相�?prompt 模板
+- [x] 实现 3+ 个策略相�?prompt 模板
+- [x] 实现 3+ 个风控相�?prompt 模板
+- [x] 支持 prompt 参数化和默认�?- [x] Prompt 列表可从 Claude Desktop 访问
 
 ## 示例实现
 

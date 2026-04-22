@@ -46,25 +46,25 @@ versions:
 ## 验收标准
 
 ### Python API
-- [ ] `PyBacktestingEngine.set_fill_model(model_name)` 方法
-- [ ] 支持字符串选择："best_price"、"ideal"、"two_tier"、"size_aware"、"probabilistic"
-- [ ] 默认仍为 "best_price"（向后兼容）
+- [x] `PyBacktestingEngine.set_fill_model(model_name)` 方法
+- [x] 支持字符串选择："best_price"、"ideal"、"two_tier"、"size_aware"、"probabilistic"
+- [x] 默认仍为 "best_price"（向后兼容）
 
 ### GUI 回测配置面板
-- [ ] 新增"回测配置"面板或对话框
-- [ ] 填充模型下拉框：5 种模型可选，每种附带简短描述
-- [ ] 手续费率输入框（rate，默认 0.0003）
-- [ ] 滑点输入框（slippage，默认 0.0）
-- [ ] 初始资金输入框（capital，默认 1,000,000）
-- [ ] 合约选择器（vt_symbol）
-- [ ] 时间范围选择器（开始/结束日期）
-- [ ] K线周期选择器（1m/5m/15m/1h/1d）
-- [ ] "开始回测"按钮，运行后显示统计结果
-- [ ] 回测统计结果面板：总收益、年化收益、夏普比率、最大回撤、胜率
+- [x] 新增"回测配置"面板或对话框
+- [x] 填充模型下拉框：5 种模型可选，每种附带简短描述
+- [x] 手续费率输入框（rate，默认 0.0003）
+- [x] 滑点输入框（slippage，默认 0.0）
+- [x] 初始资金输入框（capital，默认 1,000,000）
+- [x] 合约选择器（vt_symbol）
+- [x] 时间范围选择器（开始/结束日期）
+- [x] K线周期选择器（1m/5m/15m/1h/1d）
+- [x] "开始回测"按钮，运行后显示统计结果
+- [x] 回测统计结果面板：总收益、年化收益、夏普比率、最大回撤、胜率
 
 ### Rust API
-- [ ] BacktestingEngine 提供构造时或运行前设置填充模型的方法
-- [ ] 填充模型选择影响回测统计结果
+- [x] BacktestingEngine 提供构造时或运行前设置填充模型的方法
+- [x] 填充模型选择影响回测统计结果
 
 ## 影响范围
 

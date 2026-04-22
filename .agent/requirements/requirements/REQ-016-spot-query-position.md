@@ -41,7 +41,7 @@ versions:
 - [x] 将非零余额映射为 `PositionData`（direction=Long, volume=free+locked）
 - [x] 通过事件引擎发送 `EventPosition(PositionData)` 
 - [x] 不影响 Futures 网关现有实现
-- [ ] 测试：Spot 网关 query_position 返回正确的 PositionData
+- [x] 测试：Spot 网关 query_position 返回正确的 PositionData
 
 ## 影响范围
 
