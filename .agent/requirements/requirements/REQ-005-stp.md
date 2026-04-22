@@ -31,11 +31,11 @@ versions:
 
 ## 验收标准
 
-- [ ] 定义 `StpMode` 枚举：CancelTaker, CancelMaker, CancelBoth
-- [ ] 在订单提交前检查是否存在对手方自成交可能
-- [ ] 根据 StpMode 决定取消哪一方
-- [ ] 可在策略级或全局级配置 StpMode
-- [ ] 自成交被阻止时产生告警事件
+- [x] 定义 `StpMode` 枚举：CancelTaker, CancelMaker, CancelBoth
+- [x] 在订单提交前检查是否存在对手方自成交可能
+- [x] 根据 StpMode 决定取消哪一方
+- [x] 可在策略级或全局级配置 StpMode
+- [x] 自成交被阻止时产生告警事件
 
 ## 工作量
 

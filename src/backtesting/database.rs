@@ -470,6 +470,7 @@ mod tests {
         drop(loader);
     }
 
+    #[cfg(not(feature = "database"))]
     #[tokio::test]
     async fn test_database_loader_connect_without_feature() {
         let mut loader = DatabaseLoader::new();
@@ -478,6 +479,7 @@ mod tests {
         assert!(result.expect_err("should be error").contains("数据库功能未启用"));
     }
 
+    #[cfg(not(feature = "database"))]
     #[tokio::test]
     async fn test_database_loader_load_bar_data_without_feature() {
         let loader = DatabaseLoader::new();
@@ -492,6 +494,7 @@ mod tests {
         assert!(result.expect_err("should be error").contains("数据库功能未启用"));
     }
 
+    #[cfg(not(feature = "database"))]
     #[tokio::test]
     async fn test_database_loader_load_tick_data_without_feature() {
         let loader = DatabaseLoader::new();
