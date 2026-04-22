@@ -353,7 +353,25 @@ impl RiskManager {
             ));
         }
 
-        // 11. Check reduce_only validity - Reduce-Only requires existing position
+        // 11. Check Gtd expire_time - must be in the future if present
+        if req.order_type == super::constant::OrderType::Gtd {
+            match req.expire_time {
+                Some(expire_time) if expire_time <= Utc::now() => {
+                    return RiskCheckResult::Rejected(format!(
+                        "GTD order expire_time {:?} is in the past",
+                        expire_time
+                    ));
+                }
+                None => {
+                    return RiskCheckResult::Rejected(
+                        "GTD order requires expire_time to be set".to_string(),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        // 12. Check reduce_only validity - Reduce-Only requires existing position
         // Note: We can't fully validate reduce_only without knowing the current position size
         // The exchange will reject if position doesn't exist. We just log a warning here.
         // (Risk manager doesn't track per-direction positions, only net position)
@@ -826,5 +844,70 @@ mod tests {
         };
         rm.update_account(&account);
         assert_eq!(rm.get_available_balance("BINANCE_SPOT"), Some(7000.0));
+    }
+
+    #[test]
+    fn test_risk_manager_gtd_no_expire_time_rejected() {
+        let rm = RiskManager::new();
+        let req = OrderRequest {
+            symbol: "btcusdt".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: crate::trader::constant::OrderType::Gtd,
+            offset: Offset::None,
+            price: 50000.0,
+            volume: 0.01,
+            reference: String::new(),
+            post_only: false,
+            reduce_only: false,
+            expire_time: None,
+            gateway_name: String::new(),
+        };
+        let result = rm.check_order(&req);
+        assert!(matches!(result, RiskCheckResult::Rejected(_)));
+    }
+
+    #[test]
+    fn test_risk_manager_gtd_past_expire_time_rejected() {
+        let rm = RiskManager::new();
+        let past_time = Utc::now() - chrono::Duration::hours(1);
+        let req = OrderRequest {
+            symbol: "btcusdt".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: crate::trader::constant::OrderType::Gtd,
+            offset: Offset::None,
+            price: 50000.0,
+            volume: 0.01,
+            reference: String::new(),
+            post_only: false,
+            reduce_only: false,
+            expire_time: Some(past_time),
+            gateway_name: String::new(),
+        };
+        let result = rm.check_order(&req);
+        assert!(matches!(result, RiskCheckResult::Rejected(_)));
+    }
+
+    #[test]
+    fn test_risk_manager_gtd_future_expire_time_approved() {
+        let rm = RiskManager::new();
+        let future_time = Utc::now() + chrono::Duration::hours(1);
+        let req = OrderRequest {
+            symbol: "btcusdt".to_string(),
+            exchange: Exchange::Binance,
+            direction: Direction::Long,
+            order_type: crate::trader::constant::OrderType::Gtd,
+            offset: Offset::None,
+            price: 50000.0,
+            volume: 0.01,
+            reference: String::new(),
+            post_only: false,
+            reduce_only: false,
+            expire_time: Some(future_time),
+            gateway_name: String::new(),
+        };
+        let result = rm.check_order(&req);
+        assert!(matches!(result, RiskCheckResult::Approved));
     }
 }

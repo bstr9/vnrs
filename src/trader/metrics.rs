@@ -5,8 +5,9 @@
 //! and collects core trading metrics automatically via the `BaseEngine` trait.
 
 use once_cell::sync::Lazy;
-use prometheus::{Counter, Gauge, Registry, TextEncoder, opts};
+use prometheus::{Counter, Gauge, Histogram, Registry, TextEncoder, histogram_opts, opts};
 
+use super::constant::Status;
 use super::engine::BaseEngine;
 use super::gateway::GatewayEvent;
 
@@ -45,6 +46,14 @@ pub static BALANCE: Lazy<Gauge> = Lazy::new(|| {
     Gauge::with_opts(opts!("vnrs_balance", "Account balance").namespace("vnrs")).unwrap()
 });
 
+pub static ORDER_LATENCY: Lazy<Histogram> = Lazy::new(|| {
+    Histogram::with_opts(histogram_opts!(
+        "vnrs_order_latency_seconds",
+        "Order submission-to-fill latency in seconds",
+        vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0]
+    ).namespace("vnrs")).unwrap()
+});
+
 // ---------------------------------------------------------------------------
 // Initialization — register all metrics with the custom registry
 // ---------------------------------------------------------------------------
@@ -69,6 +78,7 @@ pub fn init() {
     register!(PNL_TOTAL);
     register!(STRATEGY_ACTIVE);
     register!(BALANCE);
+    register!(ORDER_LATENCY);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,8 +105,17 @@ impl BaseEngine for MetricsEngine {
             GatewayEvent::Tick(_) => {
                 TICK_COUNT.inc();
             }
-            GatewayEvent::Order(_) => {
+            GatewayEvent::Order(order) => {
                 ORDERS_TOTAL.inc();
+                if matches!(order.status, Status::AllTraded | Status::PartTraded) {
+                    if let Some(create_time) = order.datetime {
+                        let elapsed = (chrono::Utc::now() - create_time)
+                            .to_std()
+                            .map(|d| d.as_secs_f64())
+                            .unwrap_or(0.0);
+                        ORDER_LATENCY.observe(elapsed);
+                    }
+                }
             }
             GatewayEvent::Trade(_) => {
                 TRADES_TOTAL.inc();

@@ -18,7 +18,7 @@ use super::websocket_client::{BinanceWebSocketClient, WsMessageHandler};
 use crate::trader::{
     AccountData, BarData, CancelRequest, ContractData, DepthData, Direction, Exchange,
     GatewayEventSender, GatewaySettings, GatewaySettingValue,
-    HistoryRequest, Offset, OrderData, OrderRequest,
+    HistoryRequest, Offset, OrderData, OrderRequest, OrderType,
     PositionData, Product, Status, SubscribeRequest, TickData, TradeData,
 };
 use crate::trader::gateway::BaseGateway;
@@ -213,9 +213,13 @@ impl BinanceUsdtGateway {
         if let Some(orders) = data.as_array() {
             for d in orders {
                 let order_type_str = d["type"].as_str().unwrap_or("");
-                let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                let tif_str = d["timeInForce"].as_str().unwrap_or("");
+                let order_type = match ORDERTYPE_BINANCE2VT_FUTURES.get(&(order_type_str, tif_str)) {
                     Some(t) => *t,
-                    None => continue,
+                    None => match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                        Some(t) => *t,
+                        None => continue,
+                    },
                 };
 
                 let status_str = d["status"].as_str().unwrap_or("");
@@ -533,9 +537,13 @@ impl BinanceUsdtGateway {
                         };
 
                         let order_type_str = order_data["o"].as_str().unwrap_or("");
-                        let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                        let tif_str = order_data["f"].as_str().unwrap_or("");
+                        let order_type = match ORDERTYPE_BINANCE2VT_FUTURES.get(&(order_type_str, tif_str)) {
                             Some(t) => *t,
-                            None => return,
+                            None => match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                Some(t) => *t,
+                                None => return,
+                            },
                         };
 
                         let orderid = if order_data["C"].as_str().unwrap_or("").is_empty() {
@@ -959,9 +967,13 @@ impl BaseGateway for BinanceUsdtGateway {
                                     if let Some(orders_arr) = data.as_array() {
                                         for d in orders_arr {
                                             let order_type_str = d["type"].as_str().unwrap_or("");
-                                            let order_type = match super::constants::ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                            let tif_str = d["timeInForce"].as_str().unwrap_or("");
+                                            let order_type = match super::constants::ORDERTYPE_BINANCE2VT_FUTURES.get(&(order_type_str, tif_str)) {
                                                 Some(t) => *t,
-                                                None => continue,
+                                                None => match super::constants::ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                                    Some(t) => *t,
+                                                    None => continue,
+                                                },
                                             };
 
                                             let status_str = d["status"].as_str().unwrap_or("");
@@ -1044,11 +1056,15 @@ impl BaseGateway for BinanceUsdtGateway {
 
                             if new_status != Status::Submitting {
                                 let order_type_str = data["type"].as_str().unwrap_or("");
-                                let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                let tif_str = data["timeInForce"].as_str().unwrap_or("");
+                                let order_type = match ORDERTYPE_BINANCE2VT_FUTURES.get(&(order_type_str, tif_str)) {
                                     Some(t) => *t,
-                                    None => {
-                                        order_submit_times_checker.write().await.remove(&orderid);
-                                        continue;
+                                    None => match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                        Some(t) => *t,
+                                        None => {
+                                            order_submit_times_checker.write().await.remove(&orderid);
+                                            continue;
+                                        }
                                     }
                                 };
 
@@ -1176,6 +1192,16 @@ impl BaseGateway for BinanceUsdtGateway {
             params.insert("type".to_string(), "LIMIT".to_string());
             params.insert("timeInForce".to_string(), "GTC".to_string());
             params.insert("price".to_string(), format_price(req.price));
+        }
+
+        // Good-Till-Date: add goodTillDate parameter for Gtd orders
+        if req.order_type == OrderType::Gtd {
+            if let Some(expire_time) = req.expire_time {
+                params.insert("goodTillDate".to_string(), expire_time.timestamp_millis().to_string());
+            } else {
+                self.write_log("GTD订单缺少expire_time，回退为GTC限价单").await;
+                params.insert("timeInForce".to_string(), "GTC".to_string());
+            }
         }
 
         // Reduce-Only on Binance Futures: `reduceOnly=true`

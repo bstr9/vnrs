@@ -346,7 +346,6 @@ impl RewardFunction for CompositeReward {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trader::Direction;
     use chrono::Utc;
 
     fn make_snapshot(equity: f64) -> PortfolioSnapshot {
@@ -422,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_sharpe_reward_single_step() {
-        let mut reward_fn = SharpeReward::new(10);
+        let reward_fn = SharpeReward::new(10);
         let prev = make_snapshot(100_000.0);
         let curr = make_snapshot(101_000.0);
         let reward = reward_fn.compute(&prev, &curr, &ActionValue::Discrete(1));
@@ -432,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_sharpe_reward_multiple_steps() {
-        let mut reward_fn = SharpeReward::new(10);
+        let reward_fn = SharpeReward::new(10);
         let base = 100_000.0;
         let prev = make_snapshot(base);
         

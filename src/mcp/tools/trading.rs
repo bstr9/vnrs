@@ -108,6 +108,16 @@ pub struct AnalyzeSentimentParams {
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct SuggestStrategyParamsParams {
+    /// Strategy identifier (e.g., strategy name or class name)
+    pub strategy_id: String,
+    /// Current strategy parameters as a JSON string
+    pub current_params: String,
+    /// Summary of recent strategy performance (e.g., PnL, win rate, drawdown)
+    pub performance_summary: String,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct DisconnectParams {
     /// 网关名称
     pub gateway_name: String,
@@ -542,6 +552,101 @@ impl TradingMcpServer {
                      Note: Connect to an MCP client with sampling support for real LLM analysis. Error: {}",
                     &params.text[..params.text.len().min(60)],
                     e
+                ))]))
+            }
+        }
+    }
+
+    #[tool(description = "Suggest optimized strategy parameters using LLM via MCP Sampling. Provides AI-driven parameter tuning recommendations based on current parameters and performance data.")]
+    async fn suggest_strategy_params(
+        &self,
+        Parameters(params): Parameters<SuggestStrategyParamsParams>,
+        peer: rmcp::Peer<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = SamplingConfig::default();
+
+        // Construct system prompt
+        let system_prompt = "You are a quantitative trading strategy optimizer. \
+             Given a strategy's current parameters and recent performance summary, \
+             suggest optimized parameter values. For each parameter you suggest changing, \
+             provide: \
+             1) The parameter name \
+             2) The current value \
+             3) The suggested value \
+             4) The rationale for the change \
+             Also provide an overall confidence level (0-100%) for your suggestions.";
+
+        // Construct the user message with strategy details
+        let user_message = format!(
+            "Strategy ID: {}\n\nCurrent Parameters:\n{}\n\nPerformance Summary:\n{}",
+            params.strategy_id, params.current_params, params.performance_summary
+        );
+
+        // Audit log
+        tracing::info!(
+            tool_name = "suggest_strategy_params",
+            strategy_id = %params.strategy_id,
+            max_tokens = config.max_tokens,
+            temperature = config.temperature,
+            "MCP Sampling request: suggest_strategy_params"
+        );
+
+        // Build sampling request parameters
+        let messages = vec![SamplingMessage::user_text(&user_message)];
+
+        let mut request_params = CreateMessageRequestParams::new(messages, config.max_tokens)
+            .with_temperature(config.temperature)
+            .with_system_prompt(system_prompt);
+
+        if let Some(ref model_pref) = config.model_preference {
+            let hints = vec![ModelHint::new(model_pref.clone())];
+            request_params = request_params.with_model_preferences(
+                ModelPreferences::default().with_hints(hints),
+            );
+        }
+
+        // Issue sampling request
+        match peer.create_message(request_params).await {
+            Ok(result) => {
+                tracing::info!(
+                    tool_name = "suggest_strategy_params",
+                    model = %result.model,
+                    stop_reason = result.stop_reason.as_deref().unwrap_or("<none>"),
+                    "MCP Sampling completed: suggest_strategy_params"
+                );
+
+                // Extract text response
+                let response_text = result
+                    .message
+                    .content
+                    .iter()
+                    .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                if response_text.is_empty() {
+                    Ok(CallToolResult::success(vec![Content::text(
+                        "Strategy parameter suggestion returned no text content.".to_string(),
+                    )]))
+                } else {
+                    Ok(CallToolResult::success(vec![Content::text(format!(
+                        "Strategy Parameter Suggestions for {} (model: {}):\n\n{}",
+                        params.strategy_id, result.model, response_text
+                    ))]))
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    tool_name = "suggest_strategy_params",
+                    error = %e,
+                    "MCP Sampling failed: suggest_strategy_params"
+                );
+                // Fallback: if sampling is unavailable, return a placeholder
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Strategy parameter suggestions (simulated - LLM sampling unavailable): \
+                     Strategy: {} | \
+                     Note: Connect to an MCP client with sampling support for real LLM-driven parameter optimization. Error: {}",
+                    params.strategy_id, e
                 ))]))
             }
         }

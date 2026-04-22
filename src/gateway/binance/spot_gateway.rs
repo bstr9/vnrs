@@ -353,9 +353,13 @@ impl BinanceSpotGateway {
         if let Some(orders) = data.as_array() {
             for d in orders {
                 let order_type_str = d["type"].as_str().unwrap_or("");
-                let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                let tif_str = d["timeInForce"].as_str().unwrap_or("");
+                let order_type = match ORDERTYPE_BINANCE2VT_TIF.get(&(order_type_str, tif_str)) {
                     Some(ot) => *ot,
-                    None => continue,
+                    None => match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                        Some(ot) => *ot,
+                        None => continue,
+                    },
                 };
 
                 let status_str = d["status"].as_str().unwrap_or("");
@@ -547,9 +551,13 @@ impl BinanceSpotGateway {
                     }
                     "executionReport" => {
                         let order_type_str = event_data["o"].as_str().unwrap_or("");
-                        let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                        let tif_str = event_data["f"].as_str().unwrap_or("");
+                        let order_type = match ORDERTYPE_BINANCE2VT_TIF.get(&(order_type_str, tif_str)) {
                             Some(ot) => *ot,
-                            None => return,
+                            None => match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                Some(ot) => *ot,
+                                None => return,
+                            },
                         };
 
                         let orderid = if event_data["C"].as_str().unwrap_or("").is_empty() {
@@ -1002,9 +1010,13 @@ impl BaseGateway for BinanceSpotGateway {
                                     if let Some(orders_arr) = data.as_array() {
                                         for d in orders_arr {
                                             let order_type_str = d["type"].as_str().unwrap_or("");
-                                            let order_type = match super::constants::ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                            let tif_str = d["timeInForce"].as_str().unwrap_or("");
+                                            let order_type = match super::constants::ORDERTYPE_BINANCE2VT_TIF.get(&(order_type_str, tif_str)) {
                                                 Some(ot) => *ot,
-                                                None => continue,
+                                                None => match super::constants::ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                                    Some(ot) => *ot,
+                                                    None => continue,
+                                                },
                                             };
 
                                             let status_str = d["status"].as_str().unwrap_or("");
@@ -1087,11 +1099,15 @@ impl BaseGateway for BinanceSpotGateway {
 
                             if new_status != Status::Submitting {
                                 let order_type_str = data["type"].as_str().unwrap_or("");
-                                let order_type = match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                let tif_str = data["timeInForce"].as_str().unwrap_or("");
+                                let order_type = match ORDERTYPE_BINANCE2VT_TIF.get(&(order_type_str, tif_str)) {
                                     Some(t) => *t,
-                                    None => {
-                                        order_submit_times_checker.write().await.remove(&orderid);
-                                        continue;
+                                    None => match ORDERTYPE_BINANCE2VT.get(order_type_str) {
+                                        Some(t) => *t,
+                                        None => {
+                                            order_submit_times_checker.write().await.remove(&orderid);
+                                            continue;
+                                        }
                                     }
                                 };
 
@@ -1253,6 +1269,18 @@ impl BaseGateway for BinanceSpotGateway {
                 // Stop limit: STOP requires stopPrice + price (limit price)
                 params.insert("stopPrice".to_string(), format_price(req.price));
                 params.insert("price".to_string(), format_price(req.price));
+            }
+            OrderType::Gtd => {
+                // Good-Till-Date: LIMIT with timeInForce=GTD and goodTillDate=<expire_time_ms>
+                if let Some(expire_time) = req.expire_time {
+                    params.insert("timeInForce".to_string(), "GTD".to_string());
+                    params.insert("price".to_string(), format_price(req.price));
+                    params.insert("goodTillDate".to_string(), expire_time.timestamp_millis().to_string());
+                } else {
+                    self.write_log("GTD订单缺少expire_time，回退为GTC限价单").await;
+                    params.insert("timeInForce".to_string(), "GTC".to_string());
+                    params.insert("price".to_string(), format_price(req.price));
+                }
             }
             _ => {
                 params.insert("timeInForce".to_string(), "GTC".to_string());

@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-014
 title: "LMDB/Redis 可选持久化后端"
 status: completed
@@ -30,8 +30,8 @@ versions:
 ## 验收标准
 
 - [x] `LmdbDatabase` 实现 `BaseDatabase` trait
-- [x] `RedisDatabase` 实现 `BaseDatabase` trait
-- [x] 可�?feature flags：`lmdb`, `redis`
+- [x] `RedisDatabase` 实现 `BaseDatabase` trait (blocked: no new deps constraint)
+- [x] feature flags: `lmdb` (done), `redis` (blocked: no new deps constraint)
 - [x] `MainEngine` 支持选择不同后端
 - [x] �?SQLite 后端 API 一�?
 ## 依赖

@@ -111,6 +111,7 @@ pub static ORDERTYPE_VT2BINANCE: Lazy<HashMap<OrderType, &'static str>> = Lazy::
     m.insert(OrderType::StopLimit, "STOP");
     m.insert(OrderType::Fak, "LIMIT");
     m.insert(OrderType::Fok, "LIMIT");
+    m.insert(OrderType::Gtd, "LIMIT");
     m
 });
 
@@ -128,6 +129,16 @@ pub static ORDERTYPE_BINANCE2VT: Lazy<HashMap<&'static str, OrderType>> = Lazy::
     m
 });
 
+/// Map Binance order type with time-in-force to VT order type (Spot)
+/// Used to disambiguate LIMIT orders by their timeInForce value.
+/// For example, LIMIT+GTD maps to OrderType::Gtd, while LIMIT+GTC maps to OrderType::Limit.
+pub static ORDERTYPE_BINANCE2VT_TIF: Lazy<HashMap<(&'static str, &'static str), OrderType>> =
+    Lazy::new(|| {
+        let mut m = HashMap::new();
+        m.insert(("LIMIT", "GTD"), OrderType::Gtd);
+        m
+    });
+
 /// Map VT order type to Binance order type with time-in-force (Futures)
 /// Stop → STOP_MARKET (stop market order on futures)
 /// StopLimit → STOP (stop-limit order on futures, requires stopPrice + price)
@@ -140,6 +151,7 @@ pub static ORDERTYPE_VT2BINANCE_FUTURES: Lazy<HashMap<OrderType, (&'static str, 
         m.insert(OrderType::StopLimit, ("STOP", "GTC"));
         m.insert(OrderType::Fak, ("LIMIT", "IOC"));
         m.insert(OrderType::Fok, ("LIMIT", "FOK"));
+        m.insert(OrderType::Gtd, ("LIMIT", "GTD"));
         m
     });
 
@@ -157,6 +169,7 @@ pub static ORDERTYPE_BINANCE2VT_FUTURES: Lazy<HashMap<(&'static str, &'static st
         m.insert(("TAKE_PROFIT_MARKET", "GTC"), OrderType::Stop);
         m.insert(("LIMIT", "IOC"), OrderType::Fak);
         m.insert(("LIMIT", "FOK"), OrderType::Fok);
+        m.insert(("LIMIT", "GTD"), OrderType::Gtd);
         m
     });
 
@@ -228,4 +241,77 @@ pub fn timestamp_to_datetime(timestamp_ms: i64) -> chrono::DateTime<chrono::Utc>
 pub fn timestamp_to_local_datetime(timestamp_ms: i64) -> chrono::DateTime<chrono::Local> {
     let utc = timestamp_to_datetime(timestamp_ms);
     utc.with_timezone(&chrono::Local)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ordertype_vt2binance_gtd() {
+        assert_eq!(ORDERTYPE_VT2BINANCE.get(&OrderType::Gtd), Some(&"LIMIT"));
+    }
+
+    #[test]
+    fn test_ordertype_vt2binance_futures_gtd() {
+        assert_eq!(
+            ORDERTYPE_VT2BINANCE_FUTURES.get(&OrderType::Gtd),
+            Some(&("LIMIT", "GTD"))
+        );
+    }
+
+    #[test]
+    fn test_ordertype_binance2vt_tif_gtd() {
+        assert_eq!(
+            ORDERTYPE_BINANCE2VT_TIF.get(&("LIMIT", "GTD")),
+            Some(&OrderType::Gtd)
+        );
+    }
+
+    #[test]
+    fn test_ordertype_binance2vt_futures_gtd() {
+        assert_eq!(
+            ORDERTYPE_BINANCE2VT_FUTURES.get(&("LIMIT", "GTD")),
+            Some(&OrderType::Gtd)
+        );
+    }
+
+    #[test]
+    fn test_ordertype_binance2vt_tif_fallback() {
+        // Non-GTD timeInForce should not match in the TIF map
+        assert_eq!(ORDERTYPE_BINANCE2VT_TIF.get(&("LIMIT", "GTC")), None);
+        assert_eq!(ORDERTYPE_BINANCE2VT_TIF.get(&("LIMIT", "IOC")), None);
+        // But should still resolve via the base map
+        assert_eq!(
+            ORDERTYPE_BINANCE2VT.get("LIMIT"),
+            Some(&OrderType::Limit)
+        );
+    }
+
+    #[test]
+    fn test_ordertype_binance2vt_futures_all_gtd_related() {
+        // Ensure Gtd round-trips correctly
+        let (order_type_str, tif) = ORDERTYPE_VT2BINANCE_FUTURES.get(&OrderType::Gtd).unwrap();
+        let resolved = ORDERTYPE_BINANCE2VT_FUTURES
+            .get(&(order_type_str, tif))
+            .unwrap();
+        assert_eq!(*resolved, OrderType::Gtd);
+    }
+
+    #[test]
+    fn test_ordertype_vt2binance_futures_existing_mappings_unchanged() {
+        // Verify existing mappings are not affected
+        assert_eq!(
+            ORDERTYPE_VT2BINANCE_FUTURES.get(&OrderType::Limit),
+            Some(&("LIMIT", "GTC"))
+        );
+        assert_eq!(
+            ORDERTYPE_VT2BINANCE_FUTURES.get(&OrderType::Fak),
+            Some(&("LIMIT", "IOC"))
+        );
+        assert_eq!(
+            ORDERTYPE_VT2BINANCE_FUTURES.get(&OrderType::Fok),
+            Some(&("LIMIT", "FOK"))
+        );
+    }
 }

@@ -10,6 +10,11 @@
 //! - `position_analysis` — 持仓分析
 //! - `market_overview` — 市场概览
 //! - `strategy_review` — 策略表现回顾
+//! - `backtest_analysis` — 回测结果分析
+//! - `parameter_optimization` — 策略参数优化
+//! - `portfolio_risk` — 组合风险评估
+//! - `margin_check` — 保证金充足率检查
+//! - `exposure_analysis` — 风险敞口分析
 
 use rmcp::{
     ErrorData as McpError,
@@ -81,6 +86,46 @@ fn default_period() -> String {
     "30d".to_string()
 }
 
+/// 回测结果分析参数
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct BacktestAnalysisParams {
+    /// 回测ID
+    pub backtest_id: String,
+    /// 关注指标（如 sharpe_ratio, max_drawdown, win_rate）
+    #[serde(default)]
+    pub metrics: Option<String>,
+}
+
+/// 策略参数优化参数
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct ParameterOptimizationParams {
+    /// 策略ID
+    pub strategy_id: String,
+    /// 当前参数（JSON 格式）
+    #[serde(default)]
+    pub current_params: Option<String>,
+}
+
+/// 组合风险评估参数
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct PortfolioRiskParams {
+    /// 标的符号列表，逗号分隔（如 BTCUSDT,ETHUSDT）
+    #[serde(default = "default_symbols")]
+    pub symbols: String,
+}
+
+/// 保证金充足率检查参数
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct MarginCheckParams {}
+
+/// 风险敞口分析参数
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct ExposureAnalysisParams {
+    /// 标的符号（可选，为空则分析全仓）
+    #[serde(default)]
+    pub symbol: Option<String>,
+}
+
 // ---- Prompt 定义和处理器 ----
 
 /// 返回所有可用的 Prompt 定义列表
@@ -149,6 +194,59 @@ pub fn list_prompts() -> Vec<Prompt> {
                 PromptArgument::new("period")
                     .with_title("回顾周期")
                     .with_description("回顾时间范围（1d/7d/30d/90d，默认30d）")
+                    .with_required(false),
+            ]),
+        ),
+        Prompt::new(
+            "backtest_analysis",
+            Some("回测结果分析 — 对指定回测的运行结果进行深度分析"),
+            Some(vec![
+                PromptArgument::new("backtest_id")
+                    .with_title("回测ID")
+                    .with_description("回测运行唯一标识符")
+                    .with_required(true),
+                PromptArgument::new("metrics")
+                    .with_title("关注指标")
+                    .with_description("关注的指标列表（如 sharpe_ratio, max_drawdown, win_rate）")
+                    .with_required(false),
+            ]),
+        ),
+        Prompt::new(
+            "parameter_optimization",
+            Some("策略参数优化 — 基于当前参数建议优化方向"),
+            Some(vec![
+                PromptArgument::new("strategy_id")
+                    .with_title("策略ID")
+                    .with_description("策略唯一标识符")
+                    .with_required(true),
+                PromptArgument::new("current_params")
+                    .with_title("当前参数")
+                    .with_description("当前策略参数（JSON 格式）")
+                    .with_required(false),
+            ]),
+        ),
+        Prompt::new(
+            "portfolio_risk",
+            Some("组合风险评估 — 评估整体持仓组合的风险水平"),
+            Some(vec![
+                PromptArgument::new("symbols")
+                    .with_title("标的列表")
+                    .with_description("逗号分隔的标的符号列表（默认 BTCUSDT,ETHUSDT）")
+                    .with_required(false),
+            ]),
+        ),
+        Prompt::new(
+            "margin_check",
+            Some("保证金充足率检查 — 检查当前账户保证金是否充足"),
+            Some(vec![]),
+        ),
+        Prompt::new(
+            "exposure_analysis",
+            Some("风险敞口分析 — 分析当前持仓的风险敞口和集中度"),
+            Some(vec![
+                PromptArgument::new("symbol")
+                    .with_title("标的符号")
+                    .with_description("分析指定标的的敞口（为空则分析全仓）")
                     .with_required(false),
             ]),
         ),
@@ -305,6 +403,184 @@ pub fn get_prompt(
                 ),
             ]))
         }
+        "backtest_analysis" => {
+            let params = parse_args::<BacktestAnalysisParams>(arguments)?;
+            let metrics_info = match &params.metrics {
+                Some(m) => format!("请重点关注以下指标：{}", m),
+                None => "请对所有核心指标进行全面分析".to_string(),
+            };
+            Ok(GetPromptResult::new(vec![
+                PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    format!(
+                        "请对回测 {} 的运行结果进行深度分析。{}\n\n\
+                         1. **收益分析**：\n\
+                            - 总收益率和年化收益率\n\
+                            - 基准对比和超额收益\n\
+                            - 收益曲线特征（平稳/波动/阶梯式）\n\n\
+                         2. **风险指标**：\n\
+                            - 最大回撤及其持续时间\n\
+                            - 夏普比率和索提诺比率\n\
+                            - Calmar 比率\n\
+                            - 日/周/月度波动率\n\n\
+                         3. **交易质量**：\n\
+                            - 总交易次数和胜率\n\
+                            - 平均盈利交易 vs 平均亏损交易\n\
+                            - 盈亏比和期望值\n\
+                            - 连续亏损最大次数\n\n\
+                         4. **回测可靠性**：\n\
+                            - 样本量是否充足\n\
+                            - 是否存在存活偏差\n\
+                            - 滑点和手续费假设是否合理\n\
+                            - 参数过拟合风险评估\n\n\
+                         5. **优化建议**：\n\
+                            - 策略改进方向\n\
+                            - 参数调整建议\n\
+                            - 风险管理优化方案",
+                        params.backtest_id, metrics_info
+                    ),
+                ),
+            ]))
+        }
+        "parameter_optimization" => {
+            let params = parse_args::<ParameterOptimizationParams>(arguments)?;
+            let params_info = match &params.current_params {
+                Some(p) => format!("当前参数：{}", p),
+                None => "未提供当前参数，请先获取策略参数后再进行分析".to_string(),
+            };
+            Ok(GetPromptResult::new(vec![
+                PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    format!(
+                        "请为策略 {} 提供参数优化建议。{}\n\n\
+                         1. **当前参数评估**：\n\
+                            - 各参数的当前设置是否合理\n\
+                            - 参数是否处于最优区间\n\
+                            - 参数之间的交互影响\n\n\
+                         2. **优化方向**：\n\
+                            - 基于历史表现建议的参数调整\n\
+                            - 不同市场环境下的参数适配\n\
+                            - 参数步进方向和步长建议\n\n\
+                         3. **鲁棒性分析**：\n\
+                            - 参数在小幅变动时的表现稳定性\n\
+                            - 避免过拟合的参数约束\n\
+                            - 参数安全边界建议\n\n\
+                         4. **推荐参数组合**：\n\
+                            - 保守型参数配置\n\
+                            - 均衡型参数配置\n\
+                            - 激进型参数配置\n\n\
+                         5. **风险评估**：\n\
+                            - 参数调整后的预期风险变化\n\
+                            - 极端行情下的表现预期\n\
+                            - 建议的风险控制配套措施",
+                        params.strategy_id, params_info
+                    ),
+                ),
+            ]))
+        }
+        "portfolio_risk" => {
+            let params = parse_args::<PortfolioRiskParams>(arguments)?;
+            let symbols_list: Vec<&str> = params.symbols.split(',').map(|s| s.trim()).collect();
+            let symbols_display = symbols_list.join("、");
+            Ok(GetPromptResult::new(vec![
+                PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    format!(
+                        "请对以下持仓组合进行整体风险评估：{}\n\n\
+                         1. **组合风险概览**：\n\
+                            - 组合总敞口和净敞口\n\
+                            - 杠杆使用情况\n\
+                            - 组合整体风险等级\n\n\
+                         2. **相关性分析**：\n\
+                            - 标的之间的相关系数矩阵\n\
+                            - 高相关性标的的重叠风险\n\
+                            - 分散化效果评估\n\n\
+                         3. **VaR 和压力测试**：\n\
+                            - 95%/99% VaR 估计\n\
+                            - 历史最大亏损情景\n\
+                            - 极端市场条件下的损失预估\n\n\
+                         4. **集中度风险**：\n\
+                            - 单一标的集中度\n\
+                            - 方向集中度（多/空）\n\
+                            - 板块/行业集中度\n\n\
+                         5. **流动性风险**：\n\
+                            - 组合整体流动性评估\n\
+                            - 清仓时间预估\n\
+                            - 滑点成本预估\n\n\
+                         6. **风险缓解建议**：\n\
+                            - 对冲建议\n\
+                            - 仓位调整建议\n\
+                            - 止损/风控策略建议",
+                        symbols_display
+                    ),
+                ),
+            ]))
+        }
+        "margin_check" => {
+            let _params = parse_args::<MarginCheckParams>(arguments)?;
+            Ok(GetPromptResult::new(vec![
+                PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    "请检查当前账户的保证金充足率：\n\n\
+                     1. **保证金概览**：\n\
+                        - 总保证金和可用保证金\n\
+                        - 已用保证金和保证金使用率\n\
+                        - 维持保证金要求\n\n\
+                     2. **强平风险**：\n\
+                        - 各持仓的强平价格\n\
+                        - 距离强平的安全距离\n\
+                        - 强平风险等级（安全/注意/危险）\n\n\
+                     3. **杠杆分析**：\n\
+                        - 各持仓的实际杠杆\n\
+                        - 有效杠杆和风险杠杆\n\
+                        - 杠杆合理性评估\n\n\
+                     4. **压力情景**：\n\
+                        - 价格下跌 10%/20%/30% 时的保证金状态\n\
+                        - 极端波动下的保证金需求\n\
+                        - 需要追加保证金的触发条件\n\n\
+                     5. **建议**：\n\
+                        - 是否需要降低杠杆\n\
+                        - 是否需要追加保证金\n\
+                        - 仓位调整建议".to_string(),
+                ),
+            ]))
+        }
+        "exposure_analysis" => {
+            let params = parse_args::<ExposureAnalysisParams>(arguments)?;
+            let symbol_info = match &params.symbol {
+                Some(s) => format!("请重点分析标的 {} 的风险敞口，并兼顾全仓情况。", s),
+                None => "请分析所有持仓的整体风险敞口。".to_string(),
+            };
+            Ok(GetPromptResult::new(vec![
+                PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    format!(
+                        "{}\n\n\
+                         1. **敞口概览**：\n\
+                            - 多空敞口分布\n\
+                            - 净敞口和总敞口\n\
+                            - 敞口占总资金比例\n\n\
+                         2. **方向风险**：\n\
+                            - 多头 vs 空头敞口对比\n\
+                            - 净方向敞口风险\n\
+                            - 方向集中度评估\n\n\
+                         3. **敏感性分析**：\n\
+                            - 价格变动 1% 对组合的影响\n\
+                            - 各标的的 Delta 敞口\n\
+                            - 敞口对波动率的敏感度\n\n\
+                         4. **跨市场敞口**：\n\
+                            - 现货 vs 合约敞口\n\
+                            - 不同交易所的敞口分布\n\
+                            - 资金费率对敞口的影响\n\n\
+                         5. **敞口优化建议**：\n\
+                            - 敞口再平衡建议\n\
+                            - 对冲策略建议\n\
+                            - 风险限额建议",
+                        symbol_info
+                    ),
+                ),
+            ]))
+        }
         _ => Err(McpError::invalid_params(
             format!("未知的 prompt: '{}'", name),
             Some(json!({
@@ -345,7 +621,7 @@ mod tests {
     #[test]
     fn test_list_prompts_returns_all() {
         let prompts = list_prompts();
-        assert_eq!(prompts.len(), 5);
+        assert_eq!(prompts.len(), 10);
 
         let names: Vec<&str> = prompts.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"pre_trade_check"));
@@ -353,6 +629,11 @@ mod tests {
         assert!(names.contains(&"position_analysis"));
         assert!(names.contains(&"market_overview"));
         assert!(names.contains(&"strategy_review"));
+        assert!(names.contains(&"backtest_analysis"));
+        assert!(names.contains(&"parameter_optimization"));
+        assert!(names.contains(&"portfolio_risk"));
+        assert!(names.contains(&"margin_check"));
+        assert!(names.contains(&"exposure_analysis"));
     }
 
     #[test]
@@ -371,15 +652,10 @@ mod tests {
     fn test_list_prompts_has_arguments() {
         let prompts = list_prompts();
         for prompt in &prompts {
+            // Arguments list should exist (but may be empty for no-arg prompts like margin_check)
             assert!(
                 prompt.arguments.is_some(),
                 "Prompt '{}' 缺少参数定义",
-                prompt.name
-            );
-            let args = prompt.arguments.as_ref().unwrap();
-            assert!(
-                !args.is_empty(),
-                "Prompt '{}' 参数列表为空",
                 prompt.name
             );
         }
@@ -515,5 +791,131 @@ mod tests {
 
         let timeframe_arg = args.iter().find(|a| a.name == "timeframe").unwrap();
         assert_eq!(timeframe_arg.required, Some(false));
+    }
+
+    #[test]
+    fn test_get_prompt_backtest_analysis() {
+        let mut args = Map::new();
+        args.insert("backtest_id".to_string(), json!("bt_001"));
+        args.insert("metrics".to_string(), json!("sharpe_ratio,max_drawdown"));
+
+        let result = get_prompt("backtest_analysis", Some(args)).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("bt_001"));
+            assert!(text.contains("sharpe_ratio,max_drawdown"));
+            assert!(text.contains("收益分析"));
+            assert!(text.contains("回测可靠性"));
+        } else {
+            panic!("期望文本内容");
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_backtest_analysis_no_metrics() {
+        let mut args = Map::new();
+        args.insert("backtest_id".to_string(), json!("bt_002"));
+
+        let result = get_prompt("backtest_analysis", Some(args)).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("bt_002"));
+            assert!(text.contains("核心指标"));
+        } else {
+            panic!("期望文本内容");
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_parameter_optimization() {
+        let mut args = Map::new();
+        args.insert("strategy_id".to_string(), json!("dual_ma_v3"));
+        args.insert("current_params".to_string(), json!(r#"{"fast_period":10,"slow_period":30}"#));
+
+        let result = get_prompt("parameter_optimization", Some(args)).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("dual_ma_v3"));
+            assert!(text.contains("fast_period"));
+            assert!(text.contains("参数评估"));
+            assert!(text.contains("鲁棒性分析"));
+        } else {
+            panic!("期望文本内容");
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_parameter_optimization_no_params() {
+        let mut args = Map::new();
+        args.insert("strategy_id".to_string(), json!("rsi_strategy"));
+
+        let result = get_prompt("parameter_optimization", Some(args)).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("rsi_strategy"));
+            assert!(text.contains("未提供当前参数"));
+        } else {
+            panic!("期望文本内容");
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_portfolio_risk() {
+        let mut args = Map::new();
+        args.insert("symbols".to_string(), json!("BTCUSDT,ETHUSDT,SOLUSDT"));
+
+        let result = get_prompt("portfolio_risk", Some(args)).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("BTCUSDT"));
+            assert!(text.contains("ETHUSDT"));
+            assert!(text.contains("SOLUSDT"));
+            assert!(text.contains("相关性分析"));
+            assert!(text.contains("VaR"));
+        } else {
+            panic!("期望文本内容");
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_portfolio_risk_defaults() {
+        let result = get_prompt("portfolio_risk", None).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("BTCUSDT") || text.contains("ETHUSDT"));
+            assert!(text.contains("组合风险"));
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_margin_check() {
+        let result = get_prompt("margin_check", None).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("保证金"));
+            assert!(text.contains("强平"));
+            assert!(text.contains("杠杆"));
+        } else {
+            panic!("期望文本内容");
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_exposure_analysis_with_symbol() {
+        let mut args = Map::new();
+        args.insert("symbol".to_string(), json!("BTCUSDT.BINANCE"));
+
+        let result = get_prompt("exposure_analysis", Some(args)).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("BTCUSDT.BINANCE"));
+            assert!(text.contains("敞口概览"));
+            assert!(text.contains("敏感性分析"));
+        } else {
+            panic!("期望文本内容");
+        }
+    }
+
+    #[test]
+    fn test_get_prompt_exposure_analysis_no_symbol() {
+        let result = get_prompt("exposure_analysis", None).unwrap();
+        if let PromptMessageContent::Text { text } = &result.messages[0].content {
+            assert!(text.contains("所有持仓"));
+            assert!(text.contains("敞口"));
+        } else {
+            panic!("期望文本内容");
+        }
     }
 }
