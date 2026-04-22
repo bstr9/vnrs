@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::error::DatabaseError;
 use super::constant::{Exchange, Interval};
 use super::database::{BaseDatabase, BarOverview, EventRecord, TickOverview};
-use super::object::{BarData, OrderData, PositionData, TickData, TradeData};
+use super::object::{BarData, DepthData, OrderData, PositionData, TickData, TradeData};
 
 /// LMDB database implementation.
 ///
@@ -330,6 +330,62 @@ impl BaseDatabase for LmdbDatabase {
                 }
                 let tick = Self::deserialize_tick(value)?;
                 result.push(tick);
+            }
+
+            Ok(result)
+        })
+        .await
+        .map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
+    }
+
+    async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, DatabaseError> {
+        let env = self.env.clone();
+        let symbol = symbol.to_string();
+        let start_ts = start.timestamp();
+        let end_ts = end.timestamp();
+
+        tokio::task::spawn_blocking(move || {
+            let rtxn = env
+                .read_txn()
+                .map_err(|e| DatabaseError::QueryFailed(format!("Failed to begin read transaction: {}", e)))?;
+            let db: Database<Bytes, Bytes> = env
+                .open_database(&rtxn, Some("depths"))
+                .map_err(|e| DatabaseError::Other(format!("Failed to open depths database: {}", e)))?
+                .ok_or_else(|| DatabaseError::Other("depths database not found".to_string()))?;
+
+            let prefix = Self::tick_prefix(&exchange, &symbol); // reuse tick prefix logic for key construction
+            let range_start = {
+                let mut s = prefix.clone();
+                s.extend_from_slice(&start_ts.to_be_bytes());
+                s
+            };
+            let range_end = Self::prefix_end(&prefix);
+
+            let iter = db
+                .range(&rtxn, &(Bound::Included(range_start.as_slice()), Bound::Excluded(range_end.as_slice())))
+                .map_err(|e| DatabaseError::Other(format!("Failed to create depth range iterator: {}", e)))?;
+
+            let mut result = Vec::new();
+            for item in iter {
+                let (key, value) = item.map_err(|e| DatabaseError::Other(format!("Failed to read depth entry: {}", e)))?;
+                if let Some(pos) = key.iter().rposition(|&b| b == 0) {
+                    let ts_bytes = &key[pos + 1..];
+                    if ts_bytes.len() == 8 {
+                        let ts = i64::from_be_bytes(ts_bytes.try_into().unwrap_or([0u8; 8]));
+                        if ts > end_ts {
+                            break;
+                        }
+                    }
+                }
+                let depth: DepthData = serde_json::from_slice(value)
+                    .map_err(|e| DatabaseError::Other(format!("Failed to deserialize DepthData: {}", e)))?;
+                result.push(depth);
             }
 
             Ok(result)

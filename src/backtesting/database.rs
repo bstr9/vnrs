@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use chrono::NaiveDateTime;
 #[cfg(feature = "sqlite")]
 use std::sync::Arc;
-use crate::trader::{BarData, TickData, Exchange, Interval};
+use crate::trader::{BarData, TickData, Exchange, Interval, DepthData};
 #[cfg(feature = "sqlite")]
 use crate::trader::database::BaseDatabase;
 
@@ -332,6 +332,122 @@ impl DatabaseLoader {
         }
 
         Ok(ticks)
+    }
+
+    /// Load depth data from database
+    ///
+    /// Tries SQLite database first (if configured), then PostgreSQL.
+    #[cfg(feature = "sqlite")]
+    pub async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, String> {
+        // Try SQLite first
+        if let Some(db) = &self.sqlite_db {
+            let depths = db.load_depth_data(symbol, exchange, start, end).await.map_err(|e| e.to_string())?;
+            if !depths.is_empty() {
+                return Ok(depths);
+            }
+            return Err(format!("SQLite数据库中无Depth数据: {}", symbol));
+        }
+
+        // Fall through to PostgreSQL if available
+        #[cfg(feature = "database")]
+        {
+            self.load_depth_data_postgres(symbol, exchange, start, end).await
+        }
+        #[cfg(not(feature = "database"))]
+        {
+            Err("数据库功能未启用，请配置SQLite或使用 --features database 编译".to_string())
+        }
+    }
+
+    #[cfg(not(feature = "sqlite"))]
+    pub async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, String> {
+        #[cfg(feature = "database")]
+        {
+            self.load_depth_data_postgres(symbol, exchange, start, end).await
+        }
+        #[cfg(not(feature = "database"))]
+        {
+            let _ = (symbol, exchange, start, end);
+            Err("数据库功能未启用".to_string())
+        }
+    }
+
+    /// Load depth data from PostgreSQL (internal method)
+    #[cfg(feature = "database")]
+    async fn load_depth_data_postgres(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, String> {
+        let pool = self.pool.as_ref()
+            .ok_or("数据库未连接".to_string())?;
+
+        let exchange_str = format!("{:?}", exchange);
+
+        let query = r#"
+            SELECT
+                symbol, exchange, datetime,
+                bids_json, asks_json
+            FROM dbdepthdata
+            WHERE symbol = $1
+                AND exchange = $2
+                AND datetime >= $3
+                AND datetime <= $4
+            ORDER BY datetime ASC
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(symbol)
+            .bind(&exchange_str)
+            .bind(start.naive_utc())
+            .bind(end.naive_utc())
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("查询Depth数据失败: {}", e))?;
+
+        let mut depths = Vec::new();
+        for row in rows {
+            let datetime: NaiveDateTime = row.try_get("datetime")
+                .map_err(|e| format!("解析datetime失败: {}", e))?;
+
+            let bids_json: String = row.try_get("bids_json")
+                .unwrap_or_else(|_| "{}".to_string());
+            let asks_json: String = row.try_get("asks_json")
+                .unwrap_or_else(|_| "{}".to_string());
+
+            let bids: std::collections::BTreeMap<rust_decimal::Decimal, rust_decimal::Decimal> =
+                serde_json::from_str(&bids_json).unwrap_or_default();
+            let asks: std::collections::BTreeMap<rust_decimal::Decimal, rust_decimal::Decimal> =
+                serde_json::from_str(&asks_json).unwrap_or_default();
+
+            let depth = DepthData {
+                gateway_name: "DATABASE".to_string(),
+                symbol: row.try_get("symbol")
+                    .map_err(|e| format!("解析symbol失败: {}", e))?,
+                exchange,
+                datetime: DateTime::from_naive_utc_and_offset(datetime, Utc),
+                bids,
+                asks,
+                extra: None,
+            };
+            depths.push(depth);
+        }
+
+        Ok(depths)
     }
 }
 

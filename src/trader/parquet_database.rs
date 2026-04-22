@@ -15,7 +15,7 @@ use std::sync::RwLock;
 
 use super::constant::{Exchange, Interval};
 use super::database::{BarOverview, BaseDatabase, EventRecord, TickOverview};
-use super::object::{BarData, OrderData, PositionData, TickData, TradeData};
+use super::object::{BarData, DepthData, OrderData, PositionData, TickData, TradeData};
 use crate::error::DatabaseError;
 
 // ---------------------------------------------------------------------------
@@ -759,6 +759,18 @@ impl BaseDatabase for ParquetDatabase {
             let _ = (symbol, exchange, start, end);
             Ok(Vec::new())
         }
+    }
+
+    async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, DatabaseError> {
+        // ParquetDatabase does not currently store depth data — return empty
+        let _ = (symbol, exchange, start, end);
+        Ok(Vec::new())
     }
 
     async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::DatabaseError;
 use super::constant::{Exchange, Interval};
-use super::object::{BarData, TickData, OrderData, TradeData, PositionData};
+use super::object::{BarData, TickData, OrderData, TradeData, PositionData, DepthData};
 use super::setting::SETTINGS;
 
 /// Overview of bar data stored in database
@@ -85,6 +85,15 @@ pub trait BaseDatabase: Send + Sync {
         end: DateTime<Utc>,
     ) -> Result<Vec<TickData>, DatabaseError>;
 
+    /// Load depth data from database
+    async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, DatabaseError>;
+
     /// Delete all bar data with given symbol + exchange + interval
     async fn delete_bar_data(
         &self,
@@ -128,6 +137,7 @@ pub trait BaseDatabase: Send + Sync {
 pub struct MemoryDatabase {
     bars: std::sync::RwLock<Vec<BarData>>,
     ticks: std::sync::RwLock<Vec<TickData>>,
+    depths: std::sync::RwLock<Vec<DepthData>>,
     orders: std::sync::RwLock<Vec<OrderData>>,
     trades: std::sync::RwLock<Vec<TradeData>>,
     positions: std::sync::RwLock<Vec<PositionData>>,
@@ -139,6 +149,7 @@ impl MemoryDatabase {
         Self {
             bars: std::sync::RwLock::new(Vec::new()),
             ticks: std::sync::RwLock::new(Vec::new()),
+            depths: std::sync::RwLock::new(Vec::new()),
             orders: std::sync::RwLock::new(Vec::new()),
             trades: std::sync::RwLock::new(Vec::new()),
             positions: std::sync::RwLock::new(Vec::new()),
@@ -233,6 +244,27 @@ impl BaseDatabase for MemoryDatabase {
                     && tick.exchange == exchange
                     && tick.datetime >= start
                     && tick.datetime <= end
+            })
+            .cloned()
+            .collect();
+        Ok(result)
+    }
+
+    async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, DatabaseError> {
+        let data = self.depths.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
+        let result: Vec<DepthData> = data
+            .iter()
+            .filter(|depth| {
+                depth.symbol == symbol
+                    && depth.exchange == exchange
+                    && depth.datetime >= start
+                    && depth.datetime <= end
             })
             .cloned()
             .collect();
@@ -467,6 +499,12 @@ impl FileDatabase {
             .join(format!("{}_{}.json", exchange, symbol))
     }
 
+    /// Get the file path for depth data
+    fn depth_file_path(&self, symbol: &str, exchange: Exchange) -> std::path::PathBuf {
+        self.base_dir.join("depths")
+            .join(format!("{}_{}.json", exchange, symbol))
+    }
+
     /// Ensure the parent directory exists for a file path
     fn ensure_parent_dir(path: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
@@ -511,6 +549,27 @@ impl FileDatabase {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(ticks)
             .map_err(|e| format!("Failed to serialize ticks: {}", e))?;
+        std::fs::write(path, content)
+            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+    }
+
+    /// Load depths from a JSON file
+    fn load_depths_from_file(path: &std::path::Path) -> Result<Vec<DepthData>, String> {
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+    }
+
+    /// Save depths to a JSON file
+    #[allow(dead_code)]
+    fn save_depths_to_file(path: &std::path::Path, depths: &[DepthData]) -> Result<(), String> {
+        Self::ensure_parent_dir(path)?;
+        let content = serde_json::to_string(depths)
+            .map_err(|e| format!("Failed to serialize depths: {}", e))?;
         std::fs::write(path, content)
             .map_err(|e| format!("Failed to write {:?}: {}", path, e))
     }
@@ -783,6 +842,29 @@ impl BaseDatabase for FileDatabase {
                     && tick.exchange == exchange
                     && tick.datetime >= start
                     && tick.datetime <= end
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, DatabaseError> {
+        let path = self.depth_file_path(symbol, exchange);
+        let all_depths = Self::load_depths_from_file(&path).map_err(DatabaseError::from)?;
+
+        let result: Vec<DepthData> = all_depths
+            .into_iter()
+            .filter(|depth| {
+                depth.symbol == symbol
+                    && depth.exchange == exchange
+                    && depth.datetime >= start
+                    && depth.datetime <= end
             })
             .collect();
 

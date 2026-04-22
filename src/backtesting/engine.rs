@@ -15,10 +15,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use chrono::{DateTime, Utc, NaiveDate, Duration};
 
+
 use crate::trader::{
     TickData, BarData, OrderData, TradeData, ContractData,
     Direction, Offset, Status, Interval, Exchange, Product,
-    OrderRequest, Clock, TestClock,
+    OrderRequest, Clock, TestClock, DepthData,
 };
 use crate::trader::database::BaseDatabase;
 use crate::strategy::{
@@ -133,6 +134,7 @@ pub struct BacktestingEngine {
     // Market data
     history_data: Vec<BarData>,
     tick_data: Vec<TickData>,
+    depth_data: Vec<DepthData>,
     /// Deterministic clock abstraction — TestClock in backtest, LiveClock in live.
     /// Replaces the old `current_dt: DateTime<Utc>` field so that all time queries
     /// flow through the same `Clock` trait used by live trading, ensuring
@@ -217,6 +219,7 @@ impl BacktestingEngine {
             strategy_context: Arc::new(StrategyContext::new()),
             history_data: Vec::new(),
             tick_data: Vec::new(),
+            depth_data: Vec::new(),
             clock: Arc::new(TestClock::new(Utc::now())),
             limit_order_count: 0,
             limit_orders: HashMap::new(),
@@ -270,6 +273,7 @@ impl BacktestingEngine {
         
         self.logs.clear();
         self.history_data.clear();
+        self.depth_data.clear();
 
         self.emulated_order_count = 0;
         self.emulated_orders.clear();
@@ -644,6 +648,12 @@ impl BacktestingEngine {
         self.write_log(&format!("加载{}条Tick数据", self.tick_data.len()));
     }
 
+    /// Set depth data for backtesting
+    pub fn set_depth_data(&mut self, depths: Vec<DepthData>) {
+        self.depth_data = depths;
+        self.write_log(&format!("加载{}条Depth数据", self.depth_data.len()));
+    }
+
     /// Load bar data from a database implementing BaseDatabase trait
     ///
     /// This method loads historical bar data from any database backend
@@ -699,9 +709,34 @@ impl BacktestingEngine {
         Ok(count)
     }
 
+    /// Load depth data from a database implementing BaseDatabase trait
+    ///
+    /// # Arguments
+    /// * `database` - Arc reference to a database implementing BaseDatabase
+    ///
+    /// # Returns
+    /// Number of depth entries loaded, or error message
+    pub async fn load_depth_data_from_database(
+        &mut self,
+        database: &Arc<dyn BaseDatabase>,
+    ) -> Result<usize, String> {
+        let depths = database.load_depth_data(
+            &self.symbol,
+            self.exchange,
+            self.start,
+            self.end,
+        ).await.map_err(|e| e.to_string())?;
+
+        let count = depths.len();
+        self.depth_data = depths;
+        self.write_log(&format!("从数据库加载{}条Depth数据", count));
+
+        Ok(count)
+    }
+
     /// Run backtesting
     pub async fn run_backtesting(&mut self) -> Result<(), String> {
-        if self.history_data.is_empty() && self.tick_data.is_empty() {
+        if self.history_data.is_empty() && self.tick_data.is_empty() && self.depth_data.is_empty() {
             return Err("历史数据为空，无法开始回测".to_string());
         }
 
@@ -846,88 +881,184 @@ impl BacktestingEngine {
     ///
     /// Same look-ahead bias prevention as bar mode:
     /// Orders placed by strategy are only evaluated on the next tick.
+    ///
+    /// When depth data is available, it is interleaved with tick data by timestamp.
+    /// Depth updates are processed before strategy callbacks to maintain the
+    /// anti-look-ahead-bias ordering: update_dt → cross_pending_orders →
+    /// update_indicators → strategy.on_depth/on_tick
     async fn run_tick_backtesting(&mut self) -> Result<(), String> {
         // Take ownership to avoid borrow conflicts while mutating self
         let tick_data = std::mem::take(&mut self.tick_data);
+        let depth_data = std::mem::take(&mut self.depth_data);
 
-        for tick in &tick_data {
-            self.clock.set_time(tick.datetime);
+        // Merge tick and depth events by timestamp
+        // TickEvent(tick_index) | DepthEvent(depth_index)
+        enum TickOrDepth {
+            Tick(usize),
+            Depth(usize),
+        }
+        let mut events: Vec<(DateTime<Utc>, TickOrDepth)> = Vec::new();
+        for (i, tick) in tick_data.iter().enumerate() {
+            events.push((tick.datetime, TickOrDepth::Tick(i)));
+        }
+        for (i, depth) in depth_data.iter().enumerate() {
+            events.push((depth.datetime, TickOrDepth::Depth(i)));
+        }
+        // Stable sort by timestamp: when timestamps are equal, ticks come before depth
+        // (ticks already in the slice are at lower indices, stable sort preserves this)
+        events.sort_by_key(|(dt, _)| *dt);
 
-            let synthetic_bar = BarData {
-                gateway_name: "BACKTESTING".to_string(),
-                symbol: tick.symbol.clone(),
-                exchange: tick.exchange,
-                datetime: tick.datetime,
-                interval: Some(Interval::Tick),
-                open_price: tick.last_price,
-                high_price: tick.last_price,
-                low_price: tick.last_price,
-                close_price: tick.last_price,
-                volume: tick.volume,
-                turnover: tick.turnover,
-                open_interest: tick.open_interest,
-                extra: None,
-            };
-            self.new_day(&synthetic_bar);
+        // Track the last tick for synthetic bar / daily result close
+        let mut last_tick_ref: Option<&TickData> = None;
 
-            // Cross limit orders with tick data
-            if let Some(ref mut sim_exchange) = self.simulated_exchange {
-                let trades = sim_exchange.process_tick(&self.vt_symbol, tick, self.exchange, self.clock.as_ref());
-                for trade in trades {
-                    self.trades.insert(trade.tradeid.clone(), trade.clone());
-                    self.trade_count += 1;
-                    if let Err(e) = self.position.apply_fill(&trade) {
-                        tracing::error!("仓位更新失败: {}", e);
+        for (_dt, event) in &events {
+            match event {
+                TickOrDepth::Depth(idx) => {
+                    let depth = &depth_data[*idx];
+                    self.clock.set_time(depth.datetime);
+
+                    // Process depth update: call strategy.on_depth AFTER crossing pending orders
+                    // (same event ordering pattern: update_dt → cross → indicators → callback)
+
+                    // Build a synthetic bar from best bid/ask for order crossing
+                    let best_bid = depth.bids.iter().next_back().map(|(p, _)| p.to_string().parse::<f64>().unwrap_or(0.0)).unwrap_or(0.0);
+                    let best_ask = depth.asks.iter().next().map(|(p, _)| p.to_string().parse::<f64>().unwrap_or(0.0)).unwrap_or(0.0);
+                    let mid_price = if best_bid > 0.0 && best_ask > 0.0 {
+                        (best_bid + best_ask) / 2.0
+                    } else {
+                        best_bid.max(best_ask)
+                    };
+
+                    let synthetic_bar = BarData {
+                        gateway_name: "BACKTESTING".to_string(),
+                        symbol: depth.symbol.clone(),
+                        exchange: depth.exchange,
+                        datetime: depth.datetime,
+                        interval: Some(Interval::Tick),
+                        open_price: mid_price,
+                        high_price: mid_price,
+                        low_price: mid_price,
+                        close_price: mid_price,
+                        volume: 0.0,
+                        turnover: 0.0,
+                        open_interest: 0.0,
+                        extra: None,
+                    };
+                    self.new_day(&synthetic_bar);
+
+                    // Cross pending orders against depth data
+                    if self.simulated_exchange.is_none() {
+                        // Use synthetic bar for order crossing (depth doesn't have OHLCV)
+                        self.cross_limit_order(&synthetic_bar);
+                        self.cross_stop_order(&synthetic_bar);
                     }
-                    if let Some(ref mut daily) = self.daily_result {
-                        daily.trades.push(trade.clone());
-                        daily.trade_count += 1;
-                        daily.turnover += trade.price * trade.volume * self.size;
-                        daily.commission += trade.price * trade.volume * self.size * self.rate;
+                    self.cross_emulated_order(&synthetic_bar);
+
+                    // Update indicators
+                    let _updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
+
+                    // Check timers
+                    let timer_fired = self.check_timers(depth.datetime);
+                    for timer_id in &timer_fired {
+                        if let Some(strategy) = &mut self.strategy {
+                            strategy.on_timer(timer_id);
+                        }
                     }
-                    self.active_limit_orders.retain(|_, o| o.status != Status::AllTraded);
+
+                    // Call strategy on_depth AFTER fills are settled
+                    let pending = if let Some(strategy) = &mut self.strategy {
+                        let ctx = Arc::clone(&self.strategy_context);
+                        strategy.on_depth(depth, &ctx);
+                        strategy.drain_pending_orders()
+                    } else {
+                        Vec::new()
+                    };
+                    for req in pending {
+                        self.send_limit_order(req);
+                    }
                 }
-            } else {
-                self.cross_limit_order_tick(tick);
-            }
-            
-            // Cross stop orders with tick data
-            if self.simulated_exchange.is_none() {
-                self.cross_stop_order_tick(tick);
-            }
-            
-            // Cross emulated orders (trailing stops, MIT, LIT)
-            self.cross_emulated_order(&synthetic_bar);
-            
-            // Update indicators and dispatch on_indicator callbacks
-            let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
-            
-            // Check timers and dispatch on_timer callbacks (before on_tick)
-            let timer_fired = self.check_timers(tick.datetime);
-            for timer_id in &timer_fired {
-                if let Some(strategy) = &mut self.strategy {
-                    strategy.on_timer(timer_id);
+                TickOrDepth::Tick(idx) => {
+                    let tick = &tick_data[*idx];
+                    last_tick_ref = Some(tick);
+                    self.clock.set_time(tick.datetime);
+
+                    let synthetic_bar = BarData {
+                        gateway_name: "BACKTESTING".to_string(),
+                        symbol: tick.symbol.clone(),
+                        exchange: tick.exchange,
+                        datetime: tick.datetime,
+                        interval: Some(Interval::Tick),
+                        open_price: tick.last_price,
+                        high_price: tick.last_price,
+                        low_price: tick.last_price,
+                        close_price: tick.last_price,
+                        volume: tick.volume,
+                        turnover: tick.turnover,
+                        open_interest: tick.open_interest,
+                        extra: None,
+                    };
+                    self.new_day(&synthetic_bar);
+
+                    // Cross limit orders with tick data
+                    if let Some(ref mut sim_exchange) = self.simulated_exchange {
+                        let trades = sim_exchange.process_tick(&self.vt_symbol, tick, self.exchange, self.clock.as_ref());
+                        for trade in trades {
+                            self.trades.insert(trade.tradeid.clone(), trade.clone());
+                            self.trade_count += 1;
+                            if let Err(e) = self.position.apply_fill(&trade) {
+                                tracing::error!("仓位更新失败: {}", e);
+                            }
+                            if let Some(ref mut daily) = self.daily_result {
+                                daily.trades.push(trade.clone());
+                                daily.trade_count += 1;
+                                daily.turnover += trade.price * trade.volume * self.size;
+                                daily.commission += trade.price * trade.volume * self.size * self.rate;
+                            }
+                            self.active_limit_orders.retain(|_, o| o.status != Status::AllTraded);
+                        }
+                    } else {
+                        self.cross_limit_order_tick(tick);
+                    }
+                    
+                    // Cross stop orders with tick data
+                    if self.simulated_exchange.is_none() {
+                        self.cross_stop_order_tick(tick);
+                    }
+                    
+                    // Cross emulated orders (trailing stops, MIT, LIT)
+                    self.cross_emulated_order(&synthetic_bar);
+                    
+                    // Update indicators and dispatch on_indicator callbacks
+                    let updated_indicators = self.strategy_context.update_indicators(&self.vt_symbol, &synthetic_bar);
+                    
+                    // Check timers and dispatch on_timer callbacks (before on_tick)
+                    let timer_fired = self.check_timers(tick.datetime);
+                    for timer_id in &timer_fired {
+                        if let Some(strategy) = &mut self.strategy {
+                            strategy.on_timer(timer_id);
+                        }
+                    }
+                    
+                    // Call strategy on_tick AFTER fills are settled
+                    let pending = if let Some(strategy) = &mut self.strategy {
+                        let ctx = Arc::clone(&self.strategy_context);
+                        strategy.on_tick(tick, &ctx);
+                        for (name, value) in &updated_indicators {
+                            strategy.on_indicator(name, *value);
+                        }
+                        strategy.drain_pending_orders()
+                    } else {
+                        Vec::new()
+                    };
+                    for req in pending {
+                        self.send_limit_order(req);
+                    }
                 }
-            }
-            
-            // Call strategy on_tick AFTER fills are settled
-            let pending = if let Some(strategy) = &mut self.strategy {
-                let ctx = Arc::clone(&self.strategy_context);
-                strategy.on_tick(tick, &ctx);
-                for (name, value) in &updated_indicators {
-                    strategy.on_indicator(name, *value);
-                }
-                strategy.drain_pending_orders()
-            } else {
-                Vec::new()
-            };
-            for req in pending {
-                self.send_limit_order(req);
             }
         }
 
         // Calculate final result based on last tick
-        if let Some(last_tick) = tick_data.last() {
+        if let Some(last_tick) = last_tick_ref {
             // Create a synthetic bar for closing
             let close_bar = BarData {
                 gateway_name: "BACKTESTING".to_string(),
@@ -947,8 +1078,9 @@ impl BacktestingEngine {
             self.close_day(&close_bar);
         }
 
-        // Restore tick data
+        // Restore data
         self.tick_data = tick_data;
+        self.depth_data = depth_data;
 
         Ok(())
     }

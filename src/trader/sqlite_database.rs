@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::error::DatabaseError;
 use super::constant::{Direction, Exchange, Interval, Offset, OrderType, Status};
 use super::database::{BaseDatabase, BarOverview, TickOverview, EventRecord};
-use super::object::{BarData, TickData, OrderData, TradeData, PositionData};
+use super::object::{BarData, TickData, OrderData, TradeData, PositionData, DepthData};
 
 /// SQLite database implementation
 ///
@@ -403,6 +403,29 @@ impl SqliteDatabase {
         let _ = conn.execute("ALTER TABLE dborderdata ADD COLUMN post_only INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE dborderdata ADD COLUMN reduce_only INTEGER NOT NULL DEFAULT 0", []);
 
+        // Depth data table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS dbdepthdata (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                exchange TEXT NOT NULL,
+                datetime TEXT NOT NULL,
+                bids_json TEXT NOT NULL DEFAULT '{}',
+                asks_json TEXT NOT NULL DEFAULT '{}',
+                gateway_name TEXT NOT NULL DEFAULT '',
+                UNIQUE(symbol, exchange, datetime)
+            )
+            "#,
+            [],
+        ).map_err(|e| format!("Failed to create dbdepthdata table: {}", e))?;
+
+        // Create index for faster depth queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_depth_datetime ON dbdepthdata(symbol, exchange, datetime)",
+            [],
+        ).map_err(|e| format!("Failed to create depth datetime index: {}", e))?;
+
         Ok(())
     }
 }
@@ -676,6 +699,70 @@ impl BaseDatabase for SqliteDatabase {
             .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect ticks: {}", e)))?;
 
             Ok(ticks)
+        }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
+    }
+
+    async fn load_depth_data(
+        &self,
+        symbol: &str,
+        exchange: Exchange,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DepthData>, DatabaseError> {
+        let conn = self.conn.clone();
+
+        let symbol = symbol.to_string();
+        let exchange_str = format!("{:?}", exchange);
+        let start_str = start.to_rfc3339();
+        let end_str = end.to_rfc3339();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock()
+                .map_err(|e| DatabaseError::Other(format!("Failed to acquire database lock: {}", e)))?;
+
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT symbol, exchange, datetime, bids_json, asks_json, gateway_name
+                FROM dbdepthdata
+                WHERE symbol = ?1 AND exchange = ?2 AND datetime >= ?3 AND datetime <= ?4
+                ORDER BY datetime ASC
+                "#
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to prepare statement: {}", e)))?;
+
+            let depths = stmt.query_map(
+                params![symbol, exchange_str, start_str, end_str],
+                |row| {
+                    let datetime_str: String = row.get(2)?;
+                    let datetime = DateTime::parse_from_rfc3339(&datetime_str)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now());
+
+                    let exchange_str: String = row.get(1)?;
+                    let exchange = Self::parse_exchange(&exchange_str);
+
+                    let bids_json: String = row.get(3)?;
+                    let asks_json: String = row.get(4)?;
+
+                    let bids: std::collections::BTreeMap<rust_decimal::Decimal, rust_decimal::Decimal> =
+                        serde_json::from_str(&bids_json).unwrap_or_default();
+                    let asks: std::collections::BTreeMap<rust_decimal::Decimal, rust_decimal::Decimal> =
+                        serde_json::from_str(&asks_json).unwrap_or_default();
+
+                    Ok(DepthData {
+                        gateway_name: row.get(5)?,
+                        symbol: row.get(0)?,
+                        exchange,
+                        datetime,
+                        bids,
+                        asks,
+                        extra: None,
+                    })
+                },
+            ).map_err(|e| DatabaseError::QueryFailed(format!("Failed to query depths: {}", e)))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| DatabaseError::QueryFailed(format!("Failed to collect depths: {}", e)))?;
+
+            Ok(depths)
         }).await.map_err(|e| DatabaseError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
