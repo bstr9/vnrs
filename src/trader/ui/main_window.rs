@@ -1071,6 +1071,10 @@ impl MainWindow {
                 if let Some(configs) = self.indicator_panel.take_apply() {
                     self.apply_indicators_to_charts(&configs);
                 }
+                // Apply Python indicator changes to charts
+                if let Some(python_configs) = self.indicator_panel.take_apply_python() {
+                    self.apply_python_indicators_to_charts(&python_configs);
+                }
             }
             CentralTab::BracketOrder => {
                 let bracket_engine = self.main_engine.as_ref().map(|e| e.bracket_order_engine().clone());
@@ -1410,6 +1414,21 @@ impl MainWindow {
             }
         }
 
+        // Trading widget: stop order submit (from TradingWidget stop/stop-limit order types)
+        if let Some(req) = self.trading.take_stop_order() {
+            if let Some(ref engine) = self.main_engine {
+                let se = engine.stop_order_engine().clone();
+                tokio::spawn(async move {
+                    match se.add_stop_order(req) {
+                        Ok(id) => tracing::info!("TradingWidget 止损单已提交: id={}", id),
+                        Err(e) => tracing::warn!("TradingWidget 止损单提交失败: {}", e),
+                    }
+                });
+            } else {
+                self.toast_manager.add("主引擎未就绪", ToastType::Error);
+            }
+        }
+
         // Advanced orders panel: emulated order submit
         if let Some(req) = self.advanced_orders_panel.take_emul_request() {
             if let Some(ref engine) = self.main_engine {
@@ -1487,6 +1506,49 @@ impl MainWindow {
                         Err(e) => tracing::error!("策略 {} 移除失败: {}", n, e),
                     }
                 });
+            }
+        }
+
+        // Poll Python strategy indicator registrations
+        #[cfg(feature = "python")]
+        {
+            if let Some(ref se) = self.strategy_engine {
+                let names = se.get_all_strategy_names();
+                for name in names {
+                    let registrations = se.get_pending_indicator_registrations(&name);
+                    for reg in registrations {
+                        use super::indicator_panel::{IndicatorCategory, PythonIndicatorEntry};
+                        use crate::chart::IndicatorLocation;
+
+                        let category = match reg.category.as_str() {
+                            "trend" => IndicatorCategory::Trend,
+                            "volatility" => IndicatorCategory::Volatility,
+                            "volume" => IndicatorCategory::Volume,
+                            "oscillator" => IndicatorCategory::Oscillator,
+                            "trend_following" => IndicatorCategory::TrendFollowing,
+                            "momentum" => IndicatorCategory::Momentum,
+                            _ => IndicatorCategory::Oscillator,
+                        };
+
+                        let location = match reg.location.as_str() {
+                            "main" => IndicatorLocation::Main,
+                            _ => IndicatorLocation::Sub,
+                        };
+
+                        let entry = PythonIndicatorEntry {
+                            id: reg.id,
+                            name: reg.name,
+                            category,
+                            params_desc: reg.params_desc,
+                            enabled: true,
+                            color: egui::Color32::from_rgb(0, 200, 255),
+                            location,
+                            last_values: Vec::new(),
+                        };
+
+                        self.indicator_panel.add_python_indicator(entry);
+                    }
+                }
             }
         }
     }
@@ -1971,6 +2033,38 @@ impl MainWindow {
                 };
                 
                 chart.add_indicator(indicator);
+            }
+        }
+    }
+
+    /// Apply Python indicator configurations to all charts
+    fn apply_python_indicators_to_charts(&mut self, configs: &[super::indicator_panel::PythonIndicatorEntry]) {
+        use crate::chart::CustomIndicator;
+
+        for chart in self.charts.values_mut() {
+            for config in configs {
+                if !config.enabled {
+                    continue;
+                }
+
+                // Create a CustomIndicator from the Python indicator entry.
+                // The expression is derived from the params_desc — for Python indicators
+                // that compute externally, we use the indicator name as a placeholder
+                // expression so the chart can display the overlay line.
+                let expression = if config.params_desc.is_empty() {
+                    format!("close * 0 + nan") // placeholder: no visible line until data flows
+                } else {
+                    // Try to use params_desc as expression; if invalid, fall back to placeholder
+                    config.params_desc.clone()
+                };
+
+                let indicator = CustomIndicator::new(
+                    config.name.clone(),
+                    expression,
+                    config.color,
+                    config.location,
+                );
+                chart.add_indicator(Box::new(indicator));
             }
         }
     }

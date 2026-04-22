@@ -360,6 +360,12 @@ pub trait StrategyTemplate: Send + Sync {
         Vec::new() // Default: no pending cancellations
     }
 
+    /// Drain pending indicator registrations from the strategy
+    #[cfg(feature = "python")]
+    fn drain_pending_indicator_registrations(&mut self) -> Vec<crate::python::PendingIndicatorRegistration> {
+        Vec::new() // Default: no indicator registrations
+    }
+
     /// Update position
     fn update_position(&mut self, vt_symbol: &str, position: f64);
 

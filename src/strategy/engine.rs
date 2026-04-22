@@ -1645,6 +1645,20 @@ impl StrategyEngine {
         results
     }
 
+    /// Process pending indicator registrations from a strategy
+    ///
+    /// Returns the registrations that the strategy queued during on_init/on_bar callbacks.
+    /// The caller (typically MainWindow) should forward these to the indicator panel.
+    #[cfg(feature = "python")]
+    pub fn get_pending_indicator_registrations(&self, strategy_name: &str) -> Vec<crate::python::PendingIndicatorRegistration> {
+        let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(strategy) = strategies.get_mut(strategy_name) {
+            strategy.drain_pending_indicator_registrations()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Register a stop order for a strategy
     ///
     /// Creates a StopOrder tracked by the engine. When the trigger price is reached
