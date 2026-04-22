@@ -190,6 +190,41 @@ impl PythonEngine {
         Ok(())
     }
 
+    pub fn reset_strategy(&self, py: Python, strategy_name: &str) -> PyResult<()> {
+        if let Some(strategy_obj) = self.strategies.get(strategy_name) {
+            // Call on_reset via Python method dispatch (supports subclass overrides)
+            strategy_obj.call_method0(py, "on_reset")?;
+            strategy_obj.bind(py).borrow_mut().set_inited();
+            // Clear pos_data
+            let mut strategy_ref = strategy_obj.bind(py).borrow_mut();
+            strategy_ref.pos_data.clear();
+            strategy_ref.target_data.clear();
+            strategy_ref.variables.clear();
+            strategy_ref.active_orderids.clear();
+            strategy_ref.active_stop_orderids.clear();
+        }
+        Ok(())
+    }
+
+    pub fn restart_strategy(&self, py: Python, strategy_name: &str) -> PyResult<()> {
+        // Stop
+        if let Some(strategy_obj) = self.strategies.get(strategy_name) {
+            strategy_obj.call_method0(py, "on_stop")?;
+            strategy_obj.bind(py).borrow_mut().set_stopped();
+        }
+        // Re-init
+        if let Some(strategy_obj) = self.strategies.get(strategy_name) {
+            strategy_obj.call_method0(py, "on_init")?;
+            strategy_obj.bind(py).borrow_mut().set_inited();
+        }
+        // Start
+        if let Some(strategy_obj) = self.strategies.get(strategy_name) {
+            strategy_obj.call_method0(py, "on_start")?;
+            strategy_obj.bind(py).borrow_mut().set_trading();
+        }
+        Ok(())
+    }
+
     pub fn on_tick(&self, py: Python, tick: &TickData) -> PyResult<()> {
         let vt_symbol = format!("{}.{}", tick.symbol, tick.exchange.value());
 
@@ -463,6 +498,14 @@ impl PythonEngine {
 
     pub fn stop_strategy_py(&self, py: Python, strategy_name: &str) -> PyResult<()> {
         self.stop_strategy(py, strategy_name)
+    }
+
+    pub fn reset_strategy_py(&self, py: Python, strategy_name: &str) -> PyResult<()> {
+        self.reset_strategy(py, strategy_name)
+    }
+
+    pub fn restart_strategy_py(&self, py: Python, strategy_name: &str) -> PyResult<()> {
+        self.restart_strategy(py, strategy_name)
     }
 }
 

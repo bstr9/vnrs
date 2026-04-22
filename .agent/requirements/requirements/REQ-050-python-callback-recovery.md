@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-050
 title: "Python 策略回调失败无恢复机制"
 status: completed
@@ -33,4 +33,4 @@ versions:
 - [x] `on_init` 失败后策略状态转为 Error，不进入 Running 状态
 - [x] `on_start` 失败后策略自动停止，不接收后续行情
 - [x] 提供策略状态查询接口（Running/Error/Stopped）
-- [ ] 提供策略重置/重启机制
+- [x] 提供策略重置/重启机制

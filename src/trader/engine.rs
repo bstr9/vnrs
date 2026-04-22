@@ -1669,6 +1669,27 @@ impl MainEngine {
         }
     }
 
+    /// Reset a strategy by name (delegates to StrategyEngine)
+    ///
+    /// Clears strategy state and returns it to the Initialized state.
+    /// The strategy can then be started again with `start_strategy()`.
+    pub async fn reset_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        match self.strategy_engine() {
+            Some(se) => se.reset_strategy(strategy_name).await,
+            None => Err("StrategyEngine not configured".to_string()),
+        }
+    }
+
+    /// Restart a strategy by name (delegates to StrategyEngine)
+    ///
+    /// Performs a full stop → init → start cycle.
+    pub async fn restart_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        match self.strategy_engine() {
+            Some(se) => se.restart_strategy(strategy_name).await,
+            None => Err("StrategyEngine not configured".to_string()),
+        }
+    }
+
     /// Get tick data
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
         self.oms_engine.get_tick(vt_symbol)

@@ -27,6 +27,49 @@ impl StrategyEngineHandle {
     fn get_all_strategy_names(&self) -> PyResult<Vec<String>> {
         Ok(self.inner.get_all_strategy_names())
     }
+
+    /// Reset a strategy: clears state and returns to Initialized.
+    ///
+    /// If the strategy is currently trading, it will be stopped first.
+    /// After reset, the strategy can be started again with `start_strategy()`.
+    fn reset_strategy(&self, strategy_name: String) -> PyResult<()> {
+        let engine = self.inner.clone();
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.block_on(async {
+                    engine.reset_strategy(&strategy_name).await
+                }).map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to reset strategy '{}': {}",
+                        strategy_name, e
+                    ))
+                })
+            }
+            Err(_) => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "No tokio runtime available — must be called from within an async context",
+            )),
+        }
+    }
+
+    /// Restart a strategy: full stop → init → start cycle.
+    fn restart_strategy(&self, strategy_name: String) -> PyResult<()> {
+        let engine = self.inner.clone();
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.block_on(async {
+                    engine.restart_strategy(&strategy_name).await
+                }).map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to restart strategy '{}': {}",
+                        strategy_name, e
+                    ))
+                })
+            }
+            Err(_) => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "No tokio runtime available — must be called from within an async context",
+            )),
+        }
+    }
 }
 
 /// Create main engine from Python
@@ -336,6 +379,20 @@ impl PythonEngineWrapper {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .stop_strategy_py(py, &strategy_name)
+    }
+
+    fn reset_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .reset_strategy_py(py, &strategy_name)
+    }
+
+    fn restart_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .restart_strategy_py(py, &strategy_name)
     }
 
     fn on_tick(&self, py: Python, tick_dict: &Bound<'_, PyDict>) -> PyResult<()> {
