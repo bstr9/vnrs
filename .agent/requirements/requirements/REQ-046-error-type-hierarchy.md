@@ -37,6 +37,6 @@ relations:
 ## 验收标准
 - [x] 引入 `thiserror` 依赖
 - [x] 定义核心错误枚举：`GatewayError`、`DatabaseError`、`StrategyError`、`BacktestError`
-- [ ] `BaseGateway` trait 的返回类型从 `Result<T, String>` 改为 `Result<T, GatewayError>`
-- [ ] `BaseDatabase` trait 的返回类型从 `Result<T, String>` 改为 `Result<T, DatabaseError>`
+- [x] `BaseGateway` trait 的返回类型从 `Result<T, String>` 改为 `Result<T, GatewayError>`
+- [x] `BaseDatabase` trait 的返回类型从 `Result<T, String>` 改为 `Result<T, DatabaseError>`
 - [x] 渐进式迁移：新代码使用枚举，旧代码逐步改造

@@ -303,6 +303,17 @@ pub trait StrategyTemplate: Send + Sync {
     /// Stop strategy
     fn on_stop(&mut self);
 
+    /// Reset strategy state (optional override).
+    ///
+    /// Called when a strategy is reset via `StrategyEngine::reset_strategy()`.
+    /// Use this to clear internal variables, counters, positions, and any
+    /// other state that should be re-initialized before the strategy starts again.
+    /// After `on_reset()`, the strategy state transitions to `Inited`.
+    fn on_reset(&mut self) {
+        // Default implementation: no-op
+        // Strategies that need custom reset behavior should override this
+    }
+
     /// Tick data callback
     fn on_tick(&mut self, tick: &TickData, context: &StrategyContext);
 

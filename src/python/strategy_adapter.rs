@@ -294,6 +294,34 @@ impl StrategyTemplate for PythonStrategyAdapter {
         self.state = StrategyState::Stopped;
     }
 
+    fn on_reset(&mut self) {
+        // Try to call on_reset on the Python strategy.
+        // If the Python subclass doesn't define on_reset, this will call
+        // the base Strategy.on_reset() which is a no-op — that's fine.
+        if let Err(e) = self.call_py_method_no_args("on_reset") {
+            warn!("策略 {} on_reset 错误: {}", self.strategy_name, e);
+        }
+        // Clear internal tracking state
+        self.positions.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.variables.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        // Clear pending orders/stop orders
+        if let Some(ref queue) = self.pending_orders {
+            queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        if let Some(ref queue) = self.pending_stop_orders {
+            queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        // Reset Python strategy's pos_data and state
+        Python::attach(|py| {
+            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+            // Clear positions in the Python Strategy object
+            let _ = strategy.call_method1(py, "set_pos", ("", 0.0));
+            // Reset internal state flags to Inited
+            let _ = strategy.call_method0(py, "set_inited");
+        });
+        self.state = StrategyState::Inited;
+    }
+
     fn on_tick(&mut self, tick: &TickData, _context: &StrategyContext) {
         Python::attach(|py| {
             let py_tick = crate::python::data_types::PyTickData::from_rust(tick);

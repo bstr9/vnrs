@@ -95,6 +95,10 @@ pub struct Strategy {
     #[pyo3(get)]
     pub parameters: HashMap<String, String>,
 
+    /// Parameter type hints: maps parameter name to expected type ("int", "float", "str", "bool")
+    #[pyo3(get)]
+    pub parameter_types: HashMap<String, String>,
+
     #[pyo3(get)]
     pub variables: HashMap<String, String>,
 
@@ -147,6 +151,7 @@ impl Strategy {
             pos_data: HashMap::new(),
             target_data: HashMap::new(),
             parameters: HashMap::new(),
+            parameter_types: HashMap::new(),
             variables: HashMap::new(),
             active_orderids: Vec::new(),
             engine: None,
@@ -201,6 +206,23 @@ impl Strategy {
     /// Stop the strategy. Override in subclass.
     #[pyo3(signature = ())]
     fn on_stop(&self, _py: Python) -> PyResult<()> {
+        Ok(())
+    }
+
+    /// Reset the strategy state. Override in subclass to clear variables, counters, etc.
+    ///
+    /// Called when `StrategyEngine::reset_strategy()` is invoked. After `on_reset()`,
+    /// the strategy state transitions to "Inited" and can be started again with
+    /// `start_strategy()`.
+    ///
+    /// Override this method in your subclass to clear any custom state:
+    /// ```python
+    /// def on_reset(self):
+    ///     self.my_counter = 0
+    ///     self.my_positions.clear()
+    /// ```
+    #[pyo3(signature = ())]
+    fn on_reset(&self, _py: Python) -> PyResult<()> {
         Ok(())
     }
 
@@ -518,6 +540,37 @@ impl Strategy {
         Ok(())
     }
 
+    /// Reset the strategy: clears state and returns to "Inited".
+    ///
+    /// If the strategy is currently trading, it will be stopped first.
+    /// The strategy's `on_reset()` callback will be called, and internal
+    /// state (positions, counters, etc.) will be cleared.
+    /// After reset, the strategy can be started again with `start()`.
+    fn reset(&self) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let strategy_name = self.strategy_name.clone();
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "reset_strategy", (strategy_name,));
+            });
+        }
+        Ok(())
+    }
+
+    /// Restart the strategy: full stop → init → start cycle.
+    ///
+    /// Equivalent to calling `stop()`, then re-initializing, then `start()`.
+    /// The strategy goes through a complete restart cycle, reloading historical
+    /// data and reinitializing indicators.
+    fn restart(&self) -> PyResult<()> {
+        if let Some(ref engine) = self.engine {
+            let strategy_name = self.strategy_name.clone();
+            Python::attach(|py| {
+                let _ = engine.call_method1(py, "restart_strategy", (strategy_name,));
+            });
+        }
+        Ok(())
+    }
+
     /// Put strategy event (vnpy CtaTemplate compatible).
     /// Notifies the engine/UI that strategy state has changed.
     /// In backtesting mode, this is a no-op.
@@ -641,12 +694,28 @@ impl Strategy {
         Ok(self.parameters.get(key).cloned().or(default.map(|s| s.to_string())))
     }
 
+    /// Get the declared type hint for a parameter.
+    ///
+    /// Returns the type string ("int", "float", "str", "bool") if the parameter
+    /// has a type hint, or None if no type was declared.
+    fn get_parameter_type(&self, key: &str) -> PyResult<Option<String>> {
+        Ok(self.parameter_types.get(key).cloned())
+    }
+
     /// Set a strategy parameter.
+    ///
+    /// If the parameter was declared with a type hint via `insert_parameter`,
+    /// the value will be validated against that type. On type mismatch, raises
+    /// a Python ValueError with a clear message.
     ///
     /// Args:
     ///     key: Parameter name
     ///     value: Parameter value
     fn set_parameter(&mut self, key: &str, value: &str) -> PyResult<()> {
+        // Validate type if this parameter has a declared type
+        if let Some(type_hint) = self.parameter_types.get(key) {
+            Self::validate_parameter_type(key, type_hint, value)?;
+        }
         self.parameters.insert(key.to_string(), value.to_string());
         Ok(())
     }
@@ -672,11 +741,26 @@ impl Strategy {
         Ok(())
     }
 
-    /// Insert a strategy parameter (called by engine when loading strategy settings).
+    /// Insert a strategy parameter with an optional type hint (called by engine when loading strategy settings).
     ///
-    /// This is an alias for `set_parameter` used by the engine to populate
-    /// strategy parameters from configuration.
-    fn insert_parameter(&mut self, key: &str, value: &str) -> PyResult<()> {
+    /// This declares a parameter with its expected type. If `type_hint` is one of
+    /// "int", "float", "bool", or "str", subsequent `set_parameter` calls will
+    /// validate the value against that type. An empty or "str" type_hint means
+    /// no validation (strings are the default).
+    ///
+    /// Args:
+    ///     key: Parameter name
+    ///     type_hint: Expected type — "int", "float", "str", "bool", or "" for no validation
+    ///     value: Parameter value
+    #[pyo3(signature = (key, type_hint, value))]
+    fn insert_parameter(&mut self, key: &str, type_hint: &str, value: &str) -> PyResult<()> {
+        if !type_hint.is_empty() && type_hint != "str" {
+            // Validate the default value against the declared type
+            Self::validate_parameter_type(key, type_hint, value)?;
+        }
+        if !type_hint.is_empty() {
+            self.parameter_types.insert(key.to_string(), type_hint.to_string());
+        }
         self.parameters.insert(key.to_string(), value.to_string());
         Ok(())
     }
@@ -745,6 +829,47 @@ impl Strategy {
 }
 
 impl Strategy {
+    /// Validate a parameter value against its declared type hint.
+    ///
+    /// Returns `Ok(())` if the value matches the type, or a `PyValueError`
+    /// with a clear message like: `Parameter 'window' expects int, got 'abc'`
+    fn validate_parameter_type(key: &str, type_hint: &str, value: &str) -> PyResult<()> {
+        match type_hint {
+            "int" => {
+                if value.parse::<i64>().is_err() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Parameter '{}' expects int, got '{}'",
+                        key, value
+                    )));
+                }
+            }
+            "float" => {
+                if value.parse::<f64>().is_err() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Parameter '{}' expects float, got '{}'",
+                        key, value
+                    )));
+                }
+            }
+            "bool" => {
+                let lower = value.to_lowercase();
+                if lower != "true" && lower != "false" {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "Parameter '{}' expects bool, got '{}'",
+                        key, value
+                    )));
+                }
+            }
+            "str" | "" => {
+                // No validation needed for string type
+            }
+            _ => {
+                // Unknown type hint — no validation, but don't error either
+            }
+        }
+        Ok(())
+    }
+
     /// Get the pending orders queue (for PythonStrategyAdapter to drain)
     pub fn pending_orders_arc(&self) -> Arc<Mutex<Vec<PendingOrder>>> {
         Arc::clone(&self.pending_orders)

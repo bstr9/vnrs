@@ -873,6 +873,102 @@ impl StrategyEngine {
         Ok(())
     }
 
+    /// Reset a strategy: clear state and return to Initialized.
+    ///
+    /// If the strategy is currently Trading, it will be stopped first.
+    /// Calls `on_reset()` on the strategy (if supported) to allow it to
+    /// clear internal variables, counters, positions, etc.
+    /// After reset, the strategy state is `Inited` and can be started again
+    /// with `start_strategy()`.
+    pub async fn reset_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        // If currently trading, stop first
+        let needs_stop = {
+            let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
+            match strategies.get(strategy_name) {
+                Some(strategy) => strategy.state() == StrategyState::Trading,
+                None => return Err(format!("Strategy {} not found", strategy_name)),
+            }
+        };
+
+        if needs_stop {
+            self.stop_strategy(strategy_name).await?;
+        }
+
+        // Call on_reset and set state to Inited
+        {
+            let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
+            if let Some(strategy) = strategies.get_mut(strategy_name) {
+                strategy.on_reset();
+            } else {
+                return Err(format!("Strategy {} not found", strategy_name));
+            }
+        }
+
+        // Clear strategy-level tracking data
+        {
+            let mut pnl = self.strategy_pnl.write().unwrap_or_else(|e| e.into_inner());
+            pnl.remove(strategy_name);
+        }
+        {
+            let mut unrealized = self.strategy_unrealized_pnl.write().unwrap_or_else(|e| e.into_inner());
+            unrealized.remove(strategy_name);
+        }
+        {
+            let mut trade_count = self.strategy_trade_count.write().unwrap_or_else(|e| e.into_inner());
+            trade_count.remove(strategy_name);
+        }
+        {
+            let mut avg_prices = self.strategy_avg_price.write().unwrap_or_else(|e| e.into_inner());
+            avg_prices.retain(|(name, _), _| name != strategy_name);
+        }
+        {
+            let mut frozen = self.strategy_frozen_closes.write().unwrap_or_else(|e| e.into_inner());
+            frozen.remove(strategy_name);
+        }
+        {
+            let mut close_info = self.order_close_info.write().unwrap_or_else(|e| e.into_inner());
+            close_info.retain(|_, info| info.strategy_name != strategy_name);
+        }
+
+        // Cancel all timers for this strategy
+        self.cancel_all_timers(strategy_name);
+
+        // Unregister bar synthesizers
+        self.unregister_bar_synthesizers(strategy_name);
+
+        tracing::info!("Strategy {} reset to Initialized state", strategy_name);
+        Ok(())
+    }
+
+    /// Restart a strategy: full stop + init + start cycle.
+    ///
+    /// Equivalent to calling `stop_strategy()` then `init_strategy()` then
+    /// `start_strategy()`. The strategy goes through a complete restart cycle,
+    /// reloading historical data and reinitializing indicators.
+    pub async fn restart_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        // Stop if trading
+        let needs_stop = {
+            let strategies = self.strategies.read().unwrap_or_else(|e| e.into_inner());
+            match strategies.get(strategy_name) {
+                Some(strategy) => strategy.state() == StrategyState::Trading,
+                None => return Err(format!("Strategy {} not found", strategy_name)),
+            }
+        };
+
+        if needs_stop {
+            self.stop_strategy(strategy_name).await?;
+        }
+
+        // Re-initialize (loads historical data + calls on_init)
+        self.init_strategy(strategy_name).await?;
+
+        // Start
+        self.start_strategy(strategy_name)?;
+
+        tracing::info!("Strategy {} restarted", strategy_name);
+        Ok(())
+    }
+
     /// Load historical data for strategy initialization
     ///
     /// Data source priority:
