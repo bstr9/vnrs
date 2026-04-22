@@ -1636,6 +1636,10 @@ pub struct CustomIndicator {
     config: IndicatorLineConfig,
     location: IndicatorLocation,
     base: IndicatorBase,
+    /// When true, this indicator's values come exclusively from update_raw()
+    /// (e.g., Python-computed indicators via on_indicator). update() and calculate()
+    /// are no-ops to prevent misaligned value vectors.
+    externally_computed: bool,
 }
 
 impl CustomIndicator {
@@ -1670,12 +1674,20 @@ impl CustomIndicator {
             },
             location,
             base: IndicatorBase::new("Custom", location),
+            externally_computed: false,
         }
     }
 
     /// Get the expression string for this custom indicator
     pub fn expression(&self) -> &str {
         &self.expression
+    }
+
+    /// Set whether this indicator is externally computed.
+    /// When true, update() and calculate() are no-ops — values come
+    /// exclusively from update_raw() (e.g., Python on_indicator values).
+    pub fn set_externally_computed(&mut self, value: bool) {
+        self.externally_computed = value;
     }
 
     /// Evaluate the cached AST for a single bar.
@@ -1694,6 +1706,10 @@ impl Indicator for CustomIndicator {
     }
 
     fn update(&mut self, bar: &BarData) -> bool {
+        if self.externally_computed {
+            // Values come from update_raw() only — skip expression evaluation
+            return false;
+        }
         self.base.count += 1;
         self.base.has_inputs = true;
         self.values.push(self.evaluate_expr(bar));
@@ -1714,9 +1730,13 @@ impl Indicator for CustomIndicator {
         self.base.reset_base();
     }
 
-    fn calculate(&mut self, bars: &[BarData]) {
+    fn calculate(&mut self, _bars: &[BarData]) {
+        if self.externally_computed {
+            // Values come from update_raw() only — skip recalculation
+            return;
+        }
         self.reset();
-        for bar in bars {
+        for bar in _bars {
             self.update(bar);
         }
     }

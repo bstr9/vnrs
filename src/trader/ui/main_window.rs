@@ -1563,9 +1563,11 @@ impl MainWindow {
                         continue;
                     }
                     for iv in &values {
+                        // PythonIndicatorEntry.id = "{strategy_name}_{indicator_name}"
+                        let indicator_id = format!("{}_{}", name, iv.name);
                         // Update indicator panel with latest values
                         self.indicator_panel.update_python_indicator_values(
-                            &iv.name,
+                            &indicator_id,
                             vec![(iv.name.clone(), iv.value)],
                         );
                         // Update chart overlays
@@ -2074,16 +2076,19 @@ impl MainWindow {
 
                 // Create a CustomIndicator from the Python indicator entry.
                 // Python indicators compute externally via on_indicator — use a placeholder
-                // expression that evaluates to NaN until update_raw() pushes real values.
-                // This avoids parse errors from treating params_desc as a math expression.
-                let expression = "close * 0 + nan".to_string();
+                // expression that parses but yields 0.0 (since "nan" isn't a valid variable).
+                // Values are then pushed via update_raw(), bypassing expression evaluation.
+                let expression = "(close - close)".to_string();
 
-                let indicator = CustomIndicator::new(
+                let mut indicator = CustomIndicator::new(
                     config.name.clone(),
                     expression,
                     config.color,
                     config.location,
                 );
+                // Mark as externally-computed so update()/calculate() are no-ops.
+                // Values come exclusively from update_raw() via on_indicator.
+                indicator.set_externally_computed(true);
                 chart.add_indicator(Box::new(indicator));
             }
         }
