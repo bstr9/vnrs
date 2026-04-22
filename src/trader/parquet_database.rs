@@ -977,11 +977,11 @@ impl BaseDatabase for ParquetDatabase {
         match gateway_name {
             Some(gw) => {
                 let path = self.order_file_path(gw);
-                Self::load_json(&path)
+                Self::load_json(&path).map_err(DatabaseError::from)
             }
             None => {
                 let dir = self.base_dir.join("orders");
-                Self::load_all_from_dir(&dir)
+                Self::load_all_from_dir(&dir).map_err(DatabaseError::from)
             }
         }
     }
@@ -990,11 +990,11 @@ impl BaseDatabase for ParquetDatabase {
         match gateway_name {
             Some(gw) => {
                 let path = self.trade_file_path(gw);
-                Self::load_json(&path)
+                Self::load_json(&path).map_err(DatabaseError::from)
             }
             None => {
                 let dir = self.base_dir.join("trades");
-                Self::load_all_from_dir(&dir)
+                Self::load_all_from_dir(&dir).map_err(DatabaseError::from)
             }
         }
     }
@@ -1003,11 +1003,11 @@ impl BaseDatabase for ParquetDatabase {
         match gateway_name {
             Some(gw) => {
                 let path = self.position_file_path(gw);
-                Self::load_json(&path)
+                Self::load_json(&path).map_err(DatabaseError::from)
             }
             None => {
                 let dir = self.base_dir.join("positions");
-                Self::load_all_from_dir(&dir)
+                Self::load_all_from_dir(&dir).map_err(DatabaseError::from)
             }
         }
     }
