@@ -54,7 +54,7 @@ nautilus_trader 使用 `Config` dataclass 做参数定义。
 - [x] Python `Strategy` 添加 `parameters` 类属性（子类覆盖，声明可配置参数）
 - [x] Python `Strategy` 添加 `variables` 类属性（子类覆盖，声明运行时变量）
 - [x] `get_parameter(name)` / `set_parameter(name, value)` 方法
-- [ ] 参数类型验证（如 int/float/str/bool）
+- [x] 参数类型验证（如 int/float/str/bool）
 - [x] 引擎可通过 `strategy.parameters` 获取参数列表用于 UI 展示
 - [x] 向后兼容现有 setting dict 方式
 
