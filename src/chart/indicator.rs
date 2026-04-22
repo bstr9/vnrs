@@ -1730,13 +1730,13 @@ impl Indicator for CustomIndicator {
         self.base.reset_base();
     }
 
-    fn calculate(&mut self, _bars: &[BarData]) {
+    fn calculate(&mut self, bars: &[BarData]) {
         if self.externally_computed {
             // Values come from update_raw() only — skip recalculation
             return;
         }
         self.reset();
-        for bar in _bars {
+        for bar in bars {
             self.update(bar);
         }
     }
