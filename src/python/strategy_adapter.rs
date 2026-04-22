@@ -45,6 +45,9 @@ pub struct PythonStrategyAdapter {
 
     /// Pending stop orders from Python strategy (shared with Strategy.pending_stop_orders)
     pending_stop_orders: Option<Arc<Mutex<Vec<PendingStopOrder>>>>,
+
+    /// Pending indicator registrations from Python strategy (shared with Strategy.pending_indicator_registrations)
+    pending_indicator_registrations: Option<Arc<Mutex<Vec<crate::python::PendingIndicatorRegistration>>>>,
 }
 
 impl PythonStrategyAdapter {
@@ -148,6 +151,7 @@ impl PythonStrategyAdapter {
                 variables: Arc::new(Mutex::new(HashMap::new())),
                 pending_orders: None, // Will be set if the instance is a Strategy
                 pending_stop_orders: None, // Will be set if the instance is a Strategy
+                pending_indicator_registrations: None, // Will be set if the instance is a Strategy
             })
         })
     }
@@ -160,16 +164,16 @@ impl PythonStrategyAdapter {
     ) -> Self {
         // Try to get the pending_orders Arc from the Strategy instance
         // by downcasting the PyAny to the Rust Strategy type
-        let (pending_orders, pending_stop_orders) = Python::attach(|py| {
+        let (pending_orders, pending_stop_orders, pending_indicator_registrations) = Python::attach(|py| {
             use crate::python::Strategy;
             py_strategy
                 .cast_bound::<Strategy>(py)
                 .ok()
                 .map(|bound| {
                     let borrowed = bound.borrow();
-                    (borrowed.pending_orders_arc(), borrowed.pending_stop_orders_arc())
+                    (Some(borrowed.pending_orders_arc()), Some(borrowed.pending_stop_orders_arc()), Some(borrowed.pending_indicator_registrations_arc()))
                 })
-                .unzip()
+                .unwrap_or((None, None, None))
         });
 
         Self {
@@ -183,6 +187,7 @@ impl PythonStrategyAdapter {
             variables: Arc::new(Mutex::new(HashMap::new())),
             pending_orders,
             pending_stop_orders,
+            pending_indicator_registrations,
         }
     }
 
@@ -309,6 +314,9 @@ impl StrategyTemplate for PythonStrategyAdapter {
             queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
         if let Some(ref queue) = self.pending_stop_orders {
+            queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        if let Some(ref queue) = self.pending_indicator_registrations {
             queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
         // Reset Python strategy's pos_data and state
@@ -542,6 +550,18 @@ impl StrategyTemplate for PythonStrategyAdapter {
                 }
             })
             .collect()
+    }
+
+    fn drain_pending_indicator_registrations(&mut self) -> Vec<crate::python::PendingIndicatorRegistration> {
+        if let Some(ref queue) = self.pending_indicator_registrations {
+            queue
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .drain(..)
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     fn update_position(&mut self, vt_symbol: &str, position: f64) {

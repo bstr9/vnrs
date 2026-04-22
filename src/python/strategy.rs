@@ -40,6 +40,21 @@ pub struct PendingStopOrder {
     pub stop_price: f64,    // trigger price
 }
 
+/// A pending indicator registration queued by the strategy during on_init
+#[derive(Clone)]
+pub struct PendingIndicatorRegistration {
+    /// Unique identifier for this indicator
+    pub id: String,
+    /// Display name (e.g., "my_custom_ma")
+    pub name: String,
+    /// Category string: "trend", "volatility", "volume", "oscillator", "trend_following", "momentum"
+    pub category: String,
+    /// Parameter description (e.g., "period=20, type=EMA")
+    pub params_desc: String,
+    /// Location string: "main" or "sub"
+    pub location: String,
+}
+
 /// Strategy state as a string property for Python consumers.
 /// Maps to the Rust StrategyState enum:
 ///   "NotInited" → "Inited" → "Trading" → "Stopped"
@@ -131,6 +146,9 @@ pub struct Strategy {
     /// Pending stop orders queued during on_bar (to avoid mutex deadlock on BacktestingEngine)
     pending_stop_orders: Arc<Mutex<Vec<PendingStopOrder>>>,
 
+    /// Pending indicator registrations queued during on_init
+    pending_indicator_registrations: Arc<Mutex<Vec<PendingIndicatorRegistration>>>,
+
     /// Active stop order IDs for tracking
     #[pyo3(get)]
     pub active_stop_orderids: Vec<String>,
@@ -161,6 +179,7 @@ impl Strategy {
             context: None,
             pending_orders: Arc::new(Mutex::new(Vec::new())),
             pending_stop_orders: Arc::new(Mutex::new(Vec::new())),
+            pending_indicator_registrations: Arc::new(Mutex::new(Vec::new())),
             active_stop_orderids: Vec::new(),
         }
     }
@@ -439,6 +458,33 @@ impl Strategy {
                 stop_price,
             });
         Ok(stop_orderid)
+    }
+
+    /// Register a custom indicator from Python so it appears in the GUI indicator panel.
+    ///
+    /// Call this in `on_init()` to make your custom indicators visible in the chart.
+    ///
+    /// Args:
+    ///     name: Display name for the indicator (e.g., "my_custom_ma")
+    ///     category: Category string - one of: "trend", "volatility", "volume",
+    ///               "oscillator", "trend_following", "momentum" (default: "oscillator")
+    ///     params_desc: Parameter description (e.g., "period=20, type=EMA") (default: "")
+    ///     location: Chart location - "main" for overlay, "sub" for separate pane (default: "sub")
+    #[pyo3(signature = (name, category="oscillator".to_string(), params_desc="".to_string(), location="sub".to_string()))]
+    fn register_indicator(&self, name: String, category: String, params_desc: String, location: String) -> PyResult<()> {
+        let id = format!("{}_{}", self.strategy_name, name);
+        let registration = PendingIndicatorRegistration {
+            id,
+            name,
+            category,
+            params_desc,
+            location,
+        };
+        self.pending_indicator_registrations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(registration);
+        Ok(())
     }
 
     /// Handle stop order update. Override in subclass.
@@ -878,5 +924,10 @@ impl Strategy {
     /// Get the pending stop orders queue (for PythonStrategyAdapter to drain)
     pub fn pending_stop_orders_arc(&self) -> Arc<Mutex<Vec<PendingStopOrder>>> {
         Arc::clone(&self.pending_stop_orders)
+    }
+
+    /// Get the pending indicator registrations queue (for PythonStrategyAdapter to drain)
+    pub fn pending_indicator_registrations_arc(&self) -> Arc<Mutex<Vec<PendingIndicatorRegistration>>> {
+        Arc::clone(&self.pending_indicator_registrations)
     }
 }
