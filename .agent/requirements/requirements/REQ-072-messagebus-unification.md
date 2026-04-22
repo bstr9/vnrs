@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-072
 title: "Python/Rust MessageBus 统一——消除双消息系统"
 status: completed
@@ -48,14 +48,14 @@ versions:
 ## 验收标准
 
 ### 统一方案
-- [ ] Rust MessageBus 注册到 MainEngine 作为子引擎
-- [ ] Python MessageBus 改为 Rust MessageBus 的薄封装
-- [ ] Rust 和 Python 订阅者能收到同一消息
-- [ ] 迁移 Python 端现有 MessageBus 用户代码
+- [x] Rust MessageBus 注册到 MainEngine 作为子引擎
+- [x] Python MessageBus 改为 Rust MessageBus 的薄封装
+- [x] Rust 和 Python 订阅者能收到同一消息
+- [x] 迁移 Python 端现有 MessageBus 用户代码
 
 ### 向后兼容
-- [ ] Python MessageBus API 保持不变（内部委托给 Rust）
-- [ ] 现有 Python 代码无需修改
+- [x] Python MessageBus API 保持不变（内部委托给 Rust）
+- [x] 现有 Python 代码无需修改
 
 ## 影响范围
 

@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-001
 title: "SQLite 持久化完善（订单/成交/仓位）"
 status: completed

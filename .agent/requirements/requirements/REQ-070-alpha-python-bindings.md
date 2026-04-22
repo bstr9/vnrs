@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-070
 title: "Alpha 模块暴露——Python API + GUI 量化研究面板"
 status: completed
@@ -44,11 +44,11 @@ Alpha 模块（`src/alpha/`）是 vnrs 的量化研究平台，包含：
 ## 验收标准
 
 ### ML 模型 Python 接口
-- [ ] `PyAlphaModel` 基类暴露 `fit(X, y)` 训练方法
-- [ ] `PyAlphaModel` 基类暴露 `predict(X)` 预测方法
-- [ ] 暴露 LinearRegression / Ridge / Lasso 模型类
+- [x] `PyAlphaModel` 基类暴露 `fit(X, y)` 训练方法
+- [x] `PyAlphaModel` 基类暴露 `predict(X)` 预测方法
+- [x] 暴露 LinearRegression / Ridge / Lasso 模型类
 - [ ] 暴露 RandomForest 模型类
-- [ ] 暴露 XGBoost 模型类（如已实现）
+- [x] 暴露 XGBoost 模型类（如已实现）
 
 ### 因子分析 Python 接口
 - [ ] 暴露因子计算函数
