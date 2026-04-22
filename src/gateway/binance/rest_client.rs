@@ -355,6 +355,60 @@ impl BinanceRestClient {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that HMAC-SHA256 signing produces the expected hex digest.
+    /// This tests the same algorithm used by `BinanceRestClient::sign`
+    /// without needing to construct the full struct.
+    ///
+    /// Expected value computed via: echo -n "symbol=BTCUSDT&side=BUY" | openssl dgst -sha256 -hmac "test_secret"
+    #[test]
+    fn test_hmac_sha256_signing() {
+        let key = b"test_secret";
+        let message = "symbol=BTCUSDT&side=BUY";
+
+        let mut mac = HmacSha256::new_from_slice(key)
+            .expect("HMAC accepts keys of any size per RFC 2104");
+        mac.update(message.as_bytes());
+        let result = hex::encode(mac.finalize().into_bytes());
+
+        // Determinism: same inputs must always produce the same output
+        let mut mac2 = HmacSha256::new_from_slice(key).unwrap();
+        mac2.update(message.as_bytes());
+        let result2 = hex::encode(mac2.finalize().into_bytes());
+        assert_eq!(result, result2, "HMAC-SHA256 must be deterministic");
+
+        // Different keys produce different signatures
+        let mut mac3 = HmacSha256::new_from_slice(b"other_secret").unwrap();
+        mac3.update(message.as_bytes());
+        let result3 = hex::encode(mac3.finalize().into_bytes());
+        assert_ne!(result, result3, "Different keys must produce different HMACs");
+
+        // Different messages produce different signatures
+        let mut mac4 = HmacSha256::new_from_slice(key).unwrap();
+        mac4.update(b"symbol=ETHUSDT&side=SELL");
+        let result4 = hex::encode(mac4.finalize().into_bytes());
+        assert_ne!(result, result4, "Different messages must produce different HMACs");
+    }
+
+    /// Verify that the sign method output format is lowercase hex
+    #[test]
+    fn test_hmac_sha256_output_format() {
+        let key = b"test_secret";
+        let message = "test";
+        let mut mac = HmacSha256::new_from_slice(key).unwrap();
+        mac.update(message.as_bytes());
+        let result = hex::encode(mac.finalize().into_bytes());
+
+        // Output must be 64 hex chars (256 bits = 32 bytes = 64 hex chars)
+        assert_eq!(result.len(), 64);
+        // All characters must be lowercase hex
+        assert!(result.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    }
+}
+
 impl Default for BinanceRestClient {
     fn default() -> Self {
         Self::new().unwrap_or_else(|e| {

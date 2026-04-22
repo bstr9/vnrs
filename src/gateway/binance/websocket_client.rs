@@ -962,4 +962,62 @@ mod tests {
         // which we can't easily test without a real server)
         assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
     }
+
+    /// Test that the "e" field in JSON correctly identifies the event type
+    /// for Binance WebSocket message routing.
+    #[test]
+    fn test_ws_message_type_detection_tick_data() {
+        // Spot market data: combined stream format with "data" nested object
+        let tick_msg = serde_json::from_str::<Value>(
+            r#"{"stream":"btcusdt@ticker","data":{"e":"24hrTicker","c":"50000.00","v":"12345.67","E":1672531200000}}"#
+        ).unwrap();
+        let data = tick_msg.get("data").unwrap();
+        let event_type = data.get("e").and_then(|s| s.as_str()).unwrap_or("");
+        assert_eq!(event_type, "24hrTicker");
+    }
+
+    #[test]
+    fn test_ws_message_type_detection_order_report() {
+        // Futures ORDER_TRADE_UPDATE: "e" at top level
+        let order_msg = serde_json::from_str::<Value>(
+            r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"my_order_1","S":"BUY","o":"LIMIT","X":"NEW","p":"50000.00","q":"0.001","z":"0","T":1672531200000}}"#
+        ).unwrap();
+        let event_type = order_msg.get("e").and_then(|s| s.as_str()).unwrap_or("");
+        assert_eq!(event_type, "ORDER_TRADE_UPDATE");
+    }
+
+    #[test]
+    fn test_ws_message_type_detection_unknown_event() {
+        // Unknown event type should still be detectable
+        let unknown_msg = serde_json::from_str::<Value>(
+            r#"{"e":"someNewEventType","data":"whatever"}"#
+        ).unwrap();
+        let event_type = unknown_msg.get("e").and_then(|s| s.as_str()).unwrap_or("");
+        assert_eq!(event_type, "someNewEventType");
+    }
+
+    #[test]
+    fn test_ws_message_type_detection_missing_event_field() {
+        // Messages without "e" field (e.g., subscription responses)
+        let sub_response = serde_json::from_str::<Value>(
+            r#"{"id":"sub_1672531200","status":200,"result":{"subscriptionId":12345}}"#
+        ).unwrap();
+        let event_type = sub_response.get("e").and_then(|s| s.as_str()).unwrap_or("");
+        assert_eq!(event_type, ""); // No event type — handled differently
+    }
+
+    #[test]
+    fn test_ws_message_type_detection_spot_execution_report() {
+        // Spot user stream via WebSocket API: event nested under "event" key
+        let ws_api_msg = serde_json::from_str::<Value>(
+            r#"{"subscriptionId":1,"event":{"e":"executionReport","s":"BTCUSDT","c":"my_order","S":"BUY","o":"LIMIT","X":"NEW","p":"50000.00","q":"0.001","z":"0","O":1672531200000}}"#
+        ).unwrap();
+        // Extract event data — new format nests under "event" key
+        let event_data = match ws_api_msg.get("event") {
+            Some(e) => e.clone(),
+            None => ws_api_msg.clone(),
+        };
+        let event_type = event_data.get("e").and_then(|s| s.as_str()).unwrap_or("");
+        assert_eq!(event_type, "executionReport");
+    }
 }

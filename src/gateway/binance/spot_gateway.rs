@@ -1347,3 +1347,84 @@ impl BaseGateway for BinanceSpotGateway {
         Ok(history)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trader::{Direction, Exchange, Offset, OrderType, Status};
+
+    /// Test OrderData construction from Binance Spot REST API order response fields.
+    /// This mirrors the parsing logic in `query_order_impl` and the `executionReport`
+    /// WebSocket handler.
+    #[test]
+    fn test_spot_order_data_from_rest_response() {
+        // Simulate JSON fields from /api/v3/openOrders response
+        let json = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "clientOrderId": "260422123456000001",
+            "side": "BUY",
+            "type": "LIMIT",
+            "price": "50000.00",
+            "origQty": "0.001",
+            "executedQty": "0.000",
+            "status": "NEW",
+            "time": 1672531200000_i64
+        });
+
+        let order_type_str = json["type"].as_str().unwrap_or("");
+        let order_type = ORDERTYPE_BINANCE2VT.get(order_type_str).copied().unwrap();
+        let status_str = json["status"].as_str().unwrap_or("");
+        let direction_str = json["side"].as_str().unwrap_or("");
+
+        let order = OrderData {
+            symbol: json["symbol"].as_str().unwrap_or("").to_lowercase(),
+            exchange: Exchange::Binance,
+            orderid: json["clientOrderId"].as_str().unwrap_or("").to_string(),
+            order_type,
+            direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
+            offset: Offset::None,
+            price: json["price"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+            volume: json["origQty"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+            traded: json["executedQty"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+            status: STATUS_BINANCE2VT.get(status_str).copied().unwrap_or(Status::Submitting),
+            datetime: Some(timestamp_to_datetime(json["time"].as_i64().unwrap_or(0))),
+            reference: String::new(),
+            gateway_name: "BINANCE_SPOT".to_string(),
+            post_only: false,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
+        };
+
+        assert_eq!(order.symbol, "btcusdt");
+        assert_eq!(order.exchange, Exchange::Binance);
+        assert_eq!(order.orderid, "260422123456000001");
+        assert_eq!(order.order_type, OrderType::Limit);
+        assert_eq!(order.direction, Some(Direction::Long));
+        assert_eq!(order.offset, Offset::None);
+        assert_eq!(order.price, 50000.0);
+        assert_eq!(order.volume, 0.001);
+        assert_eq!(order.traded, 0.0);
+        assert_eq!(order.status, Status::NotTraded);
+        assert!(!order.post_only);
+        assert!(!order.reduce_only);
+    }
+
+    /// Test that SELL direction maps correctly through Binance-to-VT mapping.
+    #[test]
+    fn test_spot_direction_mapping() {
+        assert_eq!(DIRECTION_BINANCE2VT.get("BUY").copied(), Some(Direction::Long));
+        assert_eq!(DIRECTION_BINANCE2VT.get("SELL").copied(), Some(Direction::Short));
+    }
+
+    /// Test that Binance order status strings map to VT Status correctly.
+    #[test]
+    fn test_spot_status_mapping() {
+        assert_eq!(STATUS_BINANCE2VT.get("NEW").copied(), Some(Status::NotTraded));
+        assert_eq!(STATUS_BINANCE2VT.get("PARTIALLY_FILLED").copied(), Some(Status::PartTraded));
+        assert_eq!(STATUS_BINANCE2VT.get("FILLED").copied(), Some(Status::AllTraded));
+        assert_eq!(STATUS_BINANCE2VT.get("CANCELED").copied(), Some(Status::Cancelled));
+        assert_eq!(STATUS_BINANCE2VT.get("REJECTED").copied(), Some(Status::Rejected));
+        assert_eq!(STATUS_BINANCE2VT.get("EXPIRED").copied(), Some(Status::Cancelled));
+    }
+}

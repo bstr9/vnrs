@@ -1262,3 +1262,189 @@ impl BaseGateway for BinanceUsdtGateway {
         Ok(history)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trader::{Direction, Exchange, Offset, OrderType, Product, Status};
+
+    /// Test ContractData construction from Binance USDT-M Futures exchangeInfo response.
+    /// This mirrors the parsing logic in `query_contract_impl`.
+    #[test]
+    fn test_usdt_contract_data_from_exchange_info() {
+        let json = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "baseAsset": "BTC",
+            "quoteAsset": "USDT",
+            "filters": [
+                { "filterType": "PRICE_FILTER", "tickSize": "0.10" },
+                { "filterType": "LOT_SIZE", "stepSize": "0.001" },
+                { "filterType": "MIN_NOTIONAL", "notional": "5" }
+            ]
+        });
+
+        let base_asset = json["baseAsset"].as_str().unwrap_or("");
+        let quote_asset = json["quoteAsset"].as_str().unwrap_or("");
+        let name = format!("{}/{}", base_asset.to_uppercase(), quote_asset.to_uppercase());
+
+        let mut pricetick: f64 = 1.0;
+        let mut min_volume: f64 = 1.0;
+        let mut min_notional: f64 = 0.0;
+
+        if let Some(filters) = json["filters"].as_array() {
+            for f in filters {
+                match f["filterType"].as_str().unwrap_or("") {
+                    "PRICE_FILTER" => pricetick = f["tickSize"].as_str().unwrap_or("1").parse().unwrap_or(1.0),
+                    "LOT_SIZE" => min_volume = f["stepSize"].as_str().unwrap_or("1").parse().unwrap_or(1.0),
+                    "MIN_NOTIONAL" => {
+                        min_notional = f["notional"].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let mut extra = std::collections::HashMap::new();
+        if min_notional > 0.0 {
+            extra.insert("min_notional".to_string(), min_notional.to_string());
+        }
+
+        let contract = ContractData {
+            symbol: json["symbol"].as_str().unwrap_or("").to_lowercase(),
+            exchange: Exchange::BinanceUsdm,
+            name,
+            product: Product::Futures,
+            size: 1.0,
+            pricetick,
+            min_volume,
+            max_volume: None,
+            stop_supported: true,
+            net_position: true,
+            history_data: true,
+            option_strike: None,
+            option_underlying: None,
+            option_type: None,
+            option_listed: None,
+            option_expiry: None,
+            option_portfolio: None,
+            option_index: None,
+            gateway_name: "BINANCE_USDT".to_string(),
+            extra: if extra.is_empty() { None } else { Some(extra) },
+        };
+
+        assert_eq!(contract.symbol, "btcusdt");
+        assert_eq!(contract.exchange, Exchange::BinanceUsdm);
+        assert_eq!(contract.name, "BTC/USDT");
+        assert_eq!(contract.product, Product::Futures);
+        assert_eq!(contract.size, 1.0);
+        assert_eq!(contract.pricetick, 0.1);
+        assert_eq!(contract.min_volume, 0.001);
+        assert!(contract.stop_supported);
+        assert!(contract.net_position);
+        assert!(contract.history_data);
+        assert!(contract.extra.is_some());
+        let extra_map = contract.extra.unwrap();
+        assert_eq!(extra_map.get("min_notional").unwrap(), "5");
+    }
+
+    /// Test OrderData construction from Binance USDT-M Futures ORDER_TRADE_UPDATE event.
+    /// This mirrors the parsing logic in the trade_ws handler for "ORDER_TRADE_UPDATE".
+    #[test]
+    fn test_usdt_order_data_from_ws_event() {
+        let packet = serde_json::json!({
+            "e": "ORDER_TRADE_UPDATE",
+            "o": {
+                "s": "ETHUSDT",
+                "c": "260422120000000001",
+                "C": "",
+                "S": "SELL",
+                "o": "LIMIT",
+                "X": "PARTIALLY_FILLED",
+                "p": "3000.00",
+                "q": "0.500",
+                "z": "0.200",
+                "T": 1672531200000_i64
+            }
+        });
+
+        let order_data = packet.get("o").unwrap();
+        let order_type_str = order_data["o"].as_str().unwrap_or("");
+        let order_type = ORDERTYPE_BINANCE2VT.get(order_type_str).copied().unwrap();
+        let orderid = if order_data["C"].as_str().unwrap_or("").is_empty() {
+            order_data["c"].as_str().unwrap_or("").to_string()
+        } else {
+            order_data["C"].as_str().unwrap_or("").to_string()
+        };
+        let status_str = order_data["X"].as_str().unwrap_or("");
+        let direction_str = order_data["S"].as_str().unwrap_or("");
+
+        let order = OrderData {
+            symbol: order_data["s"].as_str().unwrap_or("").to_lowercase(),
+            exchange: Exchange::BinanceUsdm,
+            orderid: orderid.clone(),
+            order_type,
+            direction: DIRECTION_BINANCE2VT.get(direction_str).copied(),
+            offset: Offset::None,
+            price: order_data["p"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+            volume: order_data["q"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+            traded: order_data["z"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+            status: STATUS_BINANCE2VT.get(status_str).copied().unwrap_or(Status::Submitting),
+            datetime: Some(timestamp_to_datetime(order_data["T"].as_i64().unwrap_or(0))),
+            reference: String::new(),
+            gateway_name: "BINANCE_USDT".to_string(),
+            post_only: false,
+            reduce_only: false,
+            expire_time: None,
+            extra: None,
+        };
+
+        assert_eq!(order.symbol, "ethusdt");
+        assert_eq!(order.exchange, Exchange::BinanceUsdm);
+        assert_eq!(order.orderid, "260422120000000001");
+        assert_eq!(order.order_type, OrderType::Limit);
+        assert_eq!(order.direction, Some(Direction::Short));
+        assert_eq!(order.price, 3000.0);
+        assert_eq!(order.volume, 0.5);
+        assert_eq!(order.traded, 0.2);
+        assert_eq!(order.status, Status::PartTraded);
+    }
+
+    /// Test that the event type "e" field correctly identifies the message type.
+    #[test]
+    fn test_usdt_ws_event_type_detection() {
+        // ACCOUNT_UPDATE event
+        let account_packet = serde_json::json!({"e": "ACCOUNT_UPDATE", "a": {}});
+        assert_eq!(
+            account_packet.get("e").and_then(|s| s.as_str()).unwrap_or(""),
+            "ACCOUNT_UPDATE"
+        );
+
+        // ORDER_TRADE_UPDATE event
+        let order_packet = serde_json::json!({"e": "ORDER_TRADE_UPDATE", "o": {}});
+        assert_eq!(
+            order_packet.get("e").and_then(|s| s.as_str()).unwrap_or(""),
+            "ORDER_TRADE_UPDATE"
+        );
+
+        // listenKeyExpired event
+        let expired_packet = serde_json::json!({"e": "listenKeyExpired"});
+        assert_eq!(
+            expired_packet.get("e").and_then(|s| s.as_str()).unwrap_or(""),
+            "listenKeyExpired"
+        );
+
+        // Unknown event type
+        let unknown_packet = serde_json::json!({"e": "SOME_NEW_EVENT"});
+        assert_eq!(
+            unknown_packet.get("e").and_then(|s| s.as_str()).unwrap_or(""),
+            "SOME_NEW_EVENT"
+        );
+
+        // Missing "e" field
+        let no_event_packet = serde_json::json!({"result": null});
+        assert_eq!(
+            no_event_packet.get("e").and_then(|s| s.as_str()).unwrap_or(""),
+            ""
+        );
+    }
+}
