@@ -1,4 +1,4 @@
----
+﻿---
 id: REQ-020
 title: "Python 类型化数据类（BarData, TickData, OrderData, TradeData）"
 status: completed
@@ -52,7 +52,7 @@ nautilus_trader 使用强类型数据对象（Bar, QuoteTick, TradeTick, Instrum
 - [x] `PyOrderData` 类：orderid, symbol, direction, price, volume, status 等属性
 - [x] `PyTradeData` 类：tradeid, orderid, symbol, direction, price, volume 等属性
 - [x] 策略回调参数从 dict 改为类型化对象（向后兼容过渡期可同时支持）
-- [ ] Python 类型提示（.pyi 或 typing）支持 IDE 补全
+- [x] Python 类型提示（.pyi 或 typing）支持 IDE 补全
 - [x] 与现有 Rust 结构体 (BarData, TickData, OrderData, TradeData) 对齐
 
 ## 影响范围
