@@ -192,6 +192,16 @@ impl ChartWidget {
         self.recalculate_indicators();
     }
 
+    /// Push an externally-computed value to the indicator with the given name.
+    /// Used for Python indicators whose values arrive via on_indicator.
+    pub fn update_indicator_raw(&mut self, indicator_name: &str, value: f64) {
+        for indicator in &mut self.indicators {
+            if indicator.name() == indicator_name {
+                indicator.update_raw(value);
+            }
+        }
+    }
+
     /// Remove all indicators
     pub fn clear_indicators(&mut self) {
         self.indicators.clear();

@@ -1659,6 +1659,18 @@ impl StrategyEngine {
         }
     }
 
+    /// Drain pending indicator values for a strategy.
+    /// Called from MainWindow to propagate on_indicator values to GUI.
+    #[cfg(feature = "python")]
+    pub fn drain_pending_indicator_values(&self, strategy_name: &str) -> Vec<crate::python::PendingIndicatorValue> {
+        let mut strategies = self.strategies.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(strategy) = strategies.get_mut(strategy_name) {
+            strategy.drain_pending_indicator_values()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Register a stop order for a strategy
     ///
     /// Creates a StopOrder tracked by the engine. When the trigger price is reached

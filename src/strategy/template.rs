@@ -366,6 +366,12 @@ pub trait StrategyTemplate: Send + Sync {
         Vec::new() // Default: no indicator registrations
     }
 
+    /// Drain pending indicator values from the strategy
+    #[cfg(feature = "python")]
+    fn drain_pending_indicator_values(&mut self) -> Vec<crate::python::PendingIndicatorValue> {
+        Vec::new() // Default: no indicator values
+    }
+
     /// Update position
     fn update_position(&mut self, vt_symbol: &str, position: f64);
 

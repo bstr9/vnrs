@@ -55,6 +55,15 @@ pub struct PendingIndicatorRegistration {
     pub location: String,
 }
 
+/// A pending indicator value queued during on_indicator callback
+#[derive(Clone)]
+pub struct PendingIndicatorValue {
+    /// Indicator name (matches the name used in register_indicator)
+    pub name: String,
+    /// The computed value
+    pub value: f64,
+}
+
 /// Strategy state as a string property for Python consumers.
 /// Maps to the Rust StrategyState enum:
 ///   "NotInited" → "Inited" → "Trading" → "Stopped"

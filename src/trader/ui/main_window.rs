@@ -1551,6 +1551,31 @@ impl MainWindow {
                 }
             }
         }
+
+        // Poll Python strategy indicator values and forward to indicator panel + charts
+        #[cfg(feature = "python")]
+        {
+            if let Some(ref se) = self.strategy_engine {
+                let names = se.get_all_strategy_names();
+                for name in names {
+                    let values = se.drain_pending_indicator_values(&name);
+                    if values.is_empty() {
+                        continue;
+                    }
+                    for iv in &values {
+                        // Update indicator panel with latest values
+                        self.indicator_panel.update_python_indicator_values(
+                            &iv.name,
+                            vec![(iv.name.clone(), iv.value)],
+                        );
+                        // Update chart overlays
+                        for chart in self.charts.values_mut() {
+                            chart.update_indicator_raw(&iv.name, iv.value);
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /// Handle dashboard card click actions
@@ -2048,15 +2073,10 @@ impl MainWindow {
                 }
 
                 // Create a CustomIndicator from the Python indicator entry.
-                // The expression is derived from the params_desc — for Python indicators
-                // that compute externally, we use the indicator name as a placeholder
-                // expression so the chart can display the overlay line.
-                let expression = if config.params_desc.is_empty() {
-                    format!("close * 0 + nan") // placeholder: no visible line until data flows
-                } else {
-                    // Try to use params_desc as expression; if invalid, fall back to placeholder
-                    config.params_desc.clone()
-                };
+                // Python indicators compute externally via on_indicator — use a placeholder
+                // expression that evaluates to NaN until update_raw() pushes real values.
+                // This avoids parse errors from treating params_desc as a math expression.
+                let expression = "close * 0 + nan".to_string();
 
                 let indicator = CustomIndicator::new(
                     config.name.clone(),

@@ -257,6 +257,11 @@ pub trait Indicator: Send + Sync {
     fn get_parameters(&self) -> HashMap<String, f64> {
         HashMap::new()
     }
+
+    /// Push an externally-computed value into this indicator.
+    /// Default is no-op — only CustomIndicator overrides this to support
+    /// Python-computed indicators whose values arrive via on_indicator.
+    fn update_raw(&mut self, _value: f64) {}
 }
 
 /// Moving Average (MA)
@@ -1730,6 +1735,13 @@ impl Indicator for CustomIndicator {
 
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)> {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
+    }
+
+    fn update_raw(&mut self, value: f64) {
+        self.base.count += 1;
+        self.base.has_inputs = true;
+        self.values.push(Some(value));
+        self.base.check_initialized(1);
     }
 }
 

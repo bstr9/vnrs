@@ -48,7 +48,7 @@ pub mod instrument;
 pub mod alpha_bindings;
 
 #[cfg(feature = "python")]
-pub use strategy::{Strategy, PendingOrder, PendingStopOrder, PendingIndicatorRegistration};
+pub use strategy::{Strategy, PendingOrder, PendingStopOrder, PendingIndicatorRegistration, PendingIndicatorValue};
 #[cfg(feature = "python")]
 pub use engine::{PythonEngine, PythonEngineBridge};
 #[cfg(feature = "python")]

@@ -48,6 +48,9 @@ pub struct PythonStrategyAdapter {
 
     /// Pending indicator registrations from Python strategy (shared with Strategy.pending_indicator_registrations)
     pending_indicator_registrations: Option<Arc<Mutex<Vec<crate::python::PendingIndicatorRegistration>>>>,
+
+    /// Pending indicator values from Python strategy (collected during on_indicator callbacks)
+    pending_indicator_values: Arc<Mutex<Vec<crate::python::PendingIndicatorValue>>>,
 }
 
 impl PythonStrategyAdapter {
@@ -152,6 +155,7 @@ impl PythonStrategyAdapter {
                 pending_orders: None, // Will be set if the instance is a Strategy
                 pending_stop_orders: None, // Will be set if the instance is a Strategy
                 pending_indicator_registrations: None, // Will be set if the instance is a Strategy
+                pending_indicator_values: Arc::new(Mutex::new(Vec::new())),
             })
         })
     }
@@ -188,6 +192,7 @@ impl PythonStrategyAdapter {
             pending_orders,
             pending_stop_orders,
             pending_indicator_registrations,
+            pending_indicator_values: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -424,6 +429,16 @@ impl StrategyTemplate for PythonStrategyAdapter {
     }
 
     fn on_indicator(&mut self, name: &str, value: f64) {
+        // Collect the value for GUI propagation (MainWindow polls this)
+        self.pending_indicator_values
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(crate::python::PendingIndicatorValue {
+                name: name.to_string(),
+                value,
+            });
+
+        // Forward to Python strategy's on_indicator method
         Python::attach(|py| {
             let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
             let _ = strategy.call_method1(py, "on_indicator", (name, value));
@@ -562,6 +577,14 @@ impl StrategyTemplate for PythonStrategyAdapter {
         } else {
             Vec::new()
         }
+    }
+
+    fn drain_pending_indicator_values(&mut self) -> Vec<crate::python::PendingIndicatorValue> {
+        self.pending_indicator_values
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect()
     }
 
     fn update_position(&mut self, vt_symbol: &str, position: f64) {
