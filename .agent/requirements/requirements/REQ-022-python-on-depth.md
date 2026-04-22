@@ -32,7 +32,7 @@ Rust 端 `StrategyTemplate` trait 有 `on_depth()` 回调方法，接收 `DepthD
 - [x] Python `Strategy` 类添加 `on_depth(self, depth: PyDepthData)` 回调
 - [x] `PyDepthData` 类：symbol, exchange, datetime, bid_prices, bid_volumes, ask_prices, ask_volumes
 - [x] `PythonStrategyAdapter` 在 Rust 端转发 on_depth 事件到 Python
-- [ ] 回测引擎支持深度数据回放（如数据可用）
+- [x] 回测引擎支持深度数据回放（如数据可用）
 - [x] 与 REQ-020 的类型化数据类对齐
 
 ## 影响范围
