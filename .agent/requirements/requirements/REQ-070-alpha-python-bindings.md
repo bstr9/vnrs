@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-070
 title: "Alpha 模块暴露——Python API + GUI 量化研究面板"
 status: completed

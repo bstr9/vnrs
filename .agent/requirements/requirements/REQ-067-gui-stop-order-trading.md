@@ -1,4 +1,4 @@
-﻿---
+---
 id: REQ-067
 title: "GUI 交易面板支持止损单/止损限价单下单"
 status: completed

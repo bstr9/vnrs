@@ -226,6 +226,27 @@ impl IndicatorConfigEntry {
     }
 }
 
+/// An indicator registered from Python (via PyArrayManager)
+#[derive(Debug, Clone)]
+pub struct PythonIndicatorEntry {
+    /// Unique identifier for this Python indicator
+    pub id: String,
+    /// Display name (e.g., "my_custom_ma")
+    pub name: String,
+    /// Category for grouping in the UI
+    pub category: IndicatorCategory,
+    /// Parameter description (e.g., "period=20, type=EMA")
+    pub params_desc: String,
+    /// Whether this indicator is enabled
+    pub enabled: bool,
+    /// Line color
+    pub color: Color32,
+    /// Location on chart (Main or Sub)
+    pub location: IndicatorLocation,
+    /// Last computed values for display
+    pub last_values: Vec<(String, f64)>,
+}
+
 /// Saved indicator preset
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IndicatorPreset {
@@ -251,6 +272,12 @@ pub struct IndicatorPanel {
     show_save_preset: bool,
     /// Pending action: apply indicators to chart
     pending_apply: Option<Vec<IndicatorConfigEntry>>,
+    /// Python-registered indicators
+    python_indicators: Vec<PythonIndicatorEntry>,
+    /// Currently selected Python indicator id for configuration
+    selected_python_indicator: Option<String>,
+    /// Pending action: apply Python indicators to chart
+    pending_apply_python: Option<Vec<PythonIndicatorEntry>>,
 }
 
 impl Default for IndicatorPanel {
@@ -276,6 +303,9 @@ impl IndicatorPanel {
             new_preset_name: String::new(),
             show_save_preset: false,
             pending_apply: None,
+            python_indicators: Vec::new(),
+            selected_python_indicator: None,
+            pending_apply_python: None,
         }
     }
     
@@ -292,6 +322,38 @@ impl IndicatorPanel {
         self.pending_apply.take()
     }
     
+    /// Register a Python indicator so it appears in the GUI panel
+    pub fn add_python_indicator(&mut self, entry: PythonIndicatorEntry) {
+        if !self.python_indicators.iter().any(|e| e.id == entry.id) {
+            self.python_indicators.push(entry);
+        }
+    }
+
+    /// Remove a Python indicator by id
+    pub fn remove_python_indicator(&mut self, id: &str) {
+        self.python_indicators.retain(|e| e.id != id);
+        if self.selected_python_indicator.as_deref() == Some(id) {
+            self.selected_python_indicator = None;
+        }
+    }
+
+    /// Update values for a Python indicator
+    pub fn update_python_indicator_values(&mut self, id: &str, values: Vec<(String, f64)>) {
+        if let Some(entry) = self.python_indicators.iter_mut().find(|e| e.id == id) {
+            entry.last_values = values;
+        }
+    }
+
+    /// Get all enabled Python indicators
+    pub fn get_enabled_python_indicators(&self) -> Vec<&PythonIndicatorEntry> {
+        self.python_indicators.iter().filter(|e| e.enabled).collect()
+    }
+
+    /// Take pending apply action for Python indicators
+    pub fn take_apply_python(&mut self) -> Option<Vec<PythonIndicatorEntry>> {
+        self.pending_apply_python.take()
+    }
+    
     /// Show the indicator panel UI
     pub fn show(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
@@ -306,6 +368,8 @@ impl IndicatorPanel {
             // Show selected indicator configuration
             if let Some(config) = &self.editing_config {
                 self.show_indicator_config(ui, config.clone());
+            } else if self.selected_python_indicator.is_some() {
+                self.show_python_indicator_config(ui);
             } else {
                 ui.label(RichText::new("请从上方选择一个指标进行配置").color(Color32::GRAY));
             }
@@ -351,12 +415,68 @@ impl IndicatorPanel {
                             if ui.selectable_label(self.selected_type == Some(it), label).clicked() {
                                 self.selected_type = Some(it);
                                 self.editing_config = self.available_indicators.get(&it).cloned();
+                                // Deselect Python indicator when a built-in one is selected
+                                self.selected_python_indicator = None;
                             }
                         });
                     }
                 }
             });
         }
+
+        // Python indicators section
+        ui.collapsing("Python 指标", |ui| {
+            if self.python_indicators.is_empty() {
+                ui.label(RichText::new("（暂无 Python 指标）").color(Color32::GRAY));
+            } else {
+                for entry in &mut self.python_indicators {
+                    let is_selected = self.selected_python_indicator.as_deref() == Some(&entry.id);
+                    let mut enabled = entry.enabled;
+
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut enabled, "").changed() {
+                            entry.enabled = enabled;
+                        }
+
+                        let label = if is_selected {
+                            RichText::new(&entry.name).color(Color32::from_rgb(100, 200, 255))
+                        } else {
+                            RichText::new(&entry.name)
+                        };
+
+                        if ui.selectable_label(is_selected, label).clicked() {
+                            self.selected_python_indicator = Some(entry.id.clone());
+                            // Deselect built-in indicator when a Python one is selected
+                            self.selected_type = None;
+                            self.editing_config = None;
+                        }
+                    });
+
+                    // Show params description inline
+                    if !entry.params_desc.is_empty() {
+                        ui.label(
+                            RichText::new(format!("  {}", entry.params_desc))
+                                .color(Color32::GRAY)
+                                .small(),
+                        );
+                    }
+
+                    // Show last computed values inline
+                    if !entry.last_values.is_empty() {
+                        let values_str: Vec<String> = entry
+                            .last_values
+                            .iter()
+                            .map(|(k, v)| format!("{}={:.4}", k, v))
+                            .collect();
+                        ui.label(
+                            RichText::new(format!("  {}", values_str.join(", ")))
+                                .color(Color32::from_rgb(180, 180, 100))
+                                .small(),
+                        );
+                    }
+                }
+            }
+        });
     }
     
     /// Show configuration for a specific indicator
@@ -496,18 +616,103 @@ impl IndicatorPanel {
         });
     }
     
+    /// Show configuration for a selected Python indicator
+    fn show_python_indicator_config(&mut self, ui: &mut Ui) {
+        let selected_id = match &self.selected_python_indicator {
+            Some(id) => id.clone(),
+            None => return,
+        };
+
+        // Find the entry and work with a clone to satisfy borrow checker
+        let entry_idx = match self.python_indicators.iter().position(|e| e.id == selected_id) {
+            Some(idx) => idx,
+            None => return,
+        };
+
+        let entry = &mut self.python_indicators[entry_idx];
+
+        ui.label(RichText::new(format!("配置: {} (Python)", entry.name)).strong());
+
+        // Name (read-only)
+        ui.horizontal(|ui| {
+            ui.label("名称:");
+            ui.label(&entry.name);
+        });
+
+        // Category display
+        ui.horizontal(|ui| {
+            ui.label("分类:");
+            ui.label(entry.category.display_name());
+        });
+
+        // Parameters description (read-only)
+        if !entry.params_desc.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("参数:");
+                ui.label(RichText::new(&entry.params_desc).color(Color32::LIGHT_GRAY));
+            });
+        }
+
+        ui.separator();
+
+        // Color picker
+        ui.horizontal(|ui| {
+            ui.label("颜色:");
+            ui.color_edit_button_srgba(&mut entry.color);
+        });
+
+        // Location toggle
+        ui.horizontal(|ui| {
+            ui.label("显示位置:");
+            let mut is_main = entry.location == IndicatorLocation::Main;
+            if ui.checkbox(&mut is_main, "主图").changed() {
+                entry.location = if is_main {
+                    IndicatorLocation::Main
+                } else {
+                    IndicatorLocation::Sub
+                };
+            }
+        });
+
+        ui.separator();
+
+        // Last computed values
+        if !entry.last_values.is_empty() {
+            ui.label(RichText::new("最新计算值").strong());
+            for (label, value) in &entry.last_values {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}:", label));
+                    ui.label(format!("{:.6}", value));
+                });
+            }
+        } else {
+            ui.label(RichText::new("暂无计算值").color(Color32::GRAY));
+        }
+    }
+    
     /// Show action buttons
     fn show_action_buttons(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            // Apply button
-            let enabled_count = self.available_indicators.values().filter(|c| c.enabled).count();
-            if ui.button(format!("应用到图表 ({})", enabled_count)).clicked() && enabled_count > 0 {
+            // Apply button — includes both built-in and Python indicator counts
+            let builtin_count = self.available_indicators.values().filter(|c| c.enabled).count();
+            let python_count = self.python_indicators.iter().filter(|e| e.enabled).count();
+            let total_count = builtin_count + python_count;
+            if ui.button(format!("应用到图表 ({})", total_count)).clicked() && total_count > 0 {
                 let enabled: Vec<IndicatorConfigEntry> = self.available_indicators
                     .values()
                     .filter(|c| c.enabled)
                     .cloned()
                     .collect();
                 self.pending_apply = Some(enabled);
+
+                let enabled_python: Vec<PythonIndicatorEntry> = self.python_indicators
+                    .iter()
+                    .filter(|e| e.enabled)
+                    .cloned()
+                    .collect();
+                if !enabled_python.is_empty() {
+                    self.pending_apply_python = Some(enabled_python);
+                }
             }
             
             // Clear all button
@@ -515,8 +720,12 @@ impl IndicatorPanel {
                 for config in self.available_indicators.values_mut() {
                     config.enabled = false;
                 }
+                for entry in &mut self.python_indicators {
+                    entry.enabled = false;
+                }
                 // Also trigger clear action
                 self.pending_apply = Some(Vec::new());
+                self.pending_apply_python = Some(Vec::new());
             }
         });
     }

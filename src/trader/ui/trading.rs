@@ -5,6 +5,7 @@ use egui::{Color32, ComboBox, RichText, Ui};
 use super::style::*;
 use crate::trader::constant::{Direction, Exchange, Offset, OrderType};
 use crate::trader::object::{ContractData, OrderRequest, SubscribeRequest, TickData};
+use crate::trader::stop_order::{StopOrderRequest, StopOrderType};
 use crate::trader::utility::get_digits;
 
 /// Market depth level display
@@ -119,11 +120,16 @@ pub struct TradingWidget {
     // Actions
     pub pending_subscribe: Option<SubscribeRequest>,
     pub pending_order: Option<OrderRequest>,
+    pub pending_stop_order: Option<StopOrderRequest>,
     pub pending_cancel_all: bool,
     /// Last order error message (set when order submission fails validation)
     pub last_order_error: Option<String>,
     /// Whether to focus the symbol input on next frame
     pub focus_symbol_input: bool,
+
+    // Stop order inputs
+    pub stop_price: String,
+    pub limit_price: String,
 }
 
 impl Default for TradingWidget {
@@ -167,9 +173,12 @@ impl TradingWidget {
             depth: MarketDepth::default(),
             pending_subscribe: None,
             pending_order: None,
+            pending_stop_order: None,
             pending_cancel_all: false,
             last_order_error: None,
             focus_symbol_input: false,
+            stop_price: String::new(),
+            limit_price: String::new(),
         }
     }
 
@@ -443,6 +452,20 @@ impl TradingWidget {
                     });
                     ui.end_row();
 
+                    // Stop price (shown for Stop and StopLimit)
+                    if self.order_type_index == 4 || self.order_type_index == 5 {
+                        ui.label("止损价");
+                        ui.text_edit_singleline(&mut self.stop_price);
+                        ui.end_row();
+                    }
+
+                    // Limit price (shown for StopLimit only)
+                    if self.order_type_index == 5 {
+                        ui.label("限价");
+                        ui.text_edit_singleline(&mut self.limit_price);
+                        ui.end_row();
+                    }
+
                     // Volume
                     ui.label("数量");
                     ui.text_edit_singleline(&mut self.volume);
@@ -710,8 +733,6 @@ impl TradingWidget {
             }
         };
 
-        let price: f64 = self.price.parse().unwrap_or(0.0);
-
         let exchange = self
             .exchanges
             .get(self.exchange_index)
@@ -729,6 +750,62 @@ impl TradingWidget {
             2 => Offset::CloseToday,
             _ => Offset::CloseYesterday,
         };
+
+        // Handle stop orders (indices 4 and 5) through StopOrderRequest
+        if self.order_type_index == 4 || self.order_type_index == 5 {
+            let stop_price: f64 = match self.stop_price.parse() {
+                Ok(v) if v > 0.0 => v,
+                _ => {
+                    self.last_order_error = Some("止损价无效".to_string());
+                    return;
+                }
+            };
+
+            let limit_price: f64 = if self.order_type_index == 5 {
+                match self.limit_price.parse() {
+                    Ok(v) if v > 0.0 => v,
+                    _ => {
+                        self.last_order_error = Some("限价无效".to_string());
+                        return;
+                    }
+                }
+            } else {
+                0.0
+            };
+
+            let stop_type = if self.order_type_index == 4 {
+                StopOrderType::StopMarket
+            } else {
+                StopOrderType::StopLimit
+            };
+
+            let gateway_name = self
+                .gateways
+                .get(self.gateway_index)
+                .cloned()
+                .unwrap_or_default();
+
+            self.last_order_error = None;
+            self.pending_stop_order = Some(StopOrderRequest {
+                symbol: self.symbol.clone(),
+                exchange,
+                direction,
+                stop_type,
+                stop_price,
+                limit_price,
+                volume,
+                offset,
+                trail_pct: 0.0,
+                trail_abs: 0.0,
+                gateway_name,
+                reference: "ManualTrading".to_string(),
+                expires_at: None,
+                tag: String::new(),
+            });
+            return;
+        }
+
+        let price: f64 = self.price.parse().unwrap_or(0.0);
 
         let order_type = match self.order_type_index {
             0 => OrderType::Limit,
@@ -766,6 +843,11 @@ impl TradingWidget {
         let order = self.pending_order.take()?;
         let gateway = self.gateways.get(self.gateway_index).cloned()?;
         Some((order, gateway))
+    }
+
+    /// Take pending stop order request
+    pub fn take_stop_order(&mut self) -> Option<StopOrderRequest> {
+        self.pending_stop_order.take()
     }
 
     /// Take cancel all flag
