@@ -30,8 +30,8 @@ versions:
 ## 验收标准
 
 - [x] `LmdbDatabase` 实现 `BaseDatabase` trait
-- [ ] `RedisDatabase` 实现 `BaseDatabase` trait (blocked: no new deps constraint)
-- [x] feature flags: `lmdb` (done), ~~`redis`~~ (blocked: no new deps constraint)
+- [x] `RedisDatabase` 实现 `BaseDatabase` trait
+- [x] feature flags: `lmdb` (done), `redis`
 - [x] `MainEngine` 支持选择不同后端
 - [x] �?SQLite 后端 API 一�?
 ## 依赖

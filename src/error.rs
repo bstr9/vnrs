@@ -113,6 +113,13 @@ impl From<rusqlite::Error> for DatabaseError {
     }
 }
 
+#[cfg(feature = "redis")]
+impl From<redis::RedisError> for DatabaseError {
+    fn from(e: redis::RedisError) -> Self {
+        DatabaseError::QueryFailed(e.to_string())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Strategy errors
 // ---------------------------------------------------------------------------

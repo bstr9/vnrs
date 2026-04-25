@@ -59,6 +59,9 @@ pub mod sqlite_database;
 #[cfg(feature = "lmdb")]
 pub mod lmdb_database;
 
+#[cfg(feature = "redis")]
+pub mod redis_database;
+
 #[cfg(feature = "alpha")]
 pub mod parquet_database;
 
@@ -85,6 +88,8 @@ pub use database::{BarOverview, BaseDatabase, EventRecord, FileDatabase, MemoryD
 pub use sqlite_database::SqliteDatabase;
 #[cfg(feature = "lmdb")]
 pub use lmdb_database::LmdbDatabase;
+#[cfg(feature = "redis")]
+pub use redis_database::RedisDatabase;
 #[cfg(feature = "alpha")]
 pub use parquet_database::ParquetDatabase;
 pub use data_download::{DataDownloadManager, DownloadConfig, DownloadProgress, DownloadResult};

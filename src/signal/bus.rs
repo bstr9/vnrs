@@ -53,9 +53,8 @@ use super::types::Signal;
 /// recovery (falls back to `into_inner` on poison), following the same
 /// pattern as `MessageBus`.
 ///
-/// **Note**: The spec mentions DashMap, but this project does not currently
-/// depend on it. Using `RwLock<HashMap>` avoids adding a new external
-/// dependency while providing equivalent correctness.
+    /// **Note**: The spec mentions DashMap, but `RwLock<HashMap>` is used here
+    /// for simplicity and equivalent correctness for this use case.
 pub struct SignalBus {
     /// Topic → list of subscriber senders.
     subscribers: RwLock<HashMap<String, Vec<mpsc::UnboundedSender<Signal>>>>,

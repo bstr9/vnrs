@@ -95,6 +95,7 @@ polars = { version = "0.46", features = ["parquet", "json", "lazy", "diagonal_co
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono"], optional = true }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 heed = { version = "0.21", features = ["serde-json"], optional = true }
+redis = { version = "0.27", features = ["tokio-comp", "aio"], optional = true }
 
 # GUI (conditional on feature gate)
 egui = { version = "0.33.3", optional = true }
@@ -121,6 +122,7 @@ alpha = ["dep:polars", "dep:arrow", "dep:arrow-array", "dep:arrow-schema"]
 database = ["dep:sqlx"]
 sqlite = ["dep:rusqlite"]
 lmdb = ["dep:heed"]
+redis = ["dep:redis"]
 signal = []
 feature-store = ["dep:dashmap"]
 prometheus = ["dep:prometheus", "dep:hyper", "dep:hyper-util", "dep:http-body-util"]
