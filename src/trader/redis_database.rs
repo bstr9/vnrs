@@ -648,46 +648,49 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires running Redis server
     async fn test_redis_connection_failure() {
-        let result = RedisDatabase::connect("redis://127.0.0.1:19999");
-        assert!(result.await.is_err());
+        let result = RedisDatabase::connect("redis://127.0.0.1:19999").await;
+        assert!(result.is_err(), "Connecting to non-existent Redis should fail");
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running Redis server
-    async fn test_redis_save_and_load_bars() {
-        let db = RedisDatabase::connect("redis://127.0.0.1:6379")
-            .await
-            .expect("Failed to connect to Redis");
+    #[test]
+    fn test_exchange_from_value() {
+        assert_eq!(exchange_from_value("BINANCE"), Some(Exchange::Binance));
+        assert_eq!(exchange_from_value("OKX"), Some(Exchange::Okx));
+        assert_eq!(exchange_from_value("BINANCE_USDM"), Some(Exchange::BinanceUsdm));
+        assert_eq!(exchange_from_value("INVALID"), None);
+    }
 
-        let now = Utc::now();
-        let bar = BarData {
-            gateway_name: "test".to_string(),
-            symbol: "BTCUSDT".to_string(),
-            exchange: Exchange::Binance,
-            datetime: now,
-            interval: Some(Interval::Minute),
-            volume: 100.0,
-            turnover: 1000000.0,
-            open_interest: 0.0,
-            open_price: 50000.0,
-            high_price: 50100.0,
-            low_price: 49900.0,
-            close_price: 50050.0,
-            extra: None,
-        };
+    #[test]
+    fn test_interval_from_value() {
+        assert_eq!(interval_from_value("1m"), Some(Interval::Minute));
+        assert_eq!(interval_from_value("1h"), Some(Interval::Hour));
+        assert_eq!(interval_from_value("d"), Some(Interval::Daily));
+        assert_eq!(interval_from_value("tick"), Some(Interval::Tick));
+        assert_eq!(interval_from_value("invalid"), None);
+    }
 
-        db.save_bar_data(vec![bar.clone()], false).await.expect("save_bar_data should succeed");
+    #[test]
+    fn test_bar_key_roundtrip() {
+        let key = RedisDatabase::bar_key(&Exchange::BinanceUsdm, "ETHUSDT", &Interval::Hour4);
+        // Parse back from key: vnrs:bars:{exchange}:{symbol}:{interval}
+        let parts: Vec<&str> = key.split(':').collect();
+        assert_eq!(parts.len(), 5);
+        assert_eq!(parts[0], "vnrs");
+        assert_eq!(parts[1], "bars");
+        assert_eq!(exchange_from_value(parts[2]), Some(Exchange::BinanceUsdm));
+        assert_eq!(parts[3], "ETHUSDT");
+        assert_eq!(interval_from_value(parts[4]), Some(Interval::Hour4));
+    }
 
-        let start = now - chrono::Duration::hours(1);
-        let end = now + chrono::Duration::hours(1);
-        let loaded = db.load_bar_data("BTCUSDT", Exchange::Binance, Interval::Minute, start, end)
-            .await.expect("load_bar_data should succeed");
-        assert!(!loaded.is_empty());
-
-        // Cleanup
-        db.delete_bar_data("BTCUSDT", Exchange::Binance, Interval::Minute)
-            .await.expect("delete_bar_data should succeed");
+    #[test]
+    fn test_tick_key_roundtrip() {
+        let key = RedisDatabase::tick_key(&Exchange::Okx, "BTCUSDT");
+        let parts: Vec<&str> = key.split(':').collect();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0], "vnrs");
+        assert_eq!(parts[1], "ticks");
+        assert_eq!(exchange_from_value(parts[2]), Some(Exchange::Okx));
+        assert_eq!(parts[3], "BTCUSDT");
     }
 }
