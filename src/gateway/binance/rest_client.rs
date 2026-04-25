@@ -76,7 +76,19 @@ impl BinanceRestClient {
         
         // Recreate client with proxy if configured
         let new_client = if !proxy_host.is_empty() && proxy_port > 0 {
-            let proxy_url = format!("http://{}:{}", proxy_host, proxy_port);
+            // Construct proxy URL — match WebSocket client convention:
+            // If proxy_host already has a scheme (http://, https://, socks5://), use as-is;
+            // otherwise default to socks5:// to match WebSocket client behavior.
+            let proxy_url = if proxy_host.starts_with("http://")
+                || proxy_host.starts_with("https://")
+                || proxy_host.starts_with("socks5://")
+                || proxy_host.starts_with("socks5h://")
+            {
+                format!("{}:{}", proxy_host, proxy_port)
+            } else {
+                format!("socks5://{}:{}", proxy_host, proxy_port)
+            };
+
             match reqwest::Proxy::all(&proxy_url) {
                 Ok(proxy) => {
                     match Client::builder()
@@ -85,7 +97,7 @@ impl BinanceRestClient {
                         .build()
                     {
                         Ok(client) => {
-                            tracing::info!("✅ REST 客户端代理配置成功: {}:{}", proxy_host, proxy_port);
+                            tracing::info!("✅ REST 客户端代理配置成功: {}", proxy_url);
                             client
                         }
                         Err(e) => {
@@ -95,7 +107,7 @@ impl BinanceRestClient {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("⚠️ 无效的代理配置 {}:{}: {}", proxy_host, proxy_port, e);
+                    tracing::warn!("⚠️ 无效的代理配置 {}: {}", proxy_url, e);
                     Self::build_default_client()
                 }
             }
