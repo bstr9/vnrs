@@ -47,6 +47,7 @@ impl CandleItem {
     }
 
     /// Convert price to screen Y coordinate
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn price_to_y(&self, price: f64, rect: Rect, y_min: f64, y_max: f64) -> f32 {
         let y_range = y_max - y_min;
         if y_range == 0.0 {
@@ -57,6 +58,7 @@ impl CandleItem {
     }
 
     /// Convert bar index to screen X coordinate
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn index_to_x(&self, ix: usize, rect: Rect, min_ix: usize, max_ix: usize) -> f32 {
         let bar_count = (max_ix - min_ix + 1) as f32;
         let bar_width = rect.width() / bar_count;
@@ -74,6 +76,7 @@ impl ChartItem for CandleItem {
         manager.get_price_range(min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_info_text(&self, manager: &BarManager, ix: usize, price_decimals: usize) -> String {
         if let Some(bar) = manager.get_bar(ix as f64) {
             format!(
@@ -91,6 +94,7 @@ impl ChartItem for CandleItem {
         }
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn draw(
         &self,
         ui: &mut Ui,
@@ -172,6 +176,7 @@ impl VolumeItem {
     }
 
     /// Convert volume to screen Y coordinate
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn volume_to_y(&self, volume: f64, rect: Rect, y_max: f64) -> f32 {
         if y_max == 0.0 {
             return rect.bottom();
@@ -181,6 +186,7 @@ impl VolumeItem {
     }
 
     /// Convert bar index to screen X coordinate
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn index_to_x(&self, ix: usize, rect: Rect, min_ix: usize, max_ix: usize) -> f32 {
         let bar_count = (max_ix - min_ix + 1) as f32;
         let bar_width = rect.width() / bar_count;
@@ -198,6 +204,7 @@ impl ChartItem for VolumeItem {
         manager.get_volume_range(min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_info_text(&self, manager: &BarManager, ix: usize, _price_decimals: usize) -> String {
         if let Some(bar) = manager.get_bar(ix as f64) {
             format!("成交量\n{:.2}", bar.volume)
@@ -206,6 +213,7 @@ impl ChartItem for VolumeItem {
         }
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn draw(
         &self,
         ui: &mut Ui,
@@ -312,7 +320,7 @@ impl TradeOverlay {
         self.pairs.clear();
     }
 
-    /// Populate from a list of trades, converting TradeData to TradeMarker
+    /// Populate from a list of trades, converting `TradeData` to `TradeMarker`
     /// and building trade pairs for visual profit/loss lines
     pub fn from_trades(trades: &[TradeData]) -> Self {
         let mut overlay = Self::new();
@@ -395,7 +403,7 @@ impl TradeOverlay {
     }
 
     /// Draw trade overlay on the candle chart
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::too_many_arguments)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; intentional cast
     pub fn draw(
         &self,
         ui: &mut Ui,

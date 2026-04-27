@@ -25,7 +25,7 @@ pub const POLL_TIMEOUT_MS: i32 = 1000;
 pub const TCP_KEEPALIVE_IDLE: i32 = 60;
 
 /// RPC Request sent from client to server
-/// Format: [method_name, args, kwargs]
+/// Format: [`method_name`, args, kwargs]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcRequest {
     /// Name of the RPC method to call
@@ -44,7 +44,7 @@ impl RpcRequest {
 }
 
 /// RPC Response sent from server to client
-/// Format: [success, data/error_message]
+/// Format: [success, `data`/`error_message`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcResponse {
     /// Whether the RPC call succeeded

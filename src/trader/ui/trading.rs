@@ -255,7 +255,7 @@ impl TradingWidget {
         self.pending_order = Some(req);
     }
 
-    /// Update vt_symbol and request subscription
+    /// Update `vt_symbol` and request subscription
     fn update_vt_symbol(&mut self) {
         if self.symbol.is_empty() {
             return;
@@ -287,6 +287,7 @@ impl TradingWidget {
     }
 
     /// Show the trading widget
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     pub fn show(&mut self, ui: &mut Ui) {
         ui.set_min_width(280.0);
 

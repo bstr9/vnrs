@@ -1,7 +1,7 @@
 //! MCP Account Tools — 账户与持仓查询工具集
 //!
-//! 提供 get_balance / get_positions / get_position / get_trade_history / get_fee_rate
-//! / get_account_summary 等 MCP Tool，通过 MainEngine 的 OmsEngine 缓存读取账户数据。
+//! 提供 `get_balance` `/` `get_positions` / `get_position` / `get_trade_history` / `get_fee_rate`
+//! / `get_account_summary` 等 MCP Tool，`通过` `MainEngine` 的 `OmsEngine` 缓存读取账户数据。
 
 use rmcp::{
     ErrorData as McpError,
@@ -20,13 +20,13 @@ use super::super::server::TradingMcpServer;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct SymbolParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct GetPositionParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
     /// 方向：Long / Short / Net
     #[serde(default)]
@@ -35,7 +35,7 @@ pub struct GetPositionParams {
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct AccountIdParams {
-    /// 账户 ID（vt_accountid 格式，如 binance.SPOT）
+    /// 账户 `ID`（`vt_accountid` 格式，如 binance.SPOT）
     pub account_id: String,
 }
 
@@ -55,7 +55,7 @@ fn default_limit() -> usize {
 
 // ---- AccountTools (data holder, no longer has #[tool_router]) ----
 
-/// 账户与持仓查询数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
+/// 账户与持仓查询数据容器（已迁移到 `TradingMcpServer` 的 `#`[`tool_router`] impl）
 #[allow(dead_code)]
 pub struct AccountTools {
     engine: Arc<MainEngine>,
@@ -63,7 +63,7 @@ pub struct AccountTools {
 
 #[allow(dead_code)]
 impl AccountTools {
-    /// 创建 AccountTools 实例
+    /// 创建 `AccountTools` 实例
     pub fn new(engine: Arc<MainEngine>) -> Self {
         Self { engine }
     }

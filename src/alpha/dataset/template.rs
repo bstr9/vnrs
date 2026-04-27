@@ -1,7 +1,7 @@
 //! Template for alpha datasets
 //! Provides the core data structure for alpha factor analysis
 //!
-//! This module implements the AlphaDataset structure matching vnpy's functionality,
+//! This module implements the `AlphaDataset` structure matching vnpy's functionality,
 //! including feature calculation, data processing, and segment management.
 
 use crate::alpha::dataset::utility::{to_datetime, Segment};
@@ -23,7 +23,7 @@ pub enum FeatureExpression {
 
 /// Alpha dataset for factor analysis and machine learning
 pub struct AlphaDataset {
-    /// Raw data DataFrame
+    /// Raw data `DataFrame`
     pub df: DataFrame,
 
     /// Processed raw data
@@ -55,7 +55,7 @@ pub struct AlphaDataset {
 }
 
 impl AlphaDataset {
-    /// Create a new AlphaDataset
+    /// Create a new `AlphaDataset`
     pub fn new(
         df: DataFrame,
         train_period: (String, String),
@@ -314,6 +314,7 @@ impl AlphaDataset {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss)] // value fits in target type; value fits in target type; value is non-negative
     fn try_parse_return_label(&self, df: &DataFrame, expr: &str) -> Option<Series> {
         let expr_lower = expr.to_lowercase().replace(" ", "");
 
@@ -397,7 +398,8 @@ impl AlphaDataset {
     }
 }
 
-/// Filter DataFrame based on time range
+/// Filter `DataFrame` based on time range
+#[allow(clippy::cast_possible_truncation)] // value fits in target type
 pub fn query_by_time(df: &DataFrame, start: &str, end: &str) -> DataFrame {
     let start_dt = match to_datetime(start) {
         Ok(dt) => dt,

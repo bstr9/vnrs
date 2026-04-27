@@ -19,7 +19,7 @@ use crate::trader::utility::extract_vt_symbol;
 #[pyclass]
 pub struct PythonEngine {
     main_engine: Arc<MainEngine>,
-    /// Optional reference to the live StrategyEngine for routing Python strategies
+    /// Optional reference to the live `StrategyEngine` for routing Python strategies
     strategy_engine: Option<Arc<StrategyEngine>>,
     strategies: HashMap<String, Py<Strategy>>,
     symbol_strategy_map: HashMap<String, String>,
@@ -37,9 +37,9 @@ impl PythonEngine {
         }
     }
 
-    /// Create a PythonEngine from an already-shared MainEngine reference.
-    /// This allows the engine to share the same MainEngine instance with
-    /// PythonEngineBridge registered on that MainEngine.
+    /// Create a `PythonEngine` from an already-`shared` `MainEngine` reference.
+    /// This allows the engine to share the same `MainEngine` instance with
+    /// `PythonEngineBridge` registered on `that` `MainEngine`.
     pub fn new_from_arc(main_engine: Arc<MainEngine>) -> Self {
         PythonEngine {
             main_engine,
@@ -50,13 +50,13 @@ impl PythonEngine {
         }
     }
 
-    /// Set the live StrategyEngine reference so that Python strategies
+    /// Set the live `StrategyEngine` reference so that Python strategies
     /// added via `add_strategy` are also registered for live market data
     pub fn set_strategy_engine(&mut self, engine: Arc<StrategyEngine>) {
         self.strategy_engine = Some(engine);
     }
 
-    /// Get a reference to the live StrategyEngine, if set.
+    /// Get a reference to the live `StrategyEngine`, if set.
     pub fn get_strategy_engine(&self) -> Option<&Arc<StrategyEngine>> {
         self.strategy_engine.as_ref()
     }
@@ -318,7 +318,7 @@ impl PythonEngine {
         Ok(())
     }
 
-    /// Send an order through the MainEngine
+    /// Send an order through the `MainEngine`
     pub fn send_order(
         &self,
         vt_symbol: &str,
@@ -404,7 +404,7 @@ impl PythonEngine {
         self.send_order(vt_symbol, Direction::Long, Offset::Close, price, volume, OrderType::Limit)
     }
 
-    /// Cancel an existing order through the MainEngine
+    /// Cancel an existing order through the `MainEngine`
     pub fn cancel_order(&self, vt_orderid: &str) {
         // vt_orderid format: "gateway_name.orderid"
         let parts: Vec<&str> = vt_orderid.splitn(2, '.').collect();
@@ -513,7 +513,7 @@ impl PythonEngine {
 ///
 /// This allows `PythonEngine` to be registered with `MainEngine` as a sub-engine
 /// for standalone usage (when no `StrategyEngine` is set). When a `StrategyEngine`
-/// IS set, Python strategies receive events through the StrategyEngine's event
+/// IS set, Python strategies receive events through the `StrategyEngine`'s event
 /// routing instead, and this wrapper's `process_event` becomes a no-op.
 pub struct PythonEngineBridge {
     inner: Arc<std::sync::Mutex<PythonEngine>>,
@@ -526,10 +526,10 @@ impl PythonEngineBridge {
         }
     }
 
-    /// Create a bridge from an already-shared PythonEngine reference.
-    /// This allows the PythonEngineWrapper and the bridge to share the
-    /// same PythonEngine instance, so events dispatched through MainEngine
-    /// reach the same strategies that the wrapper's on_tick/on_bar/etc forward to.
+    /// Create a bridge from an already-shared `PythonEngine` reference.
+    /// This allows the `PythonEngineWrapper` and the bridge to share the
+    /// same `PythonEngine` instance, so events dispatched `through` `MainEngine`
+    /// reach the same strategies that the wrapper's `on_tick`/`on_bar`/etc forward to.
     pub fn from_shared(inner: Arc<std::sync::Mutex<PythonEngine>>) -> Self {
         PythonEngineBridge { inner }
     }

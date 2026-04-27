@@ -1,10 +1,10 @@
 //! MCP Strategy Tools — 策略管理工具集
 //!
-//! 提供 list_strategies / get_strategy_status / start_strategy / stop_strategy
-//! / pause_strategy / get_strategy_params / set_strategy_params / get_strategy_performance
-//! 等 MCP Tool，通过 StrategyEngine 管理策略生命周期。
+//! 提供 `list_strategies` `/` `get_strategy_status` / `start_strategy` / `stop_strategy`
+//! / `pause_strategy` `/` `get_strategy_params` / `set_strategy_params` / `get_strategy_performance`
+//! 等 MCP Tool，通过 `StrategyEngine` 管理策略生命周期。
 //!
-//! NOTE: Strategy tools require a StrategyEngine reference. If not provided,
+//! NOTE: Strategy tools require a `StrategyEngine` reference. If not provided,
 //! the tools will return "not available" messages.
 
 use rmcp::{
@@ -38,7 +38,7 @@ pub struct SetStrategyParamsParams {
 
 // ---- StrategyTools (data holder, no longer has #[tool_router]) ----
 
-/// 策略管理数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
+/// 策略管理数据容器（已迁移到 `TradingMcpServer` 的 `#`[`tool_router`] impl）
 #[allow(dead_code)]
 pub struct StrategyTools {
     strategy_engine: Option<Arc<StrategyEngine>>,
@@ -46,12 +46,12 @@ pub struct StrategyTools {
 
 #[allow(dead_code)]
 impl StrategyTools {
-    /// 创建 StrategyTools 实例
+    /// 创建 `StrategyTools` 实例
     pub fn new(strategy_engine: Option<Arc<StrategyEngine>>) -> Self {
         Self { strategy_engine }
     }
 
-    /// 创建带 StrategyEngine 的实例
+    /// 创建带 `StrategyEngine` 的实例
     pub fn with_engine(strategy_engine: Arc<StrategyEngine>) -> Self {
         Self {
             strategy_engine: Some(strategy_engine),

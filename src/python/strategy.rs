@@ -6,7 +6,7 @@
 //!
 //! ## vnpy Compatibility
 //! This class provides vnpy CtaTemplate-compatible properties and methods:
-//! - `self.vt_symbol` — primary trading symbol (first in vt_symbols)
+//! - `self.vt_symbol` — primary trading symbol (first in `vt_symbols`)
 //! - `self.pos` — current position for the primary symbol
 //! - `self.cancel_all()` — cancel all active orders
 //! - `self.put_event()` — notify UI of strategy state change
@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::python::{MessageBus, OrderFactory, PortfolioFacade, PyInstrument, PyStrategyContext};
 
-/// A pending order queued by the strategy during on_bar (to avoid mutex deadlock)
+/// A pending order queued by the strategy during `on_bar` (to avoid mutex deadlock)
 #[derive(Clone)]
 pub struct PendingOrder {
     pub vt_symbol: String,
@@ -28,7 +28,7 @@ pub struct PendingOrder {
     pub volume: f64,
 }
 
-/// A pending stop order queued by the strategy during on_bar (to avoid mutex deadlock)
+/// A pending stop order queued by the strategy during `on_bar` (to avoid mutex deadlock)
 #[derive(Clone)]
 pub struct PendingStopOrder {
     pub vt_symbol: String,
@@ -40,14 +40,14 @@ pub struct PendingStopOrder {
     pub stop_price: f64,    // trigger price
 }
 
-/// A pending indicator registration queued by the strategy during on_init
+/// A pending indicator registration queued by the strategy during `on_init`
 #[derive(Clone)]
 pub struct PendingIndicatorRegistration {
     /// Unique identifier for this indicator
     pub id: String,
-    /// Display name (e.g., "my_custom_ma")
+    /// Display name (e.g., "`my_custom_ma`")
     pub name: String,
-    /// Category string: "trend", "volatility", "volume", "oscillator", "trend_following", "momentum"
+    /// Category string: "trend", "volatility", "volume", "oscillator", "`trend_following`", "momentum"
     pub category: String,
     /// Parameter description (e.g., "period=20, type=EMA")
     pub params_desc: String,
@@ -55,18 +55,18 @@ pub struct PendingIndicatorRegistration {
     pub location: String,
 }
 
-/// A pending indicator value queued during on_indicator callback
+/// A pending indicator value queued during `on_indicator` callback
 #[derive(Clone)]
 pub struct PendingIndicatorValue {
-    /// Indicator name (matches the name used in register_indicator)
+    /// Indicator name (matches the name used in `register_indicator`)
     pub name: String,
     /// The computed value
     pub value: f64,
 }
 
 /// Strategy state as a string property for Python consumers.
-/// Maps to the Rust StrategyState enum:
-///   "NotInited" → "Inited" → "Trading" → "Stopped"
+/// Maps to the Rust `StrategyState` enum:
+///   "`NotInited`" → "Inited" → "Trading" → "Stopped"
 fn state_to_string(inited: bool, trading: bool, stopped: bool) -> String {
     if stopped {
         "Stopped".to_string()
@@ -149,13 +149,13 @@ pub struct Strategy {
     #[pyo3(get, set)]
     pub context: Option<Py<PyStrategyContext>>,
 
-    /// Pending orders queued during on_bar (to avoid mutex deadlock on BacktestingEngine)
+    /// Pending orders queued during `on_bar` (to avoid mutex deadlock on `BacktestingEngine`)
     pending_orders: Arc<Mutex<Vec<PendingOrder>>>,
 
-    /// Pending stop orders queued during on_bar (to avoid mutex deadlock on BacktestingEngine)
+    /// Pending stop orders queued during `on_bar` (to avoid mutex deadlock on `BacktestingEngine`)
     pending_stop_orders: Arc<Mutex<Vec<PendingStopOrder>>>,
 
-    /// Pending indicator registrations queued during on_init
+    /// Pending indicator registrations queued during `on_init`
     pending_indicator_registrations: Arc<Mutex<Vec<PendingIndicatorRegistration>>>,
 
     /// Active stop order IDs for tracking
@@ -193,7 +193,7 @@ impl Strategy {
         }
     }
 
-    /// Current strategy state as a string: "NotInited", "Inited", "Trading", "Stopped"
+    /// Current strategy state as a string: "`NotInited`", "Inited", "Trading", "Stopped"
     #[getter]
     fn state(&self) -> String {
         state_to_string(self.inited, self.trading, self.stopped)
@@ -201,16 +201,16 @@ impl Strategy {
 
     // ---- vnpy CtaTemplate compatible properties ----
 
-    /// Primary trading symbol (first element of vt_symbols).
+    /// Primary trading symbol (first element of `vt_symbols`).
     /// This is the vnpy-compatible `self.vt_symbol` property.
-    /// Returns the first vt_symbol, or empty string if none set.
+    /// Returns the first `vt_symbol`, or empty string if none set.
     #[getter]
     fn vt_symbol(&self) -> String {
         self.vt_symbols.first().cloned().unwrap_or_default()
     }
 
     /// Current position for the primary symbol (vnpy-compatible `self.pos`).
-    /// Reads from `pos_data` using the primary vt_symbol.
+    /// Reads from `pos_data` using the primary `vt_symbol`.
     #[getter]
     fn pos(&self) -> f64 {
         let symbol = self.vt_symbols.first().cloned().unwrap_or_default();
@@ -313,7 +313,7 @@ impl Strategy {
     /// Buy (long direction). Offset defaults to "open" for spot, auto for futures.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     price: Order price
     ///     volume: Order volume
     ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto)
@@ -338,7 +338,7 @@ impl Strategy {
     /// Sell (short direction). Offset defaults to "close" for spot, auto for futures.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     price: Order price
     ///     volume: Order volume
     ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto)
@@ -363,7 +363,7 @@ impl Strategy {
     /// Short (short open, futures only).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     price: Order price
     ///     volume: Order volume
     ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto=open)
@@ -395,7 +395,7 @@ impl Strategy {
     /// Cover (short close, futures only).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     price: Order price
     ///     volume: Order volume
     ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None (auto=close)
@@ -424,16 +424,16 @@ impl Strategy {
         Ok(vec![])
     }
 
-    /// Send stop order (conditional order that triggers when price reaches stop_price).
+    /// Send stop order (conditional order that triggers when price reaches `stop_price`).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "buy" or "sell"
-    ///     price: Order price (limit price for stop_limit, ignored for stop)
+    ///     price: Order price (limit price for `stop_limit`, ignored for stop)
     ///     volume: Order volume
-    ///     stop_price: Trigger price
+    ///     `stop_price`: Trigger price
     ///     offset: Offset mode — "open", "close", "closetoday", "closeyesterday", or None
-    ///     order_type: "stop" (market) or "stop_limit" (limit)
+    ///     `order_type`: "stop" (market) `or `"`stop_limit`" (limit)
     #[pyo3(signature = (vt_symbol, direction, price, volume, stop_price, offset=None, order_type="stop"))]
     #[allow(clippy::too_many_arguments)]
     fn send_stop_order(
@@ -474,10 +474,10 @@ impl Strategy {
     /// Call this in `on_init()` to make your custom indicators visible in the chart.
     ///
     /// Args:
-    ///     name: Display name for the indicator (e.g., "my_custom_ma")
+    ///     name: Display name for the indicator (e.g., "`my_custom_ma`")
     ///     category: Category string - one of: "trend", "volatility", "volume",
-    ///               "oscillator", "trend_following", "momentum" (default: "oscillator")
-    ///     params_desc: Parameter description (e.g., "period=20, type=EMA") (default: "")
+    ///               "oscillator", "`trend_following`", "momentum" (default: "oscillator")
+    ///     `params_desc`: Parameter description (e.g., "period=20, type=EMA") (default: "")
     ///     location: Chart location - "main" for overlay, "sub" for separate pane (default: "sub")
     #[pyo3(signature = (name, category="oscillator".to_string(), params_desc="".to_string(), location="sub".to_string()))]
     fn register_indicator(&self, name: String, category: String, params_desc: String, location: String) -> PyResult<()> {
@@ -577,7 +577,7 @@ impl Strategy {
         Ok(())
     }
 
-    /// Cancel all active orders (vnpy CtaTemplate compatible).
+    /// Cancel all active orders (vnpy `CtaTemplate` compatible).
     /// Clears the pending orders queue and requests engine to cancel all.
     fn cancel_all(&self) -> PyResult<()> {
         // Clear pending orders queue
@@ -626,7 +626,7 @@ impl Strategy {
         Ok(())
     }
 
-    /// Put strategy event (vnpy CtaTemplate compatible).
+    /// Put strategy event (vnpy `CtaTemplate` compatible).
     /// Notifies the engine/UI that strategy state has changed.
     /// In backtesting mode, this is a no-op.
     fn put_event(&self) -> PyResult<()> {
@@ -636,10 +636,10 @@ impl Strategy {
     }
 
     /// Load historical bar data for strategy initialization
-    /// (vnpy CtaTemplate compatible).
+    /// (vnpy `CtaTemplate` compatible).
     ///
     /// In live mode, this requests the engine to load `days` days of
-    /// historical bars and replay them through on_bar().
+    /// historical bars and replay them through `on_bar`().
     /// In backtesting mode, this is a no-op (data is already loaded).
     ///
     /// Args:
@@ -661,10 +661,10 @@ impl Strategy {
     }
 
     /// Load historical tick data for strategy initialization
-    /// (vnpy CtaTemplate compatible).
+    /// (vnpy `CtaTemplate` compatible).
     ///
     /// In live mode, this requests the engine to load `days` days of
-    /// historical ticks and replay them through on_tick().
+    /// historical ticks and replay them through `on_tick`().
     /// In backtesting mode, this is a no-op.
     #[pyo3(signature = (days))]
     fn load_tick(&self, days: i32) -> PyResult<()> {
@@ -680,7 +680,7 @@ impl Strategy {
     /// Get position for a specific symbol.
     ///
     /// Reads from the local `pos_data` cache which is updated by `on_trade()`.
-    /// This avoids calling engine.get_pos() which would deadlock during
+    /// This avoids calling `engine`.`get_pos`() which would deadlock during
     /// backtesting (the engine mutex is held while calling strategy callbacks).
     ///
     /// Note: For the primary symbol, use `self.pos` (property) instead.
@@ -705,7 +705,7 @@ impl Strategy {
     /// In backtesting mode, this is a no-op (data is preloaded).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
     fn subscribe(&self, vt_symbol: &str) -> PyResult<()> {
         if let Some(ref engine) = self.engine {
             let strategy_name = self.strategy_name.clone();
@@ -724,7 +724,7 @@ impl Strategy {
     /// In backtesting mode, this is a no-op.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
     fn unsubscribe(&self, vt_symbol: &str) -> PyResult<()> {
         if let Some(ref engine) = self.engine {
             let strategy_name = self.strategy_name.clone();
@@ -761,7 +761,7 @@ impl Strategy {
     ///
     /// If the parameter was declared with a type hint via `insert_parameter`,
     /// the value will be validated against that type. On type mismatch, raises
-    /// a Python ValueError with a clear message.
+    /// a Python `ValueError` with a clear message.
     ///
     /// Args:
     ///     key: Parameter name
@@ -800,12 +800,12 @@ impl Strategy {
     ///
     /// This declares a parameter with its expected type. If `type_hint` is one of
     /// "int", "float", "bool", or "str", subsequent `set_parameter` calls will
-    /// validate the value against that type. An empty or "str" type_hint means
+    /// validate the value against that type. An empty or "str" `type_hint` means
     /// no validation (strings are the default).
     ///
     /// Args:
     ///     key: Parameter name
-    ///     type_hint: Expected type — "int", "float", "str", "bool", or "" for no validation
+    ///     `type_hint`: Expected type — "int", "float", "str", "bool", or "" for no validation
     ///     value: Parameter value
     #[pyo3(signature = (key, type_hint, value))]
     fn insert_parameter(&mut self, key: &str, type_hint: &str, value: &str) -> PyResult<()> {
@@ -832,7 +832,7 @@ impl Strategy {
     /// Load strategy settings from a dict into parameters.
     ///
     /// Iterates over the setting dict and calls `insert_parameter` for each
-    /// entry. This is how vnpy's CtaTemplate loads strategy settings.
+    /// entry. This is how vnpy's `CtaTemplate` loads strategy settings.
     fn load_setting(&mut self, setting: HashMap<String, String>) -> PyResult<()> {
         for (key, value) in setting {
             self.parameters.insert(key, value);
@@ -851,10 +851,10 @@ impl Strategy {
     /// Delegates to the engine's `get_instrument` method.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
     ///
     /// Returns:
-    ///     PyInstrument if found, None otherwise
+    ///     `PyInstrument` if found, None otherwise
     fn get_instrument(&self, py: Python, vt_symbol: String) -> PyResult<Option<Py<PyInstrument>>> {
         if let Some(engine_ref) = &self.engine {
             let result = engine_ref.call_method1(py, "get_instrument", (vt_symbol,))?;
@@ -922,17 +922,17 @@ impl Strategy {
         Ok(())
     }
 
-    /// Get the pending orders queue (for PythonStrategyAdapter to drain)
+    /// Get the pending orders queue (for `PythonStrategyAdapter` to drain)
     pub fn pending_orders_arc(&self) -> Arc<Mutex<Vec<PendingOrder>>> {
         Arc::clone(&self.pending_orders)
     }
 
-    /// Get the pending stop orders queue (for PythonStrategyAdapter to drain)
+    /// Get the pending stop orders queue (for `PythonStrategyAdapter` to drain)
     pub fn pending_stop_orders_arc(&self) -> Arc<Mutex<Vec<PendingStopOrder>>> {
         Arc::clone(&self.pending_stop_orders)
     }
 
-    /// Get the pending indicator registrations queue (for PythonStrategyAdapter to drain)
+    /// Get the pending indicator registrations queue (for `PythonStrategyAdapter` to drain)
     pub fn pending_indicator_registrations_arc(&self) -> Arc<Mutex<Vec<PendingIndicatorRegistration>>> {
         Arc::clone(&self.pending_indicator_registrations)
     }

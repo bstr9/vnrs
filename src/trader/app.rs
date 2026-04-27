@@ -35,7 +35,7 @@ pub struct AppInfo {
 }
 
 impl AppInfo {
-    /// Create new AppInfo
+    /// Create new `AppInfo`
     pub fn new(
         app_name: impl Into<String>,
         app_module: impl Into<String>,

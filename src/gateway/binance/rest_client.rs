@@ -132,6 +132,7 @@ impl BinanceRestClient {
     }
 
     /// Get current timestamp in milliseconds
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn get_timestamp(&self) -> i64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

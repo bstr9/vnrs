@@ -7,6 +7,7 @@ use chrono::NaiveDate;
 use std::collections::HashMap;
 
 /// Calculate comprehensive backtesting statistics
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts
 pub fn calculate_statistics(
     daily_results: &HashMap<NaiveDate, DailyResult>,
     start_capital: f64,
@@ -96,7 +97,7 @@ pub fn calculate_statistics(
                 max_consecutive_wins = max_consecutive_wins.max(consecutive_wins);
                 // Approximate winning trade PnL (distributed evenly)
                 if result.trade_count > 0 {
-                    let avg_trade = result.net_pnl / result.trade_count as f64;
+                    let avg_trade = result.net_pnl / f64::from(result.trade_count);
                     winning_trades_pnl.push(avg_trade);
                 }
             } else if result.net_pnl < 0.0 {
@@ -106,7 +107,7 @@ pub fn calculate_statistics(
                 max_consecutive_losses = max_consecutive_losses.max(consecutive_losses);
                 // Approximate losing trade PnL (distributed evenly)
                 if result.trade_count > 0 {
-                    let avg_trade = result.net_pnl / result.trade_count as f64;
+                    let avg_trade = result.net_pnl / f64::from(result.trade_count);
                     losing_trades_pnl.push(avg_trade);
                 }
             }
@@ -133,31 +134,31 @@ pub fn calculate_statistics(
 
     // Calculate daily averages
     let daily_net_pnl = if total_days > 0 {
-        total_net_pnl / total_days as f64
+        total_net_pnl / f64::from(total_days)
     } else {
         0.0
     };
 
     let daily_commission = if total_days > 0 {
-        total_commission / total_days as f64
+        total_commission / f64::from(total_days)
     } else {
         0.0
     };
 
     let daily_slippage = if total_days > 0 {
-        total_slippage / total_days as f64
+        total_slippage / f64::from(total_days)
     } else {
         0.0
     };
 
     let daily_turnover = if total_days > 0 {
-        total_turnover / total_days as f64
+        total_turnover / f64::from(total_days)
     } else {
         0.0
     };
 
     let daily_trade_count = if total_days > 0 {
-        total_trade_count as f64 / total_days as f64
+        f64::from(total_trade_count) / f64::from(total_days)
     } else {
         0.0
     };
@@ -185,14 +186,14 @@ pub fn calculate_statistics(
 
     // Calculate Sharpe ratio
     let sharpe_ratio = if return_std > 0.0 {
-        let excess_return = daily_return_mean - risk_free / annual_days as f64;
-        excess_return / return_std * (annual_days as f64).sqrt()
+        let excess_return = daily_return_mean - risk_free / f64::from(annual_days);
+        excess_return / return_std * (f64::from(annual_days)).sqrt()
     } else {
         0.0
     };
 
     // Annual return
-    let return_mean = daily_return_mean * annual_days as f64;
+    let return_mean = daily_return_mean * f64::from(annual_days);
 
     // GAP 3: Calculate additional metrics
     let total_trades = winning_trades_pnl.len() + losing_trades_pnl.len();
@@ -249,8 +250,8 @@ pub fn calculate_statistics(
     };
 
     let sortino_ratio = if downside_std > 0.0 {
-        let excess_return = daily_return_mean - risk_free / annual_days as f64;
-        excess_return / downside_std * (annual_days as f64).sqrt()
+        let excess_return = daily_return_mean - risk_free / f64::from(annual_days);
+        excess_return / downside_std * (f64::from(annual_days)).sqrt()
     } else {
         0.0
     };
@@ -351,6 +352,7 @@ pub fn calculate_returns(balances: &[f64]) -> Vec<f64> {
 }
 
 /// Calculate Sharpe ratio from returns
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 pub fn calculate_sharpe_ratio(returns: &[f64], risk_free: f64, annual_days: u32) -> f64 {
     if returns.is_empty() {
         return 0.0;
@@ -377,10 +379,10 @@ pub fn calculate_sharpe_ratio(returns: &[f64], risk_free: f64, annual_days: u32)
         return 0.0;
     }
 
-    let daily_risk_free = risk_free / annual_days as f64;
+    let daily_risk_free = risk_free / f64::from(annual_days);
     let excess_return = mean_return - daily_risk_free;
 
-    excess_return / std_return * (annual_days as f64).sqrt()
+    excess_return / std_return * (f64::from(annual_days)).sqrt()
 }
 
 #[cfg(test)]

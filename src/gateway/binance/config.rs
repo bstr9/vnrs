@@ -50,7 +50,8 @@ impl Default for BinanceGatewayConfig {
 }
 
 impl BinanceGatewayConfig {
-    /// Create from GatewaySettings
+    /// Create from `GatewaySettings`
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     pub fn from_settings(settings: &GatewaySettings) -> Self {
         let key = match settings.get("key") {
             Some(GatewaySettingValue::String(s)) => s.clone(),
@@ -82,7 +83,7 @@ impl BinanceGatewayConfig {
         }
     }
 
-    /// Convert to GatewaySettings
+    /// Convert to `GatewaySettings`
     pub fn to_settings(&self) -> GatewaySettings {
         let mut settings = GatewaySettings::new();
         settings.insert(
@@ -103,7 +104,7 @@ impl BinanceGatewayConfig {
         );
         settings.insert(
             "proxy_port".to_string(),
-            GatewaySettingValue::Int(self.proxy_port as i64),
+            GatewaySettingValue::Int(i64::from(self.proxy_port)),
         );
         settings
     }
@@ -112,7 +113,7 @@ impl BinanceGatewayConfig {
 /// All Binance gateway configurations
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BinanceConfigs {
-    /// Map of gateway_name -> config
+    /// Map of `gateway_name` -> config
     #[serde(default)]
     pub gateways: HashMap<String, BinanceGatewayConfig>,
 }

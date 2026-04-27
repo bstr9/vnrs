@@ -1,4 +1,4 @@
-//! Python bindings for BracketOrderEngine
+//! Python bindings for `BracketOrderEngine`
 //!
 //! Exposes bracket/OCO/OTO contingent order management to Python strategies for:
 //! - Creating bracket orders (entry + TP + SL)
@@ -21,10 +21,10 @@ use std::sync::Arc;
 // PyBracketOrderGroup
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for OrderGroup data.
+/// Python wrapper for `OrderGroup` data.
 ///
 /// Represents a group of contingent orders (bracket, OCO, or OTO) that is
-/// being tracked by the BracketOrderEngine.
+/// being tracked by the `BracketOrderEngine`.
 #[pyclass(name = "BracketOrderGroup")]
 #[derive(Clone)]
 pub struct PyBracketOrderGroup {
@@ -32,7 +32,7 @@ pub struct PyBracketOrderGroup {
 }
 
 impl PyBracketOrderGroup {
-    /// Create a new PyBracketOrderGroup from a Rust OrderGroup
+    /// Create a new `PyBracketOrderGroup` from a `Rust` `OrderGroup`
     pub fn from_rust(group: OrderGroup) -> Self {
         Self { inner: group }
     }
@@ -52,13 +52,13 @@ impl PyBracketOrderGroup {
         self.inner.contingency_type.to_string()
     }
 
-    /// Group state: "Pending", "EntryActive", "SecondaryActive", "Completed", "Cancelled", "Rejected"
+    /// Group state: "Pending", "`EntryActive`",` `"`SecondaryActive`", "Completed", "Cancelled", "Rejected"
     #[getter]
     fn state(&self) -> String {
         self.inner.state.to_string()
     }
 
-    /// Full vt_symbol (e.g., "BTCUSDT.BINANCE")
+    /// Full `vt_symbol` (e.g., "BTCUSDT.BINANCE")
     #[getter]
     fn vt_symbol(&self) -> &str {
         &self.inner.vt_symbol
@@ -101,8 +101,8 @@ impl PyBracketOrderGroup {
 
     /// Get the child orders in this group as a list of dicts.
     ///
-    /// Each dict contains: role, vt_orderid, status, filled_volume, avg_fill_price,
-    /// symbol, exchange, direction, order_type, price, volume, offset
+    /// Each dict contains: role, `vt_orderid`, `status,` `filled_volume`, `avg_fill_price`,
+    /// symbol, exchange, direction, `order_type`, price, volume, offset
     fn get_orders(&self) -> Vec<PyChildOrderInfo> {
         self.inner
             .orders
@@ -166,13 +166,13 @@ impl PyChildOrderInfo {
 
 #[pymethods]
 impl PyChildOrderInfo {
-    /// Order role: "Entry", "TakeProfit", "StopLoss", "Primary", "Secondary", "OrderA", "OrderB"
+    /// Order role: "Entry", "`TakeProfit`",` `"`StopLoss`", "Primary", "`Secondary"`, "`OrderA`",` `"`OrderB`"
     #[getter]
     fn role(&self) -> &str {
         &self.role
     }
 
-    /// vt_orderid if submitted
+    /// `vt_orderid` if submitted
     #[getter]
     fn vt_orderid(&self) -> Option<&str> {
         self.vt_orderid.as_deref()
@@ -250,11 +250,11 @@ impl PyChildOrderInfo {
 // PyBracketOrderEngine
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for BracketOrderEngine.
+/// Python wrapper for `BracketOrderEngine`.
 ///
 /// Provides bracket/OCO/OTO contingent order management.
 ///
-/// Usage::
+/// `Usage`::
 ///
 ///     engine = create_main_engine()
 ///     boe = engine.get_bracket_order_engine()
@@ -291,7 +291,7 @@ pub struct PyBracketOrderEngine {
 }
 
 impl PyBracketOrderEngine {
-    /// Create a new PyBracketOrderEngine from an Arc<BracketOrderEngine>
+    /// Create a new `PyBracketOrderEngine` from an Arc<BracketOrderEngine>
     pub fn new(engine: Arc<BracketOrderEngine>) -> Self {
         Self { inner: engine }
     }
@@ -302,16 +302,16 @@ impl PyBracketOrderEngine {
     /// Add a bracket order (entry + take-profit + stop-loss).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
     ///     direction: "LONG", "SHORT", or "NET"
-    ///     entry_price: Entry order price (0.0 for market entry)
-    ///     entry_volume: Entry order volume (must be > 0)
-    ///     tp_price: Take-profit price (must be > 0)
-    ///     sl_price: Stop-loss price (must be > 0)
-    ///     entry_type: "LIMIT" or "MARKET" (default "LIMIT")
-    ///     sl_type: "STOP", "STOP_LIMIT", or "LIMIT" (default "STOP")
+    ///     `entry_price`: Entry order price (0.0 for market entry)
+    ///     `entry_volume`: Entry order volume (must be > 0)
+    ///     `tp_price`: Take-profit price (must be > 0)
+    ///     `sl_price`: Stop-loss price (must be > 0)
+    ///     `entry_type`: "LIMIT" or "MARKET" (default "LIMIT")
+    ///     `sl_type`: "STOP",` `"`STOP_LIMIT`", or "LIMIT" (default "STOP")
     ///     offset: Order offset - "NONE", "OPEN", "CLOSE", "CLOSETODAY", "CLOSEYESTERDAY" (default "NONE")
-    ///     gateway_name: Gateway name (default "MAIN")
+    ///     `gateway_name`: Gateway name (default "MAIN")
     ///     reference: Optional reference string (default "")
     ///     tag: Optional tag string (default "")
     ///
@@ -319,7 +319,7 @@ impl PyBracketOrderEngine {
     ///     The group ID on success
     ///
     /// Raises:
-    ///     ValueError: If parameters are invalid
+    ///     `ValueError`: If parameters are invalid
     #[pyo3(signature = (vt_symbol, direction, entry_price, entry_volume, tp_price, sl_price, entry_type="LIMIT", sl_type="STOP", offset="NONE", gateway_name="MAIN", reference="", tag=""))]
     fn add_bracket_order(
         &self,
@@ -371,15 +371,15 @@ impl PyBracketOrderEngine {
     /// Add an OCO (one-cancels-other) order pair.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
     ///     direction: "LONG", "SHORT", or "NET"
-    ///     order_a_price: Price for order A
-    ///     order_b_price: Price for order B
+    ///     `order_a_price`: Price for order A
+    ///     `order_b_price`: Price for order B
     ///     volume: Order volume (must be > 0)
-    ///     order_a_type: Order type for A - "LIMIT", "MARKET", "STOP", "STOP_LIMIT" (default "LIMIT")
-    ///     order_b_type: Order type for B - "LIMIT", "MARKET", "STOP", "STOP_LIMIT" (default "LIMIT")
+    ///     `order_a_type`: Order type for A - "LIMIT", "MARKET", "STOP",` `"STOP_LIMIT" (default "LIMIT")
+    ///     `order_b_type`: Order type for B - "LIMIT", "MARKET", "STOP",` `"STOP_LIMIT" (default "LIMIT")
     ///     offset: Order offset - "NONE", "OPEN", "CLOSE", "CLOSETODAY", "CLOSEYESTERDAY" (default "NONE")
-    ///     gateway_name: Gateway name (default "MAIN")
+    ///     `gateway_name`: Gateway name (default "MAIN")
     ///     reference: Optional reference string (default "")
     ///     tag: Optional tag string (default "")
     ///
@@ -387,7 +387,7 @@ impl PyBracketOrderEngine {
     ///     The group ID on success
     ///
     /// Raises:
-    ///     ValueError: If parameters are invalid
+    ///     `ValueError`: If parameters are invalid
     #[pyo3(signature = (vt_symbol, direction, order_a_price, order_b_price, volume, order_a_type="LIMIT", order_b_type="LIMIT", offset="NONE", gateway_name="MAIN", reference="", tag=""))]
     fn add_oco_order(
         &self,
@@ -437,17 +437,17 @@ impl PyBracketOrderEngine {
     /// Add an OTO (one-triggers-other) order pair.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
-    ///     primary_direction: Direction for primary order - "LONG", "SHORT", or "NET"
-    ///     primary_price: Primary order price
-    ///     primary_volume: Primary order volume (must be > 0)
-    ///     secondary_direction: Direction for secondary order - "LONG", "SHORT", or "NET"
-    ///     secondary_price: Secondary order price
-    ///     secondary_volume: Secondary order volume (must be > 0)
-    ///     primary_type: Primary order type - "LIMIT", "MARKET", "STOP", "STOP_LIMIT" (default "LIMIT")
-    ///     secondary_type: Secondary order type - "LIMIT", "MARKET", "STOP", "STOP_LIMIT" (default "LIMIT")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     `primary_direction`: Direction for primary order - "LONG", "SHORT", or "NET"
+    ///     `primary_price`: Primary order price
+    ///     `primary_volume`: Primary order volume (must be > 0)
+    ///     `secondary_direction`: Direction for secondary order - "LONG", "SHORT", or "NET"
+    ///     `secondary_price`: Secondary order price
+    ///     `secondary_volume`: Secondary order volume (must be > 0)
+    ///     `primary_type`: Primary order type - "LIMIT", "MARKET", "STOP",` `"STOP_LIMIT" (default "LIMIT")
+    ///     `secondary_type`: Secondary order type - "LIMIT", "MARKET", "STOP",` `"STOP_LIMIT" (default "LIMIT")
     ///     offset: Order offset - "NONE", "OPEN", "CLOSE", "CLOSETODAY", "CLOSEYESTERDAY" (default "NONE")
-    ///     gateway_name: Gateway name (default "MAIN")
+    ///     `gateway_name`: Gateway name (default "MAIN")
     ///     reference: Optional reference string (default "")
     ///     tag: Optional tag string (default "")
     ///
@@ -455,7 +455,7 @@ impl PyBracketOrderEngine {
     ///     The group ID on success
     ///
     /// Raises:
-    ///     ValueError: If parameters are invalid
+    ///     `ValueError`: If parameters are invalid
     #[pyo3(signature = (vt_symbol, primary_direction, primary_price, primary_volume, secondary_direction, secondary_price, secondary_volume, primary_type="LIMIT", secondary_type="LIMIT", offset="NONE", gateway_name="MAIN", reference="", tag=""))]
     fn add_oto_order(
         &self,
@@ -510,10 +510,10 @@ impl PyBracketOrderEngine {
     /// Cancel an order group by ID.
     ///
     /// Args:
-    ///     group_id: The group ID to cancel
+    ///     `group_id`: The group ID to cancel
     ///
     /// Raises:
-    ///     ValueError: If the group is not found or not in an active state
+    ///     `ValueError`: If the group is not found or not in an active state
     fn cancel_group(&self, group_id: u64) -> PyResult<()> {
         self.inner
             .cancel_group(group_id)
@@ -523,7 +523,7 @@ impl PyBracketOrderEngine {
     /// Get all active order groups.
     ///
     /// Returns:
-    ///     List of BracketOrderGroup objects with active state
+    ///     List of `BracketOrderGroup` objects with active state
     fn get_active_groups(&self) -> Vec<PyBracketOrderGroup> {
         self.inner
             .get_active_groups()
@@ -535,7 +535,7 @@ impl PyBracketOrderEngine {
     /// Get all order groups (including completed, cancelled, rejected).
     ///
     /// Returns:
-    ///     List of all BracketOrderGroup objects
+    ///     List of all `BracketOrderGroup` objects
     fn get_all_groups(&self) -> Vec<PyBracketOrderGroup> {
         self.inner
             .get_all_groups()
@@ -547,10 +547,10 @@ impl PyBracketOrderEngine {
     /// Get a specific order group by ID.
     ///
     /// Args:
-    ///     group_id: The group ID
+    ///     `group_id`: The group ID
     ///
     /// Returns:
-    ///     BracketOrderGroup if found, None otherwise
+    ///     `BracketOrderGroup` if found, None otherwise
     fn get_group(&self, group_id: u64) -> Option<PyBracketOrderGroup> {
         self.inner
             .get_group(group_id)

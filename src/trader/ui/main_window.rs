@@ -769,7 +769,7 @@ impl MainWindow {
         }
     }
     
-    /// Apply theme based on dark_mode setting
+    /// Apply theme based on `dark_mode` setting
     pub fn setup_style(&self, ctx: &Context) {
         if self.dark_mode {
             apply_dark_theme(ctx);
@@ -1953,9 +1953,9 @@ impl MainWindow {
     
     /// Sync trade overlay from backtesting panel to the matching chart widget.
     ///
-    /// When a backtest completes and produces trades, the BacktestingPanel
+    /// When a backtest completes and produces trades, the `BacktestingPanel`
     /// populates its `trade_overlay`. This method transfers that overlay to
-    /// the chart widget for the same vt_symbol so trades are visible on the
+    /// the chart widget for the same `vt_symbol` so trades are visible on the
     /// K-line chart.
     fn sync_backtest_trade_overlay(&mut self) {
         let overlay = self.backtesting_panel.take_trade_overlay();
@@ -2308,7 +2308,7 @@ fn parse_direction(s: &str) -> crate::trader::Direction {
     }
 }
 
-/// Parse order type string to OrderType enum
+/// Parse order type string to `OrderType` enum
 fn parse_order_type(s: &str) -> crate::trader::OrderType {
     match s.to_lowercase().as_str() {
         "limit" | "限价" => crate::trader::OrderType::Limit,
@@ -2510,7 +2510,7 @@ impl TickBarAggregator {
             }
             crate::trader::Interval::Weekly => {
                 let days_from_monday = dt.weekday().num_days_from_monday();
-                let week_start = *dt - Duration::days(days_from_monday as i64);
+                let week_start = *dt - Duration::days(i64::from(days_from_monday));
                 week_start
                     .with_hour(0).unwrap_or(week_start)
                     .with_minute(0).unwrap_or(week_start)

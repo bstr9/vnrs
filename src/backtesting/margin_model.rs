@@ -1,7 +1,7 @@
 //! Margin Model for Futures Trading
 //!
 //! Calculates initial and maintenance margin for futures positions.
-//! Follows the FeeModel pattern from simulated_exchange.rs for pluggable models.
+//! Follows the `FeeModel` pattern `from` `simulated_exchange`.rs for pluggable models.
 //!
 //! Supported models:
 //! - `LinearMarginModel`: Constant rate margin (standard USDT-M futures)
@@ -79,7 +79,7 @@ impl MarginCheckResult {
 pub struct MarginBracket {
     /// Lower bound of notional value (inclusive)
     pub notional_floor: f64,
-    /// Upper bound of notional value (exclusive, f64::MAX for last bracket)
+    /// Upper bound of notional value (exclusive, `f64::MAX` for last bracket)
     pub notional_cap: f64,
     /// Initial margin rate for this bracket
     pub initial_rate: f64,
@@ -122,7 +122,7 @@ impl MarginBracket {
 
 /// Trait for margin calculation models.
 ///
-/// Follows the same pluggable pattern as `FeeModel` from simulated_exchange.rs.
+/// Follows the same pluggable pattern as `FeeModel` from `simulated_exchange`.rs.
 /// Each model calculates initial and maintenance margin, and can check whether
 /// available balance is sufficient for a new position.
 pub trait MarginModel: Send + Sync + fmt::Debug {
@@ -240,7 +240,7 @@ impl MarginModel for LinearMarginModel {
 /// Where `addl_margin` is the cumulative margin from all previous brackets.
 #[derive(Debug, Clone)]
 pub struct TieredMarginModel {
-    /// Ordered list of margin brackets (ascending by notional_floor)
+    /// Ordered list of margin brackets (ascending by `notional_floor`)
     pub brackets: Vec<MarginBracket>,
     /// Whether to apply margin checks for non-futures products
     pub futures_only: bool,
@@ -260,7 +260,7 @@ impl TieredMarginModel {
         model
     }
 
-    /// Create with pre-computed addl_margin values (skip recalculation).
+    /// Create with pre-computed `addl_margin` values (skip recalculation).
     pub fn new_raw(brackets: Vec<MarginBracket>) -> Self {
         Self {
             brackets,

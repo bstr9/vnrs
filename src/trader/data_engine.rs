@@ -1,4 +1,4 @@
-//! DataEngine — centralized subscription management and tick→bar aggregation.
+//! `DataEngine` — centralized subscription management and tick→bar aggregation.
 //!
 //! Provides:
 //! - Centralized subscription registry (de-duplicates gateway subscriptions)
@@ -186,26 +186,26 @@ impl TickBarAggregator for DefaultBarAggregator {
 /// - Aggregate ticks into 1-minute bars centrally
 /// - Synthesize higher-timeframe bars (5m/15m/1h/4h/1d) from 1m bars
 /// - Cache latest tick/bar for query interface
-/// - Emit bar events into MainEngine's event stream for StrategyEngine consumption
+/// - Emit bar events into `MainEngine`'s event stream for `StrategyEngine` consumption
 pub struct DataEngine {
-    /// Subscription registry: key = "vt_symbol.Interval" → list of subscriber names
+    /// Subscription registry: key = "`vt_symbol`.Interval" → list of subscriber names
     subscriptions: RwLock<HashMap<String, Vec<String>>>,
-    /// Per-symbol 1m bar aggregator: key = vt_symbol
+    /// Per-symbol 1m bar aggregator: key = `vt_symbol`
     bar_generators: RwLock<HashMap<String, Box<dyn TickBarAggregator>>>,
-    /// Per-(symbol, interval) bar synthesizer: key = "vt_symbol.Interval" (higher TF only)
+    /// Per-(symbol, interval) bar synthesizer: key = "`vt_symbol`.Interval" (higher TF only)
     bar_synthesizers: RwLock<HashMap<String, BarSynthesizer>>,
     /// Tick cache: latest tick per symbol
     tick_cache: RwLock<HashMap<String, TickData>>,
-    /// Bar cache: latest bar per (symbol, interval), key = "vt_symbol.Interval"
+    /// Bar cache: latest bar per (symbol, interval), key = "`vt_symbol`.Interval"
     bar_cache: RwLock<HashMap<String, BarData>>,
-    /// Event sender to inject bar events into MainEngine's event stream
+    /// Event sender to inject bar events into `MainEngine`'s event stream
     event_tx: mpsc::UnboundedSender<(String, GatewayEvent)>,
     /// Track which symbols have gateway subscriptions (for de-duplication)
     gateway_subscriptions: RwLock<HashMap<String, String>>, // vt_symbol -> gateway_name
 }
 
 impl DataEngine {
-    /// Create a new DataEngine.
+    /// Create a new `DataEngine`.
     pub fn new(
         event_tx: mpsc::UnboundedSender<(String, GatewayEvent)>,
     ) -> Self {
@@ -224,8 +224,8 @@ impl DataEngine {
     ///
     /// If this is the first subscriber for this (symbol, interval):
     /// 1. Register in subscriptions map
-    /// 2. Create BarGenerator for this symbol if needed
-    /// 3. Create BarSynthesizer for higher timeframes if needed
+    /// 2. Create `BarGenerator` for this symbol if needed
+    /// 3. Create `BarSynthesizer` for higher timeframes if needed
     /// 4. Subscribe to gateway if this is the first interval for this symbol
     ///
     /// If already subscribed, just add the subscriber name.
@@ -289,9 +289,9 @@ impl DataEngine {
     ///
     /// If this is the last subscriber for this (symbol, interval):
     /// - Remove from subscriptions map
-    /// - Remove associated bar_synthesizer
+    /// - Remove associated `bar_synthesizer`
     /// - If no subscriptions remain for this symbol at ANY interval:
-    ///   - Remove bar_generator
+    ///   - Remove `bar_generator`
     ///   - Unsubscribe from gateway
     pub fn unsubscribe(&self, vt_symbol: &str, interval: Interval, subscriber: &str) -> Result<(), String> {
         let key = subscription_key(vt_symbol, interval);
@@ -359,15 +359,15 @@ impl DataEngine {
         Ok(())
     }
 
-    /// Process a tick event from MainEngine.
+    /// Process a tick event from `MainEngine`.
     ///
     /// 1. Cache the tick
-    /// 2. Feed tick to symbol's BarGenerator
-    /// 3. If BarGenerator produces a 1m bar:
+    /// 2. Feed tick to symbol's `BarGenerator`
+    /// 3. If `BarGenerator` produces a 1m bar:
     ///    a. Cache the 1m bar
-    ///    b. Emit GatewayEvent::Bar into event stream
-    ///    c. Feed 1m bar to all BarSynthesizers for this symbol
-    ///    d. If BarSynthesizer produces a higher-TF bar, cache and emit it
+    ///    b. Emit `GatewayEvent::Bar` into event stream
+    ///    c. Feed 1m bar to all `BarSynthesizers` for this symbol
+    ///    d. If `BarSynthesizer` produces a higher-TF bar, cache and emit it
     pub fn process_tick(&self, tick: &TickData) {
         let vt_symbol = tick.vt_symbol();
 
@@ -537,7 +537,7 @@ impl BaseEngine for DataEngine {
 // Helper functions
 // ---------------------------------------------------------------------------
 
-/// Generate subscription key from vt_symbol and interval.
+/// Generate subscription key from `vt_symbol` and interval.
 fn subscription_key(vt_symbol: &str, interval: Interval) -> String {
     format!("{vt_symbol}.{interval:?}")
 }

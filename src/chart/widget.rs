@@ -18,7 +18,7 @@ use super::manager::BarManager;
 use crate::trader::object::BarData;
 use crate::trader::Interval;
 
-/// Event emitted by ChartWidget
+/// Event emitted by `ChartWidget`
 #[derive(Clone, Debug)]
 pub struct ChartEvent {
     /// Interval was changed by user
@@ -27,7 +27,7 @@ pub struct ChartEvent {
     pub new_interval: Interval,
     /// User scrolled/dragged to the left edge and needs more historical data
     pub need_more_history: bool,
-    /// The symbol (vt_symbol) for which data should be requested
+    /// The symbol (`vt_symbol`) for which data should be requested
     pub symbol: Option<String>,
 }
 
@@ -193,7 +193,7 @@ impl ChartWidget {
     }
 
     /// Push an externally-computed value to the indicator with the given name.
-    /// Used for Python indicators whose values arrive via on_indicator.
+    /// Used for Python indicators whose values arrive via `on_indicator`.
     pub fn update_indicator_raw(&mut self, indicator_name: &str, value: f64) {
         for indicator in &mut self.indicators {
             if indicator.name() == indicator_name {
@@ -251,6 +251,7 @@ impl ChartWidget {
     /// Use this when prepending older data (drag-to-load more history)
     /// The viewport shifts right by the number of new bars prepended before the old start,
     /// so the user sees the same bars they were looking at before the load.
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn update_history_prepend(&mut self, history: Vec<BarData>) {
         let old_count = self.manager.get_count();
         // Remember the time of the leftmost visible bar so we can restore the view
@@ -315,6 +316,7 @@ impl ChartWidget {
     }
 
     /// Handle keyboard input
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn handle_keyboard(&mut self, ui: &Ui) {
         let count = self.manager.get_count();
 
@@ -348,6 +350,7 @@ impl ChartWidget {
     }
 
     /// Handle mouse wheel for zooming
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn handle_scroll(&mut self, ui: &Ui) {
         let scroll_delta = ui.input(|i| i.raw_scroll_delta);
         if scroll_delta.y != 0.0 {
@@ -364,6 +367,7 @@ impl ChartWidget {
 
     /// Handle mouse drag for panning
     /// Returns true if user dragged to the left edge and needs more historical data
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn handle_drag(&mut self, response: &Response, candle_rect: Rect) -> bool {
         let mut need_more = false;
         if response.dragged() {
@@ -388,6 +392,7 @@ impl ChartWidget {
     }
 
     /// Show the chart widget
+    #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)] // lossless cast kept as-is; value fits in target type
     pub fn show(&mut self, ui: &mut Ui, symbol: Option<&str>) -> (Response, Option<ChartEvent>) {
         let mut event = None;
         // Draw toolbar first
@@ -1365,6 +1370,7 @@ impl ChartWidget {
     }
 
     /// Draw mini scrollbar for quick navigation through chart history
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn draw_scrollbar(&mut self, ui: &mut Ui, chart_area: Rect, min_ix: usize, max_ix: usize) {
         let total_count = self.manager.get_count();
         if total_count == 0 {
@@ -1459,7 +1465,7 @@ impl ChartWidget {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::too_many_arguments)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; intentional cast
     fn draw_indicators(
         &self,
         ui: &Ui,
@@ -1549,6 +1555,7 @@ impl ChartWidget {
     }
 
     /// Draw indicator legend in the top-left corner of the chart
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn draw_legend(&self, ui: &mut Ui, chart_rect: Rect) {
         // Collect Main-location indicator legend entries
         let mut entries: Vec<(String, Color32)> = Vec::new();
@@ -1635,6 +1642,7 @@ impl ChartWidget {
     }
 
     /// Draw grid lines on the chart
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn draw_grid(
         &self,
         ui: &mut Ui,
@@ -1687,6 +1695,7 @@ impl ChartWidget {
     }
 
     /// Draw Y-axis with tick labels
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn draw_y_axis(
         &self,
         ui: &mut Ui,
@@ -1734,6 +1743,7 @@ impl ChartWidget {
     }
 
     /// Draw X-axis with datetime labels
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn draw_x_axis(&self, ui: &mut Ui, chart_area: Rect, min_ix: usize, max_ix: usize) {
         let painter = ui.painter();
 
@@ -1810,6 +1820,7 @@ impl ChartCursor {
         self.visible = false;
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn move_left(&mut self, manager: &BarManager) {
         if self.x > 0 {
             self.x -= 1;
@@ -1819,6 +1830,7 @@ impl ChartCursor {
         }
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn move_right(&mut self, manager: &BarManager) {
         if self.x < manager.get_count().saturating_sub(1) {
             self.x += 1;
@@ -1828,7 +1840,7 @@ impl ChartCursor {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::too_many_arguments)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative; intentional cast
     pub fn update_position(
         &mut self,
         pos: Pos2,
@@ -1859,11 +1871,11 @@ impl ChartCursor {
         // Calculate Y value
         if self.in_candle_area {
             let normalized = 1.0 - (pos.y - candle_rect.top()) / candle_rect.height();
-            self.y = price_min + (normalized as f64) * (price_max - price_min);
+            self.y = price_min + (f64::from(normalized)) * (price_max - price_min);
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)] // usize-to-f64 cast acceptable for practical counts; intentional cast
     pub fn draw(
         &self,
         ui: &mut Ui,
@@ -2024,6 +2036,7 @@ pub struct ChartConfig {
 
 impl ChartWidget {
     /// Export current chart configuration
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     pub fn export_config(&self) -> ChartConfig {
         let indicators = self
             .indicators

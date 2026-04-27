@@ -1,4 +1,4 @@
-//! PyRiskManager — PyO3 wrapper exposing RiskEngine to Python strategies.
+//! `PyRiskManager` `—` `PyO3` wrapper `exposing` `RiskEngine` to Python strategies.
 //!
 //! Wraps `RiskEngine` behind `Arc<Mutex<...>>` for thread-safe shared access.
 //! Python strategies use `PyRiskManager` to check orders before submission,
@@ -39,7 +39,7 @@ impl PyRiskConfig {
         }
     }
 
-    /// Create a RiskConfig with all checks disabled.
+    /// Create a `RiskConfig` with all checks disabled.
     #[staticmethod]
     fn unrestricted() -> Self {
         Self {
@@ -274,8 +274,8 @@ impl PyRiskCheckResult {
 // Inner state held behind Arc<Mutex<...>>
 // ---------------------------------------------------------------------------
 
-/// Internal state combining the RiskEngine with tracked daily counters
-/// that are mirrored for Python access (since RiskEngine's fields are private).
+/// Internal state combining the `RiskEngine` with tracked daily counters
+/// that are mirrored for Python access (since `RiskEngine`'s fields are private).
 struct RiskManagerState {
     engine: RiskEngine,
     daily_trade_count: u64,
@@ -344,7 +344,7 @@ pub struct PyRiskManager {
 
 #[pymethods]
 impl PyRiskManager {
-    /// Create a new RiskManager with the given configuration.
+    /// Create a new `RiskManager` with the given configuration.
     #[new]
     fn new(config: &PyRiskConfig) -> Self {
         Self {
@@ -352,7 +352,7 @@ impl PyRiskManager {
         }
     }
 
-    /// Create a RiskManager with all risk checks disabled.
+    /// Create a `RiskManager` with all risk checks disabled.
     #[staticmethod]
     fn unrestricted() -> Self {
         Self {
@@ -363,17 +363,17 @@ impl PyRiskManager {
     /// Check whether an order passes all risk checks.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g. "BTCUSDT.BINANCE")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g. "BTCUSDT.BINANCE")
     ///     direction: "LONG", "SHORT", "BUY", or "SELL"
-    ///     offset: "NONE", "OPEN", "CLOSE", "CLOSE_TODAY", or "CLOSE_YESTERDAY"
+    ///     offset: "NONE", "OPEN", "CLOSE", "`CLOSE_TODAY`", `or `"`CLOSE_YESTERDAY`"
     ///     price: Order price
     ///     volume: Order quantity
-    ///     order_type: "MARKET", "LIMIT", or "STOP"
-    ///     position_qty: Current signed position quantity (positive=long, negative=short)
-    ///     active_orders: Number of currently active/pending orders
+    ///     `order_type`: "MARKET", "LIMIT", or "STOP"
+    ///     `position_qty`: Current signed position quantity (positive=long, negative=short)
+    ///     `active_orders`: Number of currently active/pending orders
     ///
     /// Returns:
-    ///     RiskCheckResult indicating approval or rejection with reason.
+    ///     `RiskCheckResult` indicating approval or rejection with reason.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (vt_symbol, direction, offset, price, volume, order_type, position_qty=0.0, active_orders=0))]
     pub fn check_order(
@@ -427,7 +427,7 @@ impl PyRiskManager {
     /// Record a completed trade for daily tracking.
     ///
     /// Args:
-    ///     trade_value: Notional value of the completed trade.
+    ///     `trade_value`: Notional value of the completed trade.
     fn record_trade(&self, trade_value: f64) {
         self.inner
             .lock()
@@ -578,7 +578,7 @@ fn parse_vt_symbol(vt_symbol: &str) -> (String, Exchange) {
 // Registration helper (called from bindings.rs)
 // ---------------------------------------------------------------------------
 
-/// Register PyRiskManager, PyRiskConfig, and PyRiskCheckResult with the PyO3 module.
+/// Register `PyRiskManager`, `PyRiskConfig`, and `PyRiskCheckResult` with the `PyO3` module.
 pub fn register_risk_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRiskManager>()?;
     m.add_class::<PyRiskConfig>()?;

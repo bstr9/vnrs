@@ -1,4 +1,4 @@
-//! Python bindings for OrderEmulator
+//! Python bindings for `OrderEmulator`
 //!
 //! Exposes the Order Emulator engine to Python strategies for:
 //! - Adding emulated orders (trailing stop, stop-limit, iceberg, MIT, LIT)
@@ -18,10 +18,10 @@ use std::sync::Arc;
 // PyEmulatedOrder
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for EmulatedOrder data.
+/// Python wrapper for `EmulatedOrder` data.
 ///
 /// Represents an emulated order (trailing stop, stop-limit, iceberg, MIT, LIT)
-/// that is being tracked by the OrderEmulator engine.
+/// that is being tracked by the `OrderEmulator` engine.
 #[pyclass(name = "EmulatedOrder")]
 #[derive(Clone)]
 pub struct PyEmulatedOrder {
@@ -29,7 +29,7 @@ pub struct PyEmulatedOrder {
 }
 
 impl PyEmulatedOrder {
-    /// Create a new PyEmulatedOrder from a Rust EmulatedOrder
+    /// Create a new `PyEmulatedOrder` from a `Rust` `EmulatedOrder`
     pub fn from_rust(order: EmulatedOrder) -> Self {
         Self { inner: order }
     }
@@ -43,7 +43,7 @@ impl PyEmulatedOrder {
         self.inner.id
     }
 
-    /// Order type: "TrailingStopPct", "TrailingStopAbs", "StopLimit", "Iceberg", "MIT", "LIT"
+    /// Order type: "`TrailingStopPct`",` `"`TrailingStopAbs"`, "`StopLimit`", "Iceberg", "MIT", "LIT"
     #[getter]
     fn order_type(&self) -> String {
         format_emulated_order_type(self.inner.order_type)
@@ -67,7 +67,7 @@ impl PyEmulatedOrder {
         self.inner.exchange.value().to_string()
     }
 
-    /// Full vt_symbol (e.g., "BTCUSDT.BINANCE")
+    /// Full `vt_symbol` (e.g., "BTCUSDT.BINANCE")
     #[getter]
     fn vt_symbol(&self) -> String {
         self.inner.vt_symbol()
@@ -97,13 +97,13 @@ impl PyEmulatedOrder {
         self.inner.remaining_volume
     }
 
-    /// Trailing percentage (for TrailingStopPct)
+    /// Trailing percentage (for `TrailingStopPct`)
     #[getter]
     fn trail_pct(&self) -> Option<f64> {
         self.inner.trail_pct
     }
 
-    /// Trailing absolute distance (for TrailingStopAbs)
+    /// Trailing absolute distance (for `TrailingStopAbs`)
     #[getter]
     fn trail_abs(&self) -> Option<f64> {
         self.inner.trail_abs
@@ -127,13 +127,13 @@ impl PyEmulatedOrder {
         self.inner.lowest_price
     }
 
-    /// Trigger price (for StopLimit, MIT, LIT)
+    /// Trigger price (for `StopLimit`, MIT, LIT)
     #[getter]
     fn trigger_price(&self) -> Option<f64> {
         self.inner.trigger_price
     }
 
-    /// Limit price (for StopLimit, LIT)
+    /// Limit price (for `StopLimit`, LIT)
     #[getter]
     fn limit_price(&self) -> Option<f64> {
         self.inner.limit_price
@@ -203,13 +203,13 @@ impl PyEmulatedOrder {
 // PyOrderEmulator
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for OrderEmulator.
+/// Python wrapper for `OrderEmulator`.
 ///
 /// Provides methods to add, cancel, and query emulated orders.
 /// Emulated orders are locally simulated order types not natively supported
 /// by exchanges (trailing stops, stop-limit, iceberg, MIT, LIT).
 ///
-/// Usage::
+/// `Usage`::
 ///
 ///     engine = create_main_engine()
 ///     emulator = engine.get_order_emulator()
@@ -244,7 +244,7 @@ pub struct PyOrderEmulator {
 }
 
 impl PyOrderEmulator {
-    /// Create a new PyOrderEmulator from an Arc<OrderEmulator>
+    /// Create a new `PyOrderEmulator` from an Arc<OrderEmulator>
     pub fn new(engine: Arc<OrderEmulator>) -> Self {
         Self { inner: engine }
     }
@@ -259,11 +259,11 @@ impl PyOrderEmulator {
     /// For SHORT: stop moves down as price falls, triggers when price rises.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
     ///     direction: "LONG" or "SHORT"
     ///     volume: Order quantity
     ///     rate: Trailing percentage distance (e.g., 5.0 for 5%)
-    ///     gateway_name: Gateway to use for order submission
+    ///     `gateway_name`: Gateway to use for order submission
     ///     offset: Order offset ("NONE", "OPEN", "CLOSE", etc.), default "NONE"
     ///
     /// Returns:
@@ -296,11 +296,11 @@ impl PyOrderEmulator {
     /// The stop price follows the market at a fixed price distance.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "LONG" or "SHORT"
     ///     volume: Order quantity
-    ///     trail_amount: Trailing absolute price distance
-    ///     gateway_name: Gateway to use for order submission
+    ///     `trail_amount`: Trailing absolute price distance
+    ///     `gateway_name`: Gateway to use for order submission
     ///     offset: Order offset, default "NONE"
     ///
     /// Returns:
@@ -334,12 +334,12 @@ impl PyOrderEmulator {
     /// specified limit price.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "LONG" or "SHORT"
     ///     volume: Order quantity
-    ///     stop_price: Trigger price
-    ///     limit_price: Limit price for the submitted order
-    ///     gateway_name: Gateway to use for order submission
+    ///     `stop_price`: Trigger price
+    ///     `limit_price`: Limit price for the submitted order
+    ///     `gateway_name`: Gateway to use for order submission
     ///     offset: Order offset, default "NONE"
     ///
     /// Returns:
@@ -382,12 +382,12 @@ impl PyOrderEmulator {
     /// visible slice is filled, the next slice is submitted.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "LONG" or "SHORT"
     ///     volume: Total order quantity (including hidden)
-    ///     display_volume: Visible quantity per slice
+    ///     `display_volume`: Visible quantity per slice
     ///     price: Limit price for iceberg slices
-    ///     gateway_name: Gateway to use for order submission
+    ///     `gateway_name`: Gateway to use for order submission
     ///     offset: Order offset, default "NONE"
     ///
     /// Returns:
@@ -430,11 +430,11 @@ impl PyOrderEmulator {
     /// is submitted.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "LONG" or "SHORT"
     ///     volume: Order quantity
-    ///     touch_price: Trigger price
-    ///     gateway_name: Gateway to use for order submission
+    ///     `touch_price`: Trigger price
+    ///     `gateway_name`: Gateway to use for order submission
     ///     offset: Order offset, default "NONE"
     ///
     /// Returns:
@@ -468,12 +468,12 @@ impl PyOrderEmulator {
     /// is submitted at the limit price.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "LONG" or "SHORT"
     ///     volume: Order quantity
-    ///     touch_price: Trigger price
-    ///     limit_price: Limit price for the submitted order
-    ///     gateway_name: Gateway to use for order submission
+    ///     `touch_price`: Trigger price
+    ///     `limit_price`: Limit price for the submitted order
+    ///     `gateway_name`: Gateway to use for order submission
     ///     offset: Order offset, default "NONE"
     ///
     /// Returns:
@@ -513,10 +513,10 @@ impl PyOrderEmulator {
     /// Cancel an emulated order by ID.
     ///
     /// Args:
-    ///     emulated_orderid: The emulated order ID (as string or int)
+    ///     `emulated_orderid`: The emulated order ID (as string or int)
     ///
     /// Raises:
-    ///     ValueError: If the order is not found or not in active status
+    ///     `ValueError`: If the order is not found or not in active status
     fn cancel_order(&self, emulated_orderid: &str) -> PyResult<()> {
         let id: u64 = emulated_orderid
             .parse()
@@ -533,7 +533,7 @@ impl PyOrderEmulator {
     /// Cancel all emulated orders for a specific symbol.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     fn cancel_orders_for_symbol(&self, vt_symbol: &str) -> PyResult<()> {
         self.inner.cancel_orders_for_symbol(vt_symbol);
         Ok(())
@@ -542,7 +542,7 @@ impl PyOrderEmulator {
     /// Get all active emulated orders.
     ///
     /// Returns:
-    ///     List of EmulatedOrder objects with Pending or Triggered status
+    ///     List of `EmulatedOrder` objects with Pending or Triggered status
     fn get_active_orders(&self) -> Vec<PyEmulatedOrder> {
         self.inner
             .get_active_orders()
@@ -554,7 +554,7 @@ impl PyOrderEmulator {
     /// Get all emulated orders (including completed, cancelled, etc.).
     ///
     /// Returns:
-    ///     List of all EmulatedOrder objects
+    ///     List of all `EmulatedOrder` objects
     fn get_all_orders(&self) -> Vec<PyEmulatedOrder> {
         self.inner
             .get_all_orders()
@@ -566,10 +566,10 @@ impl PyOrderEmulator {
     /// Get a specific emulated order by ID.
     ///
     /// Args:
-    ///     emulated_orderid: The emulated order ID
+    ///     `emulated_orderid`: The emulated order ID
     ///
     /// Returns:
-    ///     EmulatedOrder if found, None otherwise
+    ///     `EmulatedOrder` if found, None otherwise
     fn get_order(&self, emulated_orderid: u64) -> Option<PyEmulatedOrder> {
         self.inner
             .get_order(emulated_orderid)
@@ -579,10 +579,10 @@ impl PyOrderEmulator {
     /// Get emulated orders for a specific symbol.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///
     /// Returns:
-    ///     List of EmulatedOrder objects for this symbol
+    ///     List of `EmulatedOrder` objects for this symbol
     fn get_orders_for_symbol(&self, vt_symbol: &str) -> Vec<PyEmulatedOrder> {
         self.inner
             .get_orders_for_symbol(vt_symbol)

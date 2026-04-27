@@ -167,6 +167,7 @@ impl BinanceSpotGateway {
     }
 
     /// Generate new order ID
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     fn new_order_id(&self) -> String {
         let count = self.order_count.fetch_add(1, Ordering::SeqCst);
         let connect_time = self.connect_time.load(Ordering::SeqCst);
@@ -250,6 +251,7 @@ impl BinanceSpotGateway {
 
     /// Query historical trades for symbols with open orders
     /// Fetches up to 3 years of trade history with pagination.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     async fn query_trade_impl(&self) -> Result<(), String> {
         // Binance myTrades requires symbol parameter.
         // Collect symbols from cached open orders and positions to query their trade history.

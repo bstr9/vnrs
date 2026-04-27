@@ -126,6 +126,7 @@ impl SettingValue {
     }
 
     /// Get as f64
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn as_float(&self) -> Option<f64> {
         match self {
             SettingValue::Float(f) => Some(*f),
@@ -207,7 +208,7 @@ impl Settings {
         }
     }
 
-    /// Get all settings as HashMap
+    /// Get all settings as `HashMap`
     pub fn get_all(&self) -> HashMap<String, SettingValue> {
         self.settings
             .read()

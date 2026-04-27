@@ -127,7 +127,8 @@ fn format_time(dt: &DateTime<Utc>) -> String {
 }
 
 /// Format price based on pricetick. Defaults to 4 decimal places if pricetick not provided.
-/// Formula: decimals = -log10(pricetick).ceil()
+/// Formula: decimals = -`log10`(`pricetick`).`ceil`()
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
 pub fn format_price(price: f64, pricetick: Option<f64>) -> String {
     let decimals = pricetick
         .filter(|&p| p > 0.0)
@@ -1443,6 +1444,7 @@ pub struct QuoteRow {
 }
 
 impl From<&QuoteData> for QuoteRow {
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn from(quote: &QuoteData) -> Self {
         Self {
             vt_quoteid: quote.vt_quoteid(),

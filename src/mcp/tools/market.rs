@@ -1,7 +1,7 @@
 //! MCP Market Data Tools — 行情数据查询工具集
 //!
-//! 提供 get_ticker / get_orderbook / get_candles / get_trades 等 MCP Tool，
-//! 通过 MainEngine 的 OmsEngine 缓存读取实时行情数据。
+//! 提供 `get_ticker` `/` `get_orderbook` / `get_candles` / `get_trades` 等 MCP Tool，
+//! 通过 `MainEngine` `的` `OmsEngine` 缓存读取实时行情数据。
 
 use rmcp::{
     ErrorData as McpError,
@@ -20,13 +20,13 @@ use super::super::server::TradingMcpServer;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct SymbolParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct GetCandlesParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
     /// 最大返回条数（默认 100）
     #[serde(default = "default_limit")]
@@ -35,7 +35,7 @@ pub struct GetCandlesParams {
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct GetTicker24hParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
 }
 
@@ -45,7 +45,7 @@ fn default_limit() -> usize {
 
 // ---- MarketTools (data holder, no longer has #[tool_router]) ----
 
-/// 行情数据查询数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
+/// 行情数据查询数据容器（已迁移到 `TradingMcpServer` 的 `#`[`tool_router`] impl）
 #[allow(dead_code)]
 pub struct MarketTools {
     engine: Arc<MainEngine>,
@@ -53,7 +53,7 @@ pub struct MarketTools {
 
 #[allow(dead_code)]
 impl MarketTools {
-    /// 创建 MarketTools 实例
+    /// 创建 `MarketTools` 实例
     pub fn new(engine: Arc<MainEngine>) -> Self {
         Self { engine }
     }

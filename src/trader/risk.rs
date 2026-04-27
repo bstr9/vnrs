@@ -102,13 +102,13 @@ pub struct DailyStats {
     pub trade_count: usize,
     /// Total turnover today
     pub turnover: f64,
-    /// Total realized PnL today
+    /// Total realized `PnL` today
     pub realized_pnl: f64,
     /// Date string (YYYY-MM-DD) for reset tracking
     pub date: String,
 }
 
-/// RiskManager engine
+/// `RiskManager` engine
 ///
 /// Pre-trade risk management that checks orders before they are sent to the exchange.
 /// Tracks daily statistics and enforces configurable limits.
@@ -119,16 +119,16 @@ pub struct RiskManager {
     config: RwLock<RiskConfig>,
     /// Daily statistics
     daily_stats: RwLock<DailyStats>,
-    /// Active order count per vt_symbol
+    /// Active order count per `vt_symbol`
     active_orders: RwLock<HashMap<String, usize>>,
     /// Total active order count
     total_active_orders: RwLock<usize>,
-    /// Current positions per vt_symbol
+    /// Current positions per `vt_symbol`
     positions: RwLock<HashMap<String, f64>>,
-    /// Previous balance per vt_accountid (for daily PnL tracking)
+    /// Previous balance per `vt_accountid` (for `daily` `PnL` tracking)
     prev_balance: RwLock<HashMap<String, f64>>,
-    /// Available balance per gateway_name (balance - frozen)
-    /// Updated on each AccountData event from the gateway
+    /// Available balance per `gateway_name` (balance - frozen)
+    /// Updated on each `AccountData` event from the gateway
     available_balance: RwLock<HashMap<String, f64>>,
     /// Trading state (kill switch)
     trading_state: RwLock<TradingState>,
@@ -139,12 +139,12 @@ pub struct RiskManager {
 }
 
 impl RiskManager {
-    /// Create a new RiskManager with default configuration
+    /// Create a new `RiskManager` with default configuration
     pub fn new() -> Self {
         Self::with_config(RiskConfig::default())
     }
 
-    /// Create a new RiskManager with custom configuration
+    /// Create a new `RiskManager` with custom configuration
     pub fn with_config(config: RiskConfig) -> Self {
         Self {
             name: "RiskManager".to_string(),
@@ -436,7 +436,7 @@ impl RiskManager {
         positions.insert(vt_symbol, position.volume);
     }
 
-    /// Update account data (for daily PnL tracking and balance tracking)
+    /// Update account data (for daily `PnL` tracking and balance tracking)
     pub fn update_account(&self, account: &AccountData) {
         self.check_daily_reset();
         let vt_accountid = account.vt_accountid();

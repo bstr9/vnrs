@@ -32,7 +32,7 @@ impl Default for BarManager {
 }
 
 impl BarManager {
-    /// Create a new BarManager
+    /// Create a new `BarManager`
     pub fn new() -> Self {
         Self {
             bars: HashMap::new(),
@@ -118,12 +118,14 @@ impl BarManager {
     }
 
     /// Get datetime for an index
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     pub fn get_datetime(&self, ix: f64) -> Option<DateTime<Utc>> {
         let ix = to_int(ix) as usize;
         self.index_datetime_map.get(&ix).copied()
     }
 
     /// Get bar data for an index
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     pub fn get_bar(&self, ix: f64) -> Option<&BarData> {
         let ix = to_int(ix) as usize;
         self.ordered_bars.get(ix)

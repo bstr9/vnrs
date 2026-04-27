@@ -40,13 +40,13 @@ pub struct DailyResult {
     pub commission: f64,
     /// Slippage cost
     pub slippage: f64,
-    /// Trading PnL (from closing positions)
+    /// Trading `PnL` (from closing positions)
     pub trading_pnl: f64,
-    /// Holding PnL (from position value change)
+    /// Holding `PnL` (from position value change)
     pub holding_pnl: f64,
-    /// Total PnL
+    /// Total `PnL`
     pub total_pnl: f64,
-    /// Net PnL (after commission and slippage)
+    /// Net `PnL` (after commission and slippage)
     pub net_pnl: f64,
 }
 
@@ -216,7 +216,7 @@ pub struct BacktestingStatistics {
     pub win_rate: f64,
     /// Profit factor (gross profit / gross loss)
     pub profit_factor: f64,
-    /// Average trade PnL
+    /// Average trade `PnL`
     pub avg_trade_pnl: f64,
     /// Maximum consecutive winning trades
     pub max_consecutive_wins: u32,
@@ -226,13 +226,13 @@ pub struct BacktestingStatistics {
     pub sortino_ratio: f64,
     /// Calmar ratio (annual return / max drawdown)
     pub calmar_ratio: f64,
-    /// Average winning trade PnL
+    /// Average winning trade `PnL`
     pub avg_winning_trade: f64,
-    /// Average losing trade PnL
+    /// Average losing trade `PnL`
     pub avg_losing_trade: f64,
-    /// Largest winning trade PnL
+    /// Largest winning trade `PnL`
     pub largest_winning_trade: f64,
-    /// Largest losing trade PnL
+    /// Largest losing trade `PnL`
     pub largest_losing_trade: f64,
 }
 

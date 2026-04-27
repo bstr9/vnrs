@@ -20,9 +20,9 @@ use crate::rpc::common::{
 /// RPC Client configuration
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-    /// REQ socket address for request-reply pattern (e.g., "tcp://localhost:2014")
+    /// REQ socket address for request-reply pattern (e.g., <tcp://localhost:2014>)
     pub req_address: String,
-    /// SUB socket address for publish-subscribe pattern (e.g., "tcp://localhost:4102")
+    /// SUB socket address for publish-subscribe pattern (e.g., <tcp://localhost:4102>)
     pub sub_address: String,
     /// Timeout for RPC calls in milliseconds (default: 30000ms)
     pub timeout_ms: u64,
@@ -33,6 +33,7 @@ pub struct ClientConfig {
 }
 
 impl Default for ClientConfig {
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn default() -> Self {
         Self {
             req_address: "tcp://localhost:2014".to_string(),
@@ -219,6 +220,7 @@ impl RpcClient {
     }
 
     /// Make a remote procedure call with custom timeout
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     pub async fn call_with_timeout(
         &self,
         method: String,
@@ -326,6 +328,7 @@ impl RpcClient {
     }
 
     /// Spawn the message listener task
+    #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)] // lossless cast kept as-is; value fits in target type
     async fn spawn_message_listener(&self) {
         let active = self.active.clone();
         let socket_sub = self.socket_sub.clone();
@@ -347,7 +350,7 @@ impl RpcClient {
                 let sub_guard = socket_sub.lock().await;
 
                 if let Some(socket) = sub_guard.as_ref() {
-                    let poll_timeout = (heartbeat_tolerance.as_millis() as i64).min(POLL_TIMEOUT_MS as i64);
+                    let poll_timeout = (heartbeat_tolerance.as_millis() as i64).min(i64::from(POLL_TIMEOUT_MS));
 
                     match socket.poll(zmq::PollEvents::POLLIN, poll_timeout) {
                         Ok(n) if n > 0 => {

@@ -1,7 +1,7 @@
-//! Python typed data classes for TickData, OrderData, and TradeData
+//! Python typed data classes for `TickData`, `OrderData`, and `TradeData`
 //!
-//! Replaces dict-based Python interop with proper PyO3 `#[pyclass]` structs,
-//! following the existing PyBarData pattern in backtesting_bindings.rs.
+//! Replaces dict-based Python interop with proper `PyO3` `#[pyclass]` structs,
+//! following the existing `PyBarData` pattern in `backtesting_bindings`.rs.
 
 use pyo3::prelude::*;
 use rust_decimal::prelude::ToPrimitive;
@@ -14,7 +14,7 @@ use crate::trader::{
 // PyTickData
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for TickData
+/// Python wrapper for `TickData`
 #[pyclass]
 #[derive(Clone)]
 pub struct PyTickData {
@@ -235,7 +235,7 @@ impl PyTickData {
         Ok(())
     }
 
-    /// Support dict-style access: tick["last_price"] → tick.last_price
+    /// Support dict-style access: tick["`last_price`"] `→` `tick`.`last_price`
     fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
         match key {
             "gateway_name" => Ok(self.gateway_name.clone().into_pyobject(py)?.into_any().unbind()),
@@ -284,7 +284,7 @@ impl PyTickData {
         }
     }
 
-    /// Support dict-style .get() method: tick.get("last_price", 0.0)
+    /// Support dict-style .`get`() `method:` `tick`.`get`("`last_price`", 0.0)
     fn get(
         &self,
         py: Python<'_>,
@@ -301,7 +301,7 @@ impl PyTickData {
 }
 
 impl PyTickData {
-    /// Convert a Rust TickData into a PyTickData
+    /// Convert a Rust `TickData` into `a` `PyTickData`
     pub fn from_rust(tick: &TickData) -> Self {
         Self {
             gateway_name: tick.gateway_name.clone(),
@@ -396,7 +396,7 @@ impl PyTickData {
 // PyOrderData
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for OrderData
+/// Python wrapper for `OrderData`
 #[pyclass]
 #[derive(Clone)]
 pub struct PyOrderData {
@@ -549,7 +549,7 @@ impl PyOrderData {
         }
     }
 
-    /// Support dict-style .get() method
+    /// Support dict-style .`get`() method
     fn get(
         &self,
         py: Python<'_>,
@@ -566,7 +566,7 @@ impl PyOrderData {
 }
 
 impl PyOrderData {
-    /// Convert a Rust OrderData into a PyOrderData
+    /// Convert a Rust `OrderData` into `a` `PyOrderData`
     pub fn from_rust(order: &OrderData) -> Self {
         let direction_str = order
             .direction
@@ -709,7 +709,7 @@ impl PyOrderData {
 // PyTradeData
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for TradeData
+/// Python wrapper for `TradeData`
 #[pyclass]
 #[derive(Clone)]
 pub struct PyTradeData {
@@ -823,7 +823,7 @@ impl PyTradeData {
         }
     }
 
-    /// Support dict-style .get() method
+    /// Support dict-style .`get`() method
     fn get(
         &self,
         py: Python<'_>,
@@ -840,7 +840,7 @@ impl PyTradeData {
 }
 
 impl PyTradeData {
-    /// Convert a Rust TradeData into a PyTradeData
+    /// Convert a Rust `TradeData` into `a` `PyTradeData`
     pub fn from_rust(trade: &TradeData) -> Self {
         let direction_str = trade
             .direction
@@ -928,7 +928,7 @@ impl PyTradeData {
 // PyDepthData
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for DepthData
+/// Python wrapper for `DepthData`
 #[pyclass]
 #[derive(Clone)]
 pub struct PyDepthData {
@@ -944,13 +944,13 @@ pub struct PyDepthData {
     /// Bid prices sorted descending by price (highest first)
     #[pyo3(get, set)]
     pub bid_prices: Vec<f64>,
-    /// Bid volumes corresponding to bid_prices
+    /// Bid volumes corresponding to `bid_prices`
     #[pyo3(get, set)]
     pub bid_volumes: Vec<f64>,
     /// Ask prices sorted ascending by price (lowest first)
     #[pyo3(get, set)]
     pub ask_prices: Vec<f64>,
-    /// Ask volumes corresponding to ask_prices
+    /// Ask volumes corresponding to `ask_prices`
     #[pyo3(get, set)]
     pub ask_volumes: Vec<f64>,
 }
@@ -1015,7 +1015,7 @@ impl PyDepthData {
         Ok(())
     }
 
-    /// Support dict-style access: depth["bid_prices"] → depth.bid_prices
+    /// Support dict-style access: depth["`bid_prices`"] `→` `depth`.`bid_prices`
     fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
         match key {
             "gateway_name" => Ok(self.gateway_name.clone().into_pyobject(py)?.into_any().unbind()),
@@ -1035,7 +1035,7 @@ impl PyDepthData {
         }
     }
 
-    /// Support dict-style .get() method: depth.get("bid_prices", [])
+    /// Support dict-style .`get`() `method:` `depth`.`get`("`bid_prices`", [])
     fn get(
         &self,
         py: Python<'_>,
@@ -1052,7 +1052,7 @@ impl PyDepthData {
 }
 
 impl PyDepthData {
-    /// Convert a Rust DepthData into a PyDepthData
+    /// Convert a Rust `DepthData` into `a` `PyDepthData`
     pub fn from_rust(depth: &DepthData) -> Self {
         // BTreeMap<Decimal, Decimal> → Vec<f64>
         // bids: sorted descending by price (BTreeMap default is ascending, so reverse)

@@ -1,7 +1,7 @@
-//! SimulatedExchange - per-instrument matching engine with configurable fee/latency models.
+//! `SimulatedExchange` - per-instrument matching engine with configurable fee/latency models.
 //!
-//! Extracts order matching from BacktestingEngine into a separate exchange abstraction,
-//! following nautilus_trader's architecture. Each instrument gets its own matching engine
+//! Extracts order matching from `BacktestingEngine` into a separate exchange abstraction,
+//! following `nautilus_trader`'s architecture. Each instrument gets its own matching engine
 //! with independent fill models, fee schedules, and latency characteristics.
 
 use std::collections::HashMap;
@@ -22,9 +22,9 @@ use super::risk_engine::{RiskConfig, RiskEngine};
 
 /// Fee model trait for calculating transaction costs.
 ///
-/// FeeModel is separate from FillModel:
-/// - FillModel determines IF and AT WHAT PRICE an order fills
-/// - FeeModel calculates the commission for that fill
+/// `FeeModel` is separate `from` `FillModel`:
+/// - `FillModel` determines IF and AT WHAT PRICE an order fills
+/// - `FeeModel` calculates the commission for that fill
 pub trait FeeModel: Send + Sync + fmt::Debug {
     /// Get model name for logging/debugging
     fn name(&self) -> &str;
@@ -340,8 +340,8 @@ impl InstrumentConfig {
 /// - Stop order triggering
 /// - Position tracking
 ///
-/// The matching logic is extracted from BacktestingEngine::cross_limit_order
-/// and BacktestingEngine::cross_stop_order.
+/// The matching logic is extracted from `BacktestingEngine::cross_limit_order`
+/// and `BacktestingEngine::cross_stop_order`.
 pub struct InstrumentMatchingEngine {
     /// Instrument configuration
     pub config: InstrumentConfig,
@@ -520,8 +520,8 @@ impl InstrumentMatchingEngine {
 
     /// Process a bar - match pending orders, return fills.
     ///
-    /// Core matching logic extracted from BacktestingEngine::cross_limit_order
-    /// and BacktestingEngine::cross_stop_order.
+    /// Core matching logic extracted from `BacktestingEngine::cross_limit_order`
+    /// and `BacktestingEngine::cross_stop_order`.
     pub fn process_bar(
         &mut self,
         bar: &BarData,
@@ -547,9 +547,9 @@ impl InstrumentMatchingEngine {
         trades
     }
 
-    /// Cross limit orders with bar data using FillModel.
+    /// Cross limit orders with bar data using `FillModel`.
     ///
-    /// Replicates the logic from BacktestingEngine::cross_limit_order.
+    /// Replicates the logic from `BacktestingEngine::cross_limit_order`.
     fn cross_limit_order(
         &mut self,
         bar: &BarData,
@@ -605,9 +605,9 @@ impl InstrumentMatchingEngine {
         }
     }
 
-    /// Cross stop orders with bar data using FillModel.
+    /// Cross stop orders with bar data using `FillModel`.
     ///
-    /// Replicates the logic from BacktestingEngine::cross_stop_order.
+    /// Replicates the logic from `BacktestingEngine::cross_stop_order`.
       /// Evaluate stop orders against the current bar and trigger matches.
     ///
     /// **Bar-mode stop trigger (backtesting) vs tick-mode trigger (live trading):**
@@ -718,7 +718,7 @@ impl InstrumentMatchingEngine {
         }
     }
 
-    /// Cross limit orders with tick data using FillModel.
+    /// Cross limit orders with tick data using `FillModel`.
     fn cross_limit_order_tick(
         &mut self,
         tick: &TickData,
@@ -774,7 +774,7 @@ impl InstrumentMatchingEngine {
         }
     }
 
-    /// Cross stop orders with tick data using FillModel.
+    /// Cross stop orders with tick data using `FillModel`.
     fn cross_stop_order_tick(
         &mut self,
         tick: &TickData,
@@ -887,16 +887,16 @@ impl InstrumentMatchingEngine {
 
 /// Top-level simulated exchange that routes orders to per-instrument matching engines.
 ///
-/// The SimulatedExchange:
-/// - Maintains a collection of InstrumentMatchingEngines, one per instrument
-/// - Routes order submissions/cancellations to the correct engine by vt_symbol
-/// - Applies pre-trade risk checks via RiskEngine before submitting orders
+/// The `SimulatedExchange`:
+/// - Maintains a collection of `InstrumentMatchingEngines`, one per instrument
+/// - Routes order submissions/cancellations to the correct engine by `vt_symbol`
+/// - Applies pre-trade risk checks via `RiskEngine` before submitting orders
 /// - Applies fee calculation using per-instrument or default fee models
 /// - Processes market data (bars/ticks) across all instruments
 pub struct SimulatedExchange {
-    /// Exchange name (e.g., "SIMULATED_BINANCE")
+    /// Exchange name (e.g., "`SIMULATED_BINANCE`")
     name: String,
-    /// Per-instrument matching engines, keyed by vt_symbol
+    /// Per-instrument matching engines, keyed by `vt_symbol`
     instruments: HashMap<String, InstrumentMatchingEngine>,
     /// Default fee model (used when instrument has no specific fee model)
     default_fee_model: Box<dyn FeeModel>,
@@ -958,7 +958,7 @@ impl SimulatedExchange {
 
     /// Submit a limit order to the exchange.
     ///
-    /// Routes to the correct InstrumentMatchingEngine by vt_symbol.
+    /// Routes to the correct `InstrumentMatchingEngine` by `vt_symbol`.
     /// Performs pre-trade risk check before submission.
     pub fn submit_order(
         &mut self,
@@ -1043,7 +1043,7 @@ impl SimulatedExchange {
         instrument.submit_stop_order(req, direction, offset, clock)
     }
 
-    /// Cancel an order by vt_orderid.
+    /// Cancel an order by `vt_orderid`.
     ///
     /// Searches across all instruments since we may not know which one holds the order.
     pub fn cancel_order(&mut self, vt_orderid: &str) -> Result<OrderData, String> {
@@ -1131,12 +1131,12 @@ impl SimulatedExchange {
         self.risk_engine = RiskEngine::new(config);
     }
 
-    /// Get instrument matching engine by vt_symbol.
+    /// Get instrument matching engine by `vt_symbol`.
     pub fn get_instrument(&self, vt_symbol: &str) -> Option<&InstrumentMatchingEngine> {
         self.instruments.get(vt_symbol)
     }
 
-    /// Get mutable instrument matching engine by vt_symbol.
+    /// Get mutable instrument matching engine by `vt_symbol`.
     pub fn get_instrument_mut(&mut self, vt_symbol: &str) -> Option<&mut InstrumentMatchingEngine> {
         self.instruments.get_mut(vt_symbol)
     }
@@ -1183,7 +1183,7 @@ impl SimulatedExchange {
         &mut self.risk_engine
     }
 
-    /// Get all instrument vt_symbols.
+    /// Get all instrument `vt_symbols`.
     pub fn instrument_symbols(&self) -> Vec<String> {
         self.instruments.keys().cloned().collect()
     }

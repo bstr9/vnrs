@@ -240,7 +240,8 @@ impl DashboardPanel {
         };
     }
 
-    /// Update today's PnL data
+    /// Update today's `PnL` data
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn update_today_pnl(
         &mut self,
         total_pnl: f64,
@@ -292,7 +293,7 @@ impl DashboardPanel {
         self.strategies = strategies;
     }
 
-    /// Update PnL curve data
+    /// Update `PnL` curve data
     pub fn update_pnl_curve(&mut self, curve: Vec<PnlPoint>) {
         self.pnl_curve = curve;
     }
@@ -314,6 +315,7 @@ impl DashboardPanel {
     // ========================================================================
 
     /// Show the dashboard panel
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn show(&mut self, ui: &mut egui::Ui) -> DashboardAction {
         let mut action = DashboardAction::None;
 
@@ -477,6 +479,7 @@ impl DashboardPanel {
     // ========================================================================
 
     /// Render a card inside a fixed-width column allocated by the layout
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn show_account_card(&mut self, ui: &mut egui::Ui, _width: f32) -> DashboardAction {
         let mut action = DashboardAction::None;
 
@@ -733,6 +736,7 @@ impl DashboardPanel {
         action
     }
 
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn show_risk_card(&mut self, ui: &mut egui::Ui, width: f32) -> DashboardAction {
         egui::Frame::NONE
             .fill(COLOR_BG_MEDIUM)
@@ -1055,6 +1059,7 @@ impl DashboardPanel {
         action
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts
     fn show_pnl_curve_card(&mut self, ui: &mut egui::Ui, width: f32) -> DashboardAction {
         egui::Frame::NONE
             .fill(COLOR_BG_MEDIUM)

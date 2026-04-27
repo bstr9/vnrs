@@ -20,7 +20,7 @@ pub struct AlphaLab {
 }
 
 impl AlphaLab {
-    /// Create a new AlphaLab instance
+    /// Create a new `AlphaLab` instance
     pub fn new() -> Self {
         AlphaLab {
             daily_path: "./data/daily".to_string(),

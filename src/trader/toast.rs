@@ -1,6 +1,6 @@
 //! Toast notification manager for UI alert display.
 //!
-//! Receives EVENT_ALERT events via the BaseEngine process_event dispatch,
+//! Receives `EVENT_ALERT` events via the `BaseEngine` `process_event` dispatch,
 //! maintains a history of recent alerts, and provides a queue of active
 //! (undismissed) toasts for the UI to display.
 
@@ -41,9 +41,9 @@ pub struct Toast {
     pub dismissed: bool,
 }
 
-/// ToastManager — maintains a queue of toast notifications from AlertEngine.
+/// `ToastManager` — maintains a queue of toast notifications `from` `AlertEngine`.
 ///
-/// Receives EVENT_ALERT events via the BaseEngine process_event dispatch,
+/// Receives `EVENT_ALERT` events via the `BaseEngine` `process_event` dispatch,
 /// maintains a history of recent alerts, and provides a queue of active
 /// (undismissed) toasts for the UI to display.
 pub struct ToastManager {
@@ -54,7 +54,7 @@ pub struct ToastManager {
 }
 
 impl ToastManager {
-    /// Create a new ToastManager
+    /// Create a new `ToastManager`
     pub fn new() -> Self {
         Self {
             name: "ToastManager".to_string(),

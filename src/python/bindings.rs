@@ -8,7 +8,7 @@ use pyo3::types::PyDict;
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
-/// Handle to a live StrategyEngine, allowing Python code to reference
+/// Handle to a live `StrategyEngine`, allowing Python code to reference
 /// the Rust-side strategy engine created by the GUI application.
 #[pyclass]
 pub struct StrategyEngineHandle {
@@ -85,15 +85,15 @@ fn run_event_loop() -> PyResult<()> {
     Ok(())
 }
 
-/// Add a Python strategy to the live StrategyEngine for real-time trading.
+/// Add a Python strategy to the live `StrategyEngine` for real-time trading.
 ///
 /// This function creates a `PythonStrategyAdapter` wrapping the Python strategy
-/// and registers it with the live StrategyEngine so it receives market data events
-/// (tick/bar/order/trade) through the normal StrategyEngine event routing path.
+/// and registers it with the live `StrategyEngine` so it receives market data events
+/// (tick/bar/order/trade) through the normal `StrategyEngine` event routing path.
 ///
 /// Args:
 ///     strategy: Python Strategy instance
-///     strategy_engine: StrategyEngineHandle obtained from the application
+///     `strategy_engine`: `StrategyEngineHandle` obtained from the application
 ///     setting: Optional dict of strategy settings
 ///
 /// Returns:
@@ -295,13 +295,13 @@ impl PyAlertMessage {
     }
 }
 
-/// Wrapper for PythonEngine to make it compatible with PyO3
+/// Wrapper for `PythonEngine` to make it compatible `with` `PyO3`
 #[pyclass]
 pub struct PythonEngineWrapper {
     inner: Arc<Mutex<PythonEngine>>,
-    /// Keep MainEngine alive so the registered PythonEngineBridge continues
+    /// Keep `MainEngine` alive so the `registered` `PythonEngineBridge` continues
     /// receiving events. The bridge is owned by MainEngine.engines, so if
-    /// MainEngine is dropped, event routing stops.
+    /// `MainEngine` is dropped, event routing stops.
     #[allow(dead_code)]
     main_engine: Arc<MainEngine>,
     #[allow(dead_code)]
@@ -344,11 +344,11 @@ impl PythonEngineWrapper {
             .add_strategy_py(py, strategy, engine_ref)
     }
 
-    /// Set the live StrategyEngine for this PythonEngine.
+    /// Set the live `StrategyEngine` for `this` `PythonEngine`.
     ///
     /// When set, Python strategies added via `add_strategy` will also be
-    /// registered with the live StrategyEngine, enabling them to receive
-    /// real-time market data events through the StrategyEngine's event routing.
+    /// registered with the live `StrategyEngine`, enabling them to receive
+    /// real-time market data events through the `StrategyEngine`'s event routing.
     fn set_strategy_engine(&self, handle: &StrategyEngineHandle) -> PyResult<()> {
         self.inner
             .lock()
@@ -494,15 +494,15 @@ impl PythonEngineWrapper {
             .send_email(&msg);
     }
 
-    /// Send a typed order (called by PyOrder.submit()).
+    /// Send a typed order (called by `PyOrder`.`submit`()).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
-    ///     direction_str: "BUY" or "SELL"
-    ///     offset_str: "NONE", "OPEN", "CLOSE", "CLOSE_TODAY", "CLOSE_YESTERDAY"
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
+    ///     `direction_str`: "BUY" or "SELL"
+    ///     `offset_str`: "NONE", "OPEN", "CLOSE",` `"`CLOSE_TODAY"`, "`CLOSE_YESTERDAY`"
     ///     price: Order price (0.0 for market orders)
     ///     volume: Order quantity
-    ///     order_type_str: "MARKET", "LIMIT", "STOP"
+    ///     `order_type_str`: "MARKET", "LIMIT", "STOP"
     #[pyo3(signature = (vt_symbol, direction_str, offset_str, price, volume, order_type_str))]
     fn send_order_typed(
         &self,
@@ -557,7 +557,7 @@ impl PythonEngineWrapper {
         Ok(result)
     }
 
-    /// Create an OrderFactory bound to this engine.
+    /// Create an `OrderFactory` bound to this engine.
     fn create_order_factory(slf: &Bound<'_, Self>) -> PyResult<OrderFactory> {
         let engine_ref: Py<PyAny> = slf.clone().into_any().unbind();
         Ok(OrderFactory::from_engine(engine_ref, ""))
@@ -566,10 +566,10 @@ impl PythonEngineWrapper {
     /// Get instrument metadata for a symbol.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "btcusdt.binance")
     ///
     /// Returns:
-    ///     PyInstrument if found, None otherwise
+    ///     `PyInstrument` if found, None otherwise
     fn get_instrument(&self, vt_symbol: String) -> PyResult<Option<PyInstrument>> {
         let contract = self.main_engine.get_contract(&vt_symbol);
         Ok(contract.map(|c| PyInstrument::from_contract_data(&c)))
@@ -578,8 +578,8 @@ impl PythonEngineWrapper {
     /// Subscribe a strategy to market data for a symbol at runtime.
     ///
     /// Args:
-    ///     strategy_name: Name of the strategy
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `strategy_name`: Name of the strategy
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     fn subscribe(&self, strategy_name: String, vt_symbol: String) -> PyResult<()> {
         let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(se) = inner.get_strategy_engine() {
@@ -598,8 +598,8 @@ impl PythonEngineWrapper {
     /// Unsubscribe a strategy from market data for a symbol at runtime.
     ///
     /// Args:
-    ///     strategy_name: Name of the strategy
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `strategy_name`: Name of the strategy
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     fn unsubscribe(&self, strategy_name: String, vt_symbol: String) -> PyResult<()> {
         let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(se) = inner.get_strategy_engine() {
@@ -618,8 +618,8 @@ impl PythonEngineWrapper {
     /// Schedule a timer for a strategy.
     ///
     /// Args:
-    ///     strategy_name: Name of the strategy
-    ///     timer_id: Unique timer identifier within the strategy
+    ///     `strategy_name`: Name of the strategy
+    ///     `timer_id`: Unique timer identifier within the strategy
     ///     seconds: Delay until first fire (and interval if repeat=True)
     ///     repeat: Whether the timer repeats
     #[pyo3(signature = (strategy_name, timer_id, seconds, repeat=false))]
@@ -635,8 +635,8 @@ impl PythonEngineWrapper {
     /// Cancel a timer for a strategy.
     ///
     /// Args:
-    ///     strategy_name: Name of the strategy
-    ///     timer_id: Timer identifier to cancel
+    ///     `strategy_name`: Name of the strategy
+    ///     `timer_id`: Timer identifier to cancel
     fn cancel_timer(&self, strategy_name: String, timer_id: String) -> PyResult<()> {
         let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(se) = inner.get_strategy_engine() {
@@ -648,7 +648,7 @@ impl PythonEngineWrapper {
 
     /// Get all active (undismissed) toast alerts.
     ///
-    /// Returns a list of PyAlertMessage objects representing alerts
+    /// Returns a list of `PyAlertMessage` objects representing alerts
     /// that have been triggered but not yet dismissed by the user.
     fn get_active_toasts(&self) -> PyResult<Vec<PyAlertMessage>> {
         let toasts = self.main_engine.toast_manager().get_active_toasts();
@@ -660,7 +660,7 @@ impl PythonEngineWrapper {
     /// Args:
     ///     limit: Maximum number of toasts to return (default 20)
     ///
-    /// Returns a list of PyAlertMessage objects in reverse chronological order.
+    /// Returns a list of `PyAlertMessage` objects in reverse chronological order.
     #[pyo3(signature = (limit=20))]
     fn get_recent_toasts(&self, limit: usize) -> PyResult<Vec<PyAlertMessage>> {
         let toasts = self.main_engine.toast_manager().get_recent_toasts(limit);
@@ -670,7 +670,7 @@ impl PythonEngineWrapper {
     /// Set the self-trade prevention (STP) mode.
     ///
     /// Args:
-    ///     mode: One of "CancelTaker", "CancelMaker", "CancelBoth"
+    ///     mode: One of "`CancelTaker`",` `"`CancelMaker"`, "`CancelBoth`"
     fn set_stp_mode(&self, mode: String) -> PyResult<()> {
         use crate::trader::constant::StpMode;
         let stp_mode = match mode.as_str() {
@@ -690,75 +690,75 @@ impl PythonEngineWrapper {
     /// Get the current self-trade prevention (STP) mode.
     ///
     /// Returns:
-    ///     One of "CancelTaker", "CancelMaker", "CancelBoth"
+    ///     One of "`CancelTaker`",` `"`CancelMaker"`, "`CancelBoth`"
     fn get_stp_mode(&self) -> PyResult<String> {
         Ok(self.main_engine.get_stp_mode().to_string())
     }
 
-    /// Get an OffsetConverter bound to the live MainEngine's contract lookup.
+    /// Get an `OffsetConverter` bound to the `live` `MainEngine`'s contract lookup.
     ///
-    /// The returned converter uses the MainEngine's OmsEngine for contract
+    /// The returned converter uses the `MainEngine`'`s` `OmsEngine` for contract
     /// resolution, so it knows which symbols require offset conversion
     /// (e.g., SHFE/INE futures). Position data is *not* shared — this is
     /// intended for query/preview use (e.g., checking if a symbol requires
     /// offset splitting before sending an order).
     ///
     /// Returns:
-    ///     PyOffsetConverter instance
+    ///     `PyOffsetConverter` instance
     fn offset_converter(&self) -> PyResult<crate::python::offset_converter::PyOffsetConverter> {
         crate::python::offset_converter::PyOffsetConverter::from_main_engine(&self.main_engine)
     }
 
-    /// Get the StopOrderEngine for managing stop orders.
+    /// Get the `StopOrderEngine` for managing stop orders.
     ///
-    /// The StopOrderEngine tracks conditional orders (stop-loss, take-profit,
+    /// The `StopOrderEngine` tracks conditional orders (stop-loss, take-profit,
     /// trailing stops) and triggers real orders when conditions are met.
     ///
     /// Returns:
-    ///     StopOrderEngine instance
+    ///     `StopOrderEngine` instance
     fn get_stop_order_engine(&self) -> crate::python::stop_order_engine::PyStopOrderEngine {
         crate::python::stop_order_engine::PyStopOrderEngine::new(
             self.main_engine.stop_order_engine().clone(),
         )
     }
 
-    /// Get the BracketOrderEngine for managing bracket/OCO/OTO orders.
+    /// Get the `BracketOrderEngine` for managing bracket/OCO/OTO orders.
     ///
-    /// The BracketOrderEngine manages groups of contingent orders:
+    /// The `BracketOrderEngine` manages groups of contingent orders:
     /// - Bracket: entry + take-profit + stop-loss
     /// - OCO: one-cancels-other order pairs
     /// - OTO: one-triggers-other order pairs
     ///
     /// Returns:
-    ///     BracketOrderEngine instance
+    ///     `BracketOrderEngine` instance
     fn get_bracket_order_engine(&self) -> crate::python::bracket_order_engine::PyBracketOrderEngine {
         crate::python::bracket_order_engine::PyBracketOrderEngine::new(
             self.main_engine.bracket_order_engine().clone(),
         )
     }
 
-    /// Get the OrderEmulator for managing emulated order types.
+    /// Get the `OrderEmulator` for managing emulated order types.
     ///
-    /// The OrderEmulator locally simulates advanced order types not natively
+    /// The `OrderEmulator` locally simulates advanced order types not natively
     /// supported by exchanges: trailing stops, stop-limit, iceberg, MIT, LIT,
     /// and pegged-to-best orders.
     ///
     /// Returns:
-    ///     OrderEmulator instance
+    ///     `OrderEmulator` instance
     fn get_order_emulator(&self) -> crate::python::order_emulator::PyOrderEmulator {
         crate::python::order_emulator::PyOrderEmulator::new(
             self.main_engine.order_emulator().clone(),
         )
     }
 
-    /// Get the shared MessageBus wrapping the MainEngine's Rust MessageBus.
+    /// Get the shared `MessageBus` wrapping the `MainEngine`'s `Rust` `MessageBus`.
     ///
     /// This allows Python code to use the same pub/sub bus as the Rust
     /// engine, so messages published from Rust are visible to Python
     /// strategies and vice versa.
     ///
     /// Returns:
-    ///     MessageBus instance backed by MainEngine's Rust MessageBus
+    ///     `MessageBus` instance backed by `MainEngine`'s `Rust` `MessageBus`
     fn get_message_bus(&self) -> PyResult<MessageBus> {
         let rust_bus = self.main_engine.get_message_bus().clone();
         Ok(MessageBus::from_rust_message_bus(rust_bus))

@@ -87,7 +87,7 @@ pub struct TickData {
 }
 
 impl TickData {
-    /// Create a new TickData
+    /// Create a new `TickData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -136,7 +136,7 @@ impl TickData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -157,8 +157,8 @@ impl BaseData for TickData {
 }
 
 /// Depth data contains a full order book snapshot with multiple price levels.
-/// Unlike TickData's fixed 5-level depth, DepthData supports variable-depth
-/// order books using BTreeMap for efficient sorted access and updates.
+/// Unlike `TickData`'s fixed 5-level `depth,` `DepthData` supports variable-depth
+/// order books using `BTreeMap` for efficient sorted access and updates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DepthData {
     pub gateway_name: String,
@@ -176,7 +176,7 @@ pub struct DepthData {
 }
 
 impl DepthData {
-    /// Create a new DepthData
+    /// Create a new `DepthData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -194,12 +194,12 @@ impl DepthData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
 
-    /// Create DepthData from a TickData's 5-level depth
+    /// Create `DepthData` from `a` `TickData`'s 5-level depth
     pub fn from_tick(tick: &TickData) -> Self {
         let mut depth = Self::new(
             tick.gateway_name.clone(),
@@ -305,7 +305,7 @@ pub struct BarData {
 }
 
 impl BarData {
-    /// Create a new BarData
+    /// Create a new `BarData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -329,7 +329,7 @@ impl BarData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -381,7 +381,7 @@ pub struct OrderData {
 }
 
 impl OrderData {
-    /// Create a new OrderData
+    /// Create a new `OrderData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -409,12 +409,12 @@ impl OrderData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
 
-    /// Get vt_orderid (gateway_name.orderid)
+    /// Get `vt_orderid` (`gateway_name`.orderid)
     pub fn vt_orderid(&self) -> String {
         format!("{}.{}", self.gateway_name, self.orderid)
     }
@@ -470,7 +470,7 @@ pub struct TradeData {
 }
 
 impl TradeData {
-    /// Create a new TradeData
+    /// Create a new `TradeData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -493,17 +493,17 @@ impl TradeData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
 
-    /// Get vt_orderid (gateway_name.orderid)
+    /// Get `vt_orderid` (`gateway_name`.orderid)
     pub fn vt_orderid(&self) -> String {
         format!("{}.{}", self.gateway_name, self.orderid)
     }
 
-    /// Get vt_tradeid (gateway_name.tradeid)
+    /// Get `vt_tradeid` (`gateway_name`.tradeid)
     pub fn vt_tradeid(&self) -> String {
         format!("{}.{}", self.gateway_name, self.tradeid)
     }
@@ -542,7 +542,7 @@ pub struct PositionData {
 }
 
 impl PositionData {
-    /// Create a new PositionData
+    /// Create a new `PositionData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -563,12 +563,12 @@ impl PositionData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
 
-    /// Get vt_positionid (gateway_name.vt_symbol.direction)
+    /// Get `vt_positionid` (`gateway_name`.`vt_symbol`.direction)
     pub fn vt_positionid(&self) -> String {
         format!("{}.{}.{}", self.gateway_name, self.vt_symbol(), self.direction)
     }
@@ -602,7 +602,7 @@ pub struct AccountData {
 }
 
 impl AccountData {
-    /// Create a new AccountData
+    /// Create a new `AccountData`
     pub fn new(gateway_name: String, accountid: String) -> Self {
         Self {
             gateway_name,
@@ -618,7 +618,7 @@ impl AccountData {
         self.balance - self.frozen
     }
 
-    /// Get vt_accountid (gateway_name.accountid)
+    /// Get `vt_accountid` (`gateway_name`.accountid)
     pub fn vt_accountid(&self) -> String {
         format!("{}.{}", self.gateway_name, self.accountid)
     }
@@ -648,7 +648,7 @@ pub struct LogData {
 }
 
 impl LogData {
-    /// Create a new LogData
+    /// Create a new `LogData`
     pub fn new(gateway_name: String, msg: String) -> Self {
         Self {
             gateway_name,
@@ -658,7 +658,7 @@ impl LogData {
         }
     }
 
-    /// Create LogData with specific level
+    /// Create `LogData` with specific level
     pub fn with_level(gateway_name: String, msg: String, level: i32) -> Self {
         Self {
             gateway_name,
@@ -699,7 +699,7 @@ pub struct ContractData {
 }
 
 impl ContractData {
-    /// Create a new ContractData
+    /// Create a new `ContractData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -733,7 +733,7 @@ impl ContractData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -776,7 +776,7 @@ pub struct QuoteData {
 }
 
 impl QuoteData {
-    /// Create a new QuoteData
+    /// Create a new `QuoteData`
     pub fn new(
         gateway_name: String,
         symbol: String,
@@ -801,12 +801,12 @@ impl QuoteData {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
 
-    /// Get vt_quoteid (gateway_name.quoteid)
+    /// Get `vt_quoteid` (`gateway_name`.quoteid)
     pub fn vt_quoteid(&self) -> String {
         format!("{}.{}", self.gateway_name, self.quoteid)
     }
@@ -849,12 +849,12 @@ pub struct SubscribeRequest {
 }
 
 impl SubscribeRequest {
-    /// Create a new SubscribeRequest
+    /// Create a new `SubscribeRequest`
     pub fn new(symbol: String, exchange: Exchange) -> Self {
         Self { symbol, exchange }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -895,7 +895,7 @@ pub struct OrderRequest {
 }
 
 impl OrderRequest {
-    /// Create a new OrderRequest
+    /// Create a new `OrderRequest`
     pub fn new(
         symbol: String,
         exchange: Exchange,
@@ -919,7 +919,7 @@ impl OrderRequest {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -953,7 +953,7 @@ pub struct CancelRequest {
 }
 
 impl CancelRequest {
-    /// Create a new CancelRequest
+    /// Create a new `CancelRequest`
     pub fn new(orderid: String, symbol: String, exchange: Exchange) -> Self {
         Self {
             orderid,
@@ -963,7 +963,7 @@ impl CancelRequest {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -980,7 +980,7 @@ pub struct HistoryRequest {
 }
 
 impl HistoryRequest {
-    /// Create a new HistoryRequest
+    /// Create a new `HistoryRequest`
     pub fn new(symbol: String, exchange: Exchange, start: DateTime<Utc>) -> Self {
         Self {
             symbol,
@@ -991,7 +991,7 @@ impl HistoryRequest {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -1012,7 +1012,7 @@ pub struct QuoteRequest {
 }
 
 impl QuoteRequest {
-    /// Create a new QuoteRequest
+    /// Create a new `QuoteRequest`
     pub fn new(
         symbol: String,
         exchange: Exchange,
@@ -1034,7 +1034,7 @@ impl QuoteRequest {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }

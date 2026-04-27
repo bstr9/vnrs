@@ -3,12 +3,12 @@
 //! Core backtesting engine that integrates with strategy framework
 //! Supports both spot and futures trading
 //!
-//! Event loop order (following nautilus_trader to prevent look-ahead bias):
-//! 1. Bar arrives → update current_dt
+//! Event loop order (following `nautilus_trader` to prevent look-ahead bias):
+//! 1. Bar arrives → update `current_dt`
 //! 2. Handle new day (daily result tracking)
 //! 3. Cross pending limit orders from PREVIOUS bar against current bar
 //! 4. Cross pending stop orders from PREVIOUS bar against current bar
-//! 5. THEN call strategy's on_bar() (strategy can place new orders,
+//! 5. THEN call strategy's `on_bar`() (strategy can place new orders,
 //!    but they won't be evaluated until NEXT bar)
 
 use std::collections::HashMap;
@@ -135,10 +135,10 @@ pub struct BacktestingEngine {
     history_data: Vec<BarData>,
     tick_data: Vec<TickData>,
     depth_data: Vec<DepthData>,
-    /// Deterministic clock abstraction — TestClock in backtest, LiveClock in live.
+    /// Deterministic clock abstraction — `TestClock` in `backtest,` `LiveClock` in live.
     /// Replaces the old `current_dt: DateTime<Utc>` field so that all time queries
     /// flow through the same `Clock` trait used by live trading, ensuring
-    /// research-to-live parity (nautilus_trader pattern).
+    /// research-to-live parity (`nautilus_trader` pattern).
     clock: Arc<dyn Clock>,
     
     // Order management
@@ -189,13 +189,13 @@ pub struct BacktestingEngine {
     active_bracket_groups: HashMap<u64, BacktestBracketGroup>,
 
     /// Optional simulated exchange for per-instrument matching with fee/latency models.
-    /// When set, order matching is delegated to SimulatedExchange instead of the
-    /// engine's built-in cross_limit_order/cross_stop_order methods.
+    /// When set, order matching is delegated to `SimulatedExchange` instead of the
+    /// engine's built-in `cross_limit_order`/`cross_stop_order` methods.
     /// This enables configurable fee models (maker/taker), latency simulation,
-    /// and per-instrument matching engines (nautilus_trader pattern).
+    /// and per-instrument matching engines (`nautilus_trader` pattern).
     simulated_exchange: Option<SimulatedExchange>,
 
-    /// Scheduled timers for the strategy (key: timer_id)
+    /// Scheduled timers for the strategy (key: `timer_id`)
     timers: HashMap<String, TimerEntry>,
 }
 
@@ -285,16 +285,16 @@ impl BacktestingEngine {
         self.timers.clear();
     }
 
-    /// Enable the SimulatedExchange for this backtest.
+    /// Enable the `SimulatedExchange` for this backtest.
     ///
-    /// When enabled, order matching is delegated to SimulatedExchange which provides:
+    /// When enabled, order matching is delegated to `SimulatedExchange` which provides:
     /// - Per-instrument matching engines with independent fill models
     /// - Configurable fee models (maker/taker rates, flat fees, percent)
     /// - Latency simulation (fixed, random)
     /// - Pre-trade risk checks per instrument
     ///
     /// The instrument is automatically registered with the engine's current
-    /// pricetick, size, and fill_model settings.
+    /// pricetick, size, and `fill_model` settings.
     pub fn enable_simulated_exchange(&mut self) {
         let mut exchange = SimulatedExchange::new(format!("SIM_{}", self.exchange.value()));
         let config = InstrumentConfig::new(
@@ -307,7 +307,7 @@ impl BacktestingEngine {
         self.simulated_exchange = Some(exchange);
     }
 
-    /// Enable the SimulatedExchange with a custom fee model.
+    /// Enable the `SimulatedExchange` with a custom fee model.
     ///
     /// This allows configuring maker/taker fee rates, flat fees, or other
     /// fee structures that differ from the engine's default `rate` parameter.
@@ -323,12 +323,12 @@ impl BacktestingEngine {
         self.simulated_exchange = Some(exchange);
     }
 
-    /// Check if SimulatedExchange is enabled.
+    /// Check if `SimulatedExchange` is enabled.
     pub fn has_simulated_exchange(&self) -> bool {
         self.simulated_exchange.is_some()
     }
 
-    /// Get a reference to the SimulatedExchange (if enabled).
+    /// Get a reference to the `SimulatedExchange` (if enabled).
     pub fn simulated_exchange(&self) -> Option<&SimulatedExchange> {
         self.simulated_exchange.as_ref()
     }
@@ -403,7 +403,7 @@ impl BacktestingEngine {
 
     /// Set fill model by name (convenience method for Python API)
     ///
-    /// Accepts string names: "best_price", "ideal", "two_tier", "size_aware", "probabilistic"
+    /// Accepts string names: "`best_price`", "ideal",` `"`two_tier"`, "`size_aware`", "probabilistic"
     /// Uses the engine's current slippage setting for default parameters.
     pub fn set_fill_model_by_name(&mut self, model_name: &str) -> Result<(), String> {
         let model: Box<dyn FillModel> = match model_name.to_lowercase().as_str() {
@@ -579,8 +579,8 @@ impl BacktestingEngine {
 
     /// Load historical data from Binance REST API directly
     ///
-    /// Reads gateway config from .rstrader/binance/gateway_configs.json,
-    /// constructs a REST client, downloads klines via DataDownloadManager,
+    /// Reads gateway config from .`rstrader`/`binance`/`gateway_configs`.json,
+    /// constructs a REST client, downloads klines via `DataDownloadManager`,
     /// and feeds them into the backtesting engine.
     pub async fn load_data_from_binance(&mut self) -> Result<(), String> {
         self.write_log("从Binance REST API加载历史数据");
@@ -653,14 +653,14 @@ impl BacktestingEngine {
         self.write_log(&format!("加载{}条Depth数据", self.depth_data.len()));
     }
 
-    /// Load bar data from a database implementing BaseDatabase trait
+    /// Load bar data from a database implementing `BaseDatabase` trait
     ///
     /// This method loads historical bar data from any database backend
-    /// (MemoryDatabase, FileDatabase, or future SQLite/PostgreSQL backends)
+    /// (`MemoryDatabase`, `FileDatabase`, or future SQLite/PostgreSQL backends)
     /// into the backtesting engine.
     ///
     /// # Arguments
-    /// * `database` - Arc reference to a database implementing BaseDatabase
+    /// * `database` - Arc reference to a database implementing `BaseDatabase`
     ///
     /// # Returns
     /// Number of bars loaded, or error message
@@ -683,10 +683,10 @@ impl BacktestingEngine {
         Ok(count)
     }
 
-    /// Load tick data from a database implementing BaseDatabase trait
+    /// Load tick data from a database implementing `BaseDatabase` trait
     ///
     /// # Arguments
-    /// * `database` - Arc reference to a database implementing BaseDatabase
+    /// * `database` - Arc reference to a database implementing `BaseDatabase`
     ///
     /// # Returns
     /// Number of ticks loaded, or error message
@@ -708,10 +708,10 @@ impl BacktestingEngine {
         Ok(count)
     }
 
-    /// Load depth data from a database implementing BaseDatabase trait
+    /// Load depth data from a database implementing `BaseDatabase` trait
     ///
     /// # Arguments
-    /// * `database` - Arc reference to a database implementing BaseDatabase
+    /// * `database` - Arc reference to a database implementing `BaseDatabase`
     ///
     /// # Returns
     /// Number of depth entries loaded, or error message
@@ -785,12 +785,12 @@ impl BacktestingEngine {
     /// Run bar-based backtesting
     ///
     /// Event loop order per bar (prevents look-ahead bias):
-    /// 1. Update current_dt
+    /// 1. Update `current_dt`
     /// 2. Handle new day
     /// 3. Cross pending limit orders (placed on PREVIOUS bar)
     /// 4. Cross pending stop orders (placed on PREVIOUS bar)
     /// 5. Cross emulated orders (trailing stops, MIT, LIT)
-    /// 6. Call strategy on_bar() - new orders placed here are evaluated on NEXT bar
+    /// 6. Call strategy `on_bar`() - new orders placed here are evaluated on NEXT bar
     async fn run_bar_backtesting(&mut self) -> Result<(), String> {
         let context = Arc::clone(&self.strategy_context);
 
@@ -883,8 +883,8 @@ impl BacktestingEngine {
     ///
     /// When depth data is available, it is interleaved with tick data by timestamp.
     /// Depth updates are processed before strategy callbacks to maintain the
-    /// anti-look-ahead-bias ordering: update_dt → cross_pending_orders →
-    /// update_indicators → strategy.on_depth/on_tick
+    /// anti-look-ahead-bias ordering: `update_dt` `→` `cross_pending_orders` →
+    /// `update_indicators` `→` `strategy`.`on_depth`/`on_tick`
     async fn run_tick_backtesting(&mut self) -> Result<(), String> {
         // Take ownership to avoid borrow conflicts while mutating self
         let tick_data = std::mem::take(&mut self.tick_data);
@@ -1148,7 +1148,7 @@ impl BacktestingEngine {
         matches!(offset, Offset::Close | Offset::CloseYesterday | Offset::CloseToday)
     }
 
-    /// Cross limit orders with bar using FillModel
+    /// Cross limit orders with bar using `FillModel`
     fn cross_limit_order(&mut self, bar: &BarData) {
         // Collect active orders to avoid borrow issues
         let active_orders: Vec<_> = self.active_limit_orders.iter()
@@ -1232,7 +1232,7 @@ impl BacktestingEngine {
         }
     }
 
-    /// Cross stop orders with bar using FillModel
+    /// Cross stop orders with bar using `FillModel`
       /// Evaluate stop orders against the current bar and trigger matches.
     ///
     /// **Bar-mode stop trigger (backtesting) vs tick-mode trigger (live trading):**
@@ -1370,7 +1370,7 @@ impl BacktestingEngine {
         }
     }
 
-    /// Cross limit orders with tick data using FillModel
+    /// Cross limit orders with tick data using `FillModel`
     fn cross_limit_order_tick(&mut self, tick: &TickData) {
         // Collect active orders to avoid borrow issues
         let active_orders: Vec<_> = self.active_limit_orders.iter()
@@ -1453,7 +1453,7 @@ impl BacktestingEngine {
         }
     }
 
-    /// Cross stop orders with tick data using FillModel
+    /// Cross stop orders with tick data using `FillModel`
     fn cross_stop_order_tick(&mut self, tick: &TickData) {
         let mut to_trigger = Vec::new();
         
@@ -1888,8 +1888,8 @@ impl BacktestingEngine {
 
     /// Send a Market-If-Touched order
     ///
-    /// Long MIT: triggers when bar.low <= trigger_price → submit market buy
-    /// Short MIT: triggers when bar.high >= trigger_price → submit market sell
+    /// Long MIT: triggers when bar.low <= `trigger_price` → submit market buy
+    /// Short MIT: triggers when bar.high >= `trigger_price` → submit market sell
     pub fn send_mit(
         &mut self,
         symbol: &str,
@@ -1932,7 +1932,7 @@ impl BacktestingEngine {
 
     /// Send a Limit-If-Touched order
     ///
-    /// LIT: triggers like MIT, but submits a limit order at limit_price instead of market
+    /// LIT: triggers like MIT, but submits a limit order at `limit_price` instead of market
     #[allow(clippy::too_many_arguments)]
     pub fn send_lit(
         &mut self,
@@ -1979,9 +1979,9 @@ impl BacktestingEngine {
     // Bracket order methods (Bracket, OCO, OTO)
     // ========================================================================
 
-    /// Send a bracket order: entry → take_profit + stop_loss
+    /// Send a bracket order: entry → `take_profit` `+` `stop_loss`
     ///
-    /// State machine: Pending → EntryActive → SecondaryActive → Completed
+    /// State machine: Pending → `EntryActive` `→` `SecondaryActive` → Completed
     pub fn send_bracket_order(
         &mut self,
         entry_req: OrderRequest,
@@ -2058,7 +2058,7 @@ impl BacktestingEngine {
 
     /// Send an OCO (One-Cancels-Other) order: two orders, if one fills, cancel the other
     ///
-    /// State machine: Pending → SecondaryActive → Completed
+    /// State machine: Pending → `SecondaryActive` → Completed
     pub fn send_oco_order(
         &mut self,
         order_a_req: OrderRequest,
@@ -2135,7 +2135,7 @@ impl BacktestingEngine {
 
     /// Send an OTO (One-Triggers-Other) order: primary fills → submit secondary
     ///
-    /// State machine: Pending → SecondaryActive → Completed
+    /// State machine: Pending → `SecondaryActive` → Completed
     pub fn send_oto_order(
         &mut self,
         primary_req: OrderRequest,
@@ -2207,7 +2207,7 @@ impl BacktestingEngine {
     /// Cross emulated orders against current bar
     ///
     /// For each active emulated order:
-    /// - TrailingStop: update trail, trigger if price crosses stop
+    /// - `TrailingStop`: update trail, trigger if price crosses stop
     /// - MIT: trigger if price touches trigger level
     /// - LIT: trigger if price touches trigger level, submit limit order
     fn cross_emulated_order(&mut self, bar: &BarData) {
@@ -2808,7 +2808,7 @@ impl BacktestingEngine {
         self.position.signed_qty()
     }
 
-    /// Get realized PnL from position
+    /// Get realized `PnL` from position
     pub fn get_realized_pnl(&self) -> f64 {
         self.position.realized_pnl()
     }
@@ -2829,7 +2829,7 @@ impl BacktestingEngine {
         trades
     }
 
-    /// Get historical bar data for the given vt_symbol within the last N days.
+    /// Get historical bar data for the given `vt_symbol` within the last N days.
     ///
     /// This is used by Python strategies in `on_init()` to warm up indicators.
     /// Returns bars whose datetime is within `days` days before the latest bar
@@ -2845,7 +2845,7 @@ impl BacktestingEngine {
             .map(|b| b.datetime)
             .unwrap_or(self.end);
 
-        let cutoff = latest_dt - Duration::days(days as i64);
+        let cutoff = latest_dt - Duration::days(i64::from(days));
 
         self.history_data
             .iter()
@@ -2854,7 +2854,7 @@ impl BacktestingEngine {
             .collect()
     }
 
-    /// Get historical tick data for the given vt_symbol within the last N days.
+    /// Get historical tick data for the given `vt_symbol` within the last N days.
     ///
     /// Returns ticks whose datetime is within `days` days before the latest tick
     /// in the tick data. Returns empty Vec with a warning if tick data is unavailable.
@@ -2869,7 +2869,7 @@ impl BacktestingEngine {
             .map(|t| t.datetime)
             .unwrap_or(self.end);
 
-        let cutoff = latest_dt - Duration::days(days as i64);
+        let cutoff = latest_dt - Duration::days(i64::from(days));
 
         self.tick_data
             .iter()
@@ -2878,15 +2878,15 @@ impl BacktestingEngine {
             .collect()
     }
 
-    /// Get vt_symbol
+    /// Get `vt_symbol`
     pub fn get_vt_symbol(&self) -> &str {
         &self.vt_symbol
     }
 
     /// Get contract data for the trading symbol.
     ///
-    /// Constructs a ContractData from the engine's settings (pricetick, size, etc.).
-    /// Used by Python bindings to create PyInstrument for strategy code.
+    /// Constructs a `ContractData` from the engine's settings (pricetick, size, etc.).
+    /// Used by Python bindings to create `PyInstrument` for strategy code.
     pub fn get_contract_data(&self) -> Option<ContractData> {
         if self.vt_symbol.is_empty() {
             return None;
@@ -2938,6 +2938,7 @@ impl BacktestingEngine {
     // ========================================================================
 
     /// Schedule a timer for the strategy
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     pub fn schedule_timer(&mut self, timer_id: &str, seconds: f64, repeat: bool) {
         let now: DateTime<Utc> = self.clock.now();
         let delay = Duration::milliseconds((seconds * 1000.0) as i64);
@@ -2959,7 +2960,7 @@ impl BacktestingEngine {
         self.timers.remove(timer_id);
     }
 
-    /// Check timers and return list of timer_ids that have fired
+    /// Check timers and return list of `timer_ids` that have fired
     fn check_timers(&mut self, current_time: DateTime<Utc>) -> Vec<String> {
         let mut fired: Vec<String> = Vec::new();
 

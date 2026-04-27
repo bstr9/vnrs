@@ -37,7 +37,7 @@ impl Parameter {
         let mut values = Vec::new();
         let mut i = 0;
         loop {
-            let value = self.start + i as f64 * self.step;
+            let value = self.start + f64::from(i) * self.step;
             if value > self.end + 1e-10 {
                 break;
             }

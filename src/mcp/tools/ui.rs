@@ -1,7 +1,7 @@
 //! MCP UI Tools — 前端 UI 操作工具集
 //!
-//! 提供 switch_symbol / switch_interval / add_indicator / remove_indicator / clear_indicators
-//! 等 MCP Tool，通过 UICommand 通道驱动 UI 线程执行界面操作。
+//! 提供 `switch_symbol` `/` `switch_interval` / `add_indicator` / `remove_indicator` / `clear_indicators`
+//! 等 MCP Tool，通过 `UICommand` 通道驱动 UI 线程执行界面操作。
 
 use rmcp::{
     ErrorData as McpError,
@@ -66,7 +66,7 @@ fn default_level() -> String {
 
 // ---- UITools (data holder, no longer has #[tool_router]) ----
 
-/// 前端 UI 操作数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
+/// 前端 UI 操作数据容器（已迁移到 `TradingMcpServer` 的 `#`[`tool_router`] impl）
 #[allow(dead_code)]
 pub struct UITools {
     ui_sender: UICommandSender,
@@ -75,7 +75,7 @@ pub struct UITools {
 
 #[allow(dead_code)]
 impl UITools {
-    /// 创建 UITools 实例
+    /// 创建 `UITools` 实例
     pub fn new(ui_sender: UICommandSender, ui_state: Arc<RwLock<UIState>>) -> Self {
         Self {
             ui_sender,

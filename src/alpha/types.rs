@@ -1,4 +1,4 @@
-//! Alpha BarData module for alpha research
+//! Alpha `BarData` module for alpha research
 
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};

@@ -1,6 +1,6 @@
-//! Trading RPC service — bridges MainEngine with RpcServer
+//! Trading RPC service — bridges `MainEngine` `with` `RpcServer`
 //!
-//! Registers trading-related RPC functions on an RpcServer instance so that
+//! Registers trading-related RPC functions on an `RpcServer` instance so that
 //! remote clients can query state and submit/cancel orders over ZMQ.
 //! Matches the vnpy `MainEngineRpc` pattern.
 
@@ -497,7 +497,7 @@ pub async fn register_trading_functions(engine: Arc<MainEngine>, server: &RpcSer
     info!("已注册所有交易RPC函数");
 }
 
-/// Parse a JSON object into GatewaySettings
+/// Parse a JSON object into `GatewaySettings`
 ///
 /// Accepts a map of string keys to values that can be strings, integers,
 /// floats, or booleans. Converts each to the appropriate `GatewaySettingValue`.

@@ -1,10 +1,10 @@
 //! Python Instrument class for strategy contract metadata
 //!
-//! Provides Python strategies with contract metadata (tick_size, lot_size,
-//! min_notional, etc.) and utility methods (round_price, round_volume).
+//! Provides Python strategies with contract metadata (`tick_size`, `lot_size`,
+//! `min_notional`, etc.) and utility `methods `(`round_price`, `round_volume`).
 //!
-//! PyInstrument is constructed from the Rust-side ContractData, reading
-//! `min_notional` from the `extra` HashMap where Binance gateways store it.
+//! `PyInstrument` is constructed from the Rust-`side` `ContractData`, reading
+//! `min_notional` from the `extra` `HashMap` where Binance gateways store it.
 
 use pyo3::prelude::*;
 
@@ -59,9 +59,9 @@ pub struct PyInstrument {
 }
 
 impl PyInstrument {
-    /// Create a PyInstrument from a ContractData.
+    /// Create a `PyInstrument` from `a` `ContractData`.
     ///
-    /// Reads `min_notional` from the `extra` HashMap if present.
+    /// Reads `min_notional` from the `extra` `HashMap` if present.
     pub fn from_contract_data(contract: &ContractData) -> Self {
         let min_notional = contract
             .extra
@@ -109,8 +109,8 @@ impl PyInstrument {
 
     /// Round a volume to the nearest valid lot size.
     ///
-    /// Rounds down to the nearest multiple of min_volume (step size).
-    /// Returns the volume unchanged if min_volume is 0.
+    /// Rounds down to the nearest multiple of `min_volume` (step size).
+    /// Returns the volume unchanged if `min_volume` is 0.
     fn round_volume(&self, volume: f64) -> f64 {
         if self.min_volume <= 0.0 {
             return volume;

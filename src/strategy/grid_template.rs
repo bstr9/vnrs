@@ -72,7 +72,7 @@ pub struct GridStrategy {
     /// All grid levels indexed by level index
     pub grid_levels: HashMap<i32, GridLevel>,
     
-    /// Realized PnL from completed grid pairs
+    /// Realized `PnL` from completed grid pairs
     pub realized_pnl: f64,
     
     /// Traded symbol
@@ -81,6 +81,7 @@ pub struct GridStrategy {
 
 impl GridStrategy {
     /// Create a new grid strategy
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     pub fn new(
         strategy_name: String,
         vt_symbol: String,
@@ -116,16 +117,17 @@ impl GridStrategy {
     }
     
     /// Calculate all grid levels and place initial orders
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // value fits in target type; value fits in target type
     pub fn init_grid(&mut self) {
         // Create grid levels: sell levels above center, buy levels below
         for i in 1..=self.grid_count as i32 {
             // Buy level below center
-            let buy_price = self.center_price - self.grid_step * i as f64;
+            let buy_price = self.center_price - self.grid_step * f64::from(i);
             let buy_level = GridLevel::new(-i, buy_price, Direction::Long, self.grid_volume);
             self.grid_levels.insert(-i, buy_level);
             
             // Sell level above center
-            let sell_price = self.center_price + self.grid_step * i as f64;
+            let sell_price = self.center_price + self.grid_step * f64::from(i);
             let sell_level = GridLevel::new(i, sell_price, Direction::Short, self.grid_volume);
             self.grid_levels.insert(i, sell_level);
         }
@@ -217,7 +219,7 @@ impl GridStrategy {
             }
         } else {
             // Level doesn't exist yet (outside initial grid), create it
-            let price = self.center_price + self.grid_step * next_idx as f64;
+            let price = self.center_price + self.grid_step * f64::from(next_idx);
             let new_level = GridLevel::new(next_idx, price, next_direction, self.grid_volume);
             self.grid_levels.insert(next_idx, new_level);
         }
@@ -226,7 +228,7 @@ impl GridStrategy {
         self.place_pending_orders();
     }
     
-    /// Get total grid PnL
+    /// Get total grid `PnL`
     pub fn get_grid_pnl(&self) -> f64 {
         self.realized_pnl
     }

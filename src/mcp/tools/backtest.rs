@@ -1,7 +1,7 @@
 //! MCP Backtest Tools — 回测管理工具集
 //!
-//! 提供 run_backtest / get_backtest_result / list_backtests / compare_strategies
-//! 等 MCP Tool，通过 BacktestingEngine 执行策略回测。
+//! 提供 `run_backtest` `/` `get_backtest_result` / `list_backtests` / `compare_strategies`
+//! 等 MCP Tool，通过 `BacktestingEngine` 执行策略回测。
 //!
 //! NOTE: Backtest tools manage backtest runs in-memory. Results are stored
 //! in a local cache keyed by backtest ID.
@@ -23,7 +23,7 @@ use super::super::server::TradingMcpServer;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct RunBacktestParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
     /// K 线周期：1m / 5m / 15m / 1h / 4h / 1d
     pub interval: String,
@@ -95,7 +95,7 @@ pub struct BacktestEntry {
 
 // ---- BacktestTools (data holder, no longer has #[tool_router]) ----
 
-/// 回测管理数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
+/// 回测管理数据容器（已迁移到 `TradingMcpServer` 的 `#`[`tool_router`] impl）
 #[allow(dead_code)]
 pub struct BacktestTools {
     results: Arc<RwLock<Vec<BacktestEntry>>>,
@@ -103,7 +103,7 @@ pub struct BacktestTools {
 
 #[allow(dead_code)]
 impl BacktestTools {
-    /// 创建 BacktestTools 实例
+    /// 创建 `BacktestTools` 实例
     pub fn new() -> Self {
         Self {
             results: Arc::new(RwLock::new(Vec::new())),

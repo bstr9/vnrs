@@ -1,4 +1,4 @@
-//! Python bindings for StopOrderEngine
+//! Python bindings for `StopOrderEngine`
 //!
 //! Exposes stop order management to Python strategies for:
 //! - Querying active/all stop orders
@@ -15,10 +15,10 @@ use std::sync::Arc;
 // PyStopOrder
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for StopOrder data.
+/// Python wrapper for `StopOrder` data.
 ///
 /// Represents a stop order (stop-loss, take-profit, trailing stop) that is
-/// being tracked by the StopOrderEngine.
+/// being tracked by the `StopOrderEngine`.
 #[pyclass(name = "StopOrder")]
 #[derive(Clone)]
 pub struct PyStopOrder {
@@ -26,7 +26,7 @@ pub struct PyStopOrder {
 }
 
 impl PyStopOrder {
-    /// Create a new PyStopOrder from a Rust StopOrder
+    /// Create a new `PyStopOrder` from a `Rust` `StopOrder`
     pub fn from_rust(order: StopOrder) -> Self {
         Self { inner: order }
     }
@@ -52,7 +52,7 @@ impl PyStopOrder {
         self.inner.exchange.value().to_string()
     }
 
-    /// Full vt_symbol (e.g., "BTCUSDT.BINANCE")
+    /// Full `vt_symbol` (e.g., "BTCUSDT.BINANCE")
     #[getter]
     fn vt_symbol(&self) -> String {
         self.inner.vt_symbol()
@@ -64,7 +64,7 @@ impl PyStopOrder {
         format_direction(self.inner.direction)
     }
 
-    /// Stop order type: "StopMarket", "StopLimit", "TrailingStopPct", "TrailingStopAbs", "TakeProfit"
+    /// Stop order type: "`StopMarket`",` `"`StopLimit"`, "`TrailingStopPct`", "`TrailingStopAbs`", "`TakeProfit`"
     #[getter]
     fn stop_type(&self) -> String {
         format_stop_order_type(self.inner.stop_type)
@@ -76,7 +76,7 @@ impl PyStopOrder {
         self.inner.stop_price
     }
 
-    /// Limit price (for StopLimit orders)
+    /// Limit price (for `StopLimit` orders)
     #[getter]
     fn limit_price(&self) -> f64 {
         self.inner.limit_price
@@ -100,13 +100,13 @@ impl PyStopOrder {
         format_stop_order_status(self.inner.status)
     }
 
-    /// Trailing percentage (for TrailingStopPct)
+    /// Trailing percentage (for `TrailingStopPct`)
     #[getter]
     fn trail_pct(&self) -> f64 {
         self.inner.trail_pct
     }
 
-    /// Trailing absolute distance (for TrailingStopAbs)
+    /// Trailing absolute distance (for `TrailingStopAbs`)
     #[getter]
     fn trail_abs(&self) -> f64 {
         self.inner.trail_abs
@@ -182,11 +182,11 @@ impl PyStopOrder {
 // PyStopOrderEngine
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for StopOrderEngine.
+/// Python wrapper for `StopOrderEngine`.
 ///
 /// Provides stop order management including creation, querying, and cancellation.
 ///
-/// Usage::
+/// `Usage`::
 ///
 ///     engine = create_main_engine()
 ///     stop_engine = engine.get_stop_order_engine()
@@ -211,7 +211,7 @@ pub struct PyStopOrderEngine {
 }
 
 impl PyStopOrderEngine {
-    /// Create a new PyStopOrderEngine from an Arc<StopOrderEngine>
+    /// Create a new `PyStopOrderEngine` from an Arc<StopOrderEngine>
     pub fn new(engine: Arc<StopOrderEngine>) -> Self {
         Self { inner: engine }
     }
@@ -222,7 +222,7 @@ impl PyStopOrderEngine {
     /// Get all active (Pending) stop orders.
     ///
     /// Returns:
-    ///     List of StopOrder objects with Pending status
+    ///     List of `StopOrder` objects with Pending status
     fn get_active_stop_orders(&self) -> Vec<PyStopOrder> {
         self.inner
             .get_active_stop_orders()
@@ -234,7 +234,7 @@ impl PyStopOrderEngine {
     /// Get all stop orders (including triggered, cancelled, expired).
     ///
     /// Returns:
-    ///     List of all StopOrder objects
+    ///     List of all `StopOrder` objects
     fn get_all_stop_orders(&self) -> Vec<PyStopOrder> {
         self.inner
             .get_all_stop_orders()
@@ -246,10 +246,10 @@ impl PyStopOrderEngine {
     /// Get a specific stop order by ID.
     ///
     /// Args:
-    ///     stop_orderid: The stop order ID
+    ///     `stop_orderid`: The stop order ID
     ///
     /// Returns:
-    ///     StopOrder if found, None otherwise
+    ///     `StopOrder` if found, None otherwise
     fn get_stop_order(&self, stop_orderid: u64) -> Option<PyStopOrder> {
         self.inner
             .get_stop_order(stop_orderid)
@@ -259,10 +259,10 @@ impl PyStopOrderEngine {
     /// Cancel a stop order by ID.
     ///
     /// Args:
-    ///     stop_orderid: The stop order ID to cancel
+    ///     `stop_orderid`: The stop order ID to cancel
     ///
     /// Raises:
-    ///     ValueError: If the order is not found or not in Pending status
+    ///     `ValueError`: If the order is not found or not in Pending status
     fn cancel_stop_order(&self, stop_orderid: u64) -> PyResult<()> {
         self.inner
             .cancel_stop_order(stop_orderid)
@@ -272,7 +272,7 @@ impl PyStopOrderEngine {
     /// Cancel all stop orders for a specific symbol.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
     ///
     /// Returns:
     ///     Number of orders cancelled
@@ -289,23 +289,23 @@ impl PyStopOrderEngine {
     /// Add a new stop order.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
     ///     direction: "LONG", "SHORT", or "NET"
-    ///     stop_type: "StopMarket", "StopLimit", "TakeProfit", "TrailingStopPct", or "TrailingStopAbs"
-    ///     stop_price: Trigger price (for StopMarket, StopLimit, TakeProfit)
+    ///     `stop_type`:` `"`StopMarket"`, "`StopLimit`", "`TakeProfit`", "`TrailingStopPct`", or "`TrailingStopAbs`"
+    ///     `stop_price`: Trigger price (for `StopMarket`, `StopLimit`, `TakeProfit`)
     ///     volume: Order volume (must be > 0)
-    ///     limit_price: Limit price for StopLimit orders (default 0.0)
+    ///     `limit_price`: Limit price for `StopLimit` orders (default 0.0)
     ///     offset: Order offset - "NONE", "OPEN", "CLOSE", "CLOSETODAY", "CLOSEYESTERDAY" (default "NONE")
-    ///     trail_pct: Trailing percentage for TrailingStopPct, in (0, 1) (default 0.0)
-    ///     trail_abs: Trailing absolute distance for TrailingStopAbs (default 0.0)
-    ///     gateway_name: Gateway name (default "MAIN")
+    ///     `trail_pct`: Trailing percentage for `TrailingStopPct`, in (0, 1) (default 0.0)
+    ///     `trail_abs`: Trailing absolute distance for `TrailingStopAbs` (default 0.0)
+    ///     `gateway_name`: Gateway name (default "MAIN")
     ///     tag: Optional tag string (default "")
     ///
     /// Returns:
     ///     The stop order ID on success
     ///
     /// Raises:
-    ///     ValueError: If parameters are invalid (volume <= 0, bad stop_type, etc.)
+    ///     `ValueError`: If parameters are invalid (volume <= 0, `bad` `stop_type`, etc.)
     #[pyo3(signature = (vt_symbol, direction, stop_type, stop_price, volume, limit_price=0.0, offset="NONE", trail_pct=0.0, trail_abs=0.0, gateway_name="MAIN", tag=""))]
     fn add_stop_order(
         &self,

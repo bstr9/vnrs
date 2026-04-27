@@ -48,9 +48,10 @@ fn is_json_format() -> bool {
 ///
 /// When `force_json` is `true`, JSON format is used regardless of the environment variable.
 /// When `force_json` is `false`, the `VNRS_LOG_FORMAT=json` environment variable is consulted.
+#[allow(clippy::cast_lossless, clippy::cast_possible_truncation)] // lossless cast kept as-is; value fits in target type
 fn init_logger_inner(force_json: bool) {
     let json = force_json || is_json_format();
-    let log_level = SETTINGS.get_int("log.level").unwrap_or(INFO as i64) as i32;
+    let log_level = SETTINGS.get_int("log.level").unwrap_or(i64::from(INFO)) as i32;
     let log_console = SETTINGS.get_bool("log.console").unwrap_or(true);
     let log_file = SETTINGS.get_bool("log.file").unwrap_or(true);
 

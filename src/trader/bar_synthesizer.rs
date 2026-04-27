@@ -36,6 +36,7 @@ impl BarSynthesizer {
     ///
     /// The window is calculated as `target_seconds / source_seconds`.
     /// If `target <= source`, window is set to 1 (passthrough mode).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     pub fn new(source_interval: Interval, target_interval: Interval) -> Self {
         let source_secs = Self::interval_to_seconds(source_interval);
         let target_secs = Self::interval_to_seconds(target_interval);

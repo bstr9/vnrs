@@ -28,7 +28,7 @@ use crate::trader::{
 /// - `tp_atr_mult`: Take-profit trailing stop ATR multiplier (default 4.0)
 /// - `sl_atr_mult`: Stop-loss ATR multiplier (default 1.0)
 /// - `fixed_size`: Order size per trade (default 0.01)
-/// - `am_length`: ArrayManager window size (default 100)
+/// - `am_length`: `ArrayManager` window size (default 100)
 pub struct VolatilityStrategy {
     base: BaseStrategy,
 
@@ -55,6 +55,7 @@ pub struct VolatilityStrategy {
 }
 
 impl VolatilityStrategy {
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     pub fn new(strategy_name: String, vt_symbol: String, setting: StrategySetting) -> Self {
         let atr_length = setting
             .get("atr_length")

@@ -33,17 +33,17 @@ use crate::trader::object::BarData;
 pub struct SynchronizedBars {
     /// The shared timestamp of all bars in this batch.
     pub datetime: DateTime<Utc>,
-    /// Bars keyed by vt_symbol.
+    /// Bars keyed by `vt_symbol`.
     pub bars: HashMap<String, BarData>,
 }
 
 impl SynchronizedBars {
-    /// Get a bar for a specific vt_symbol.
+    /// Get a bar for a specific `vt_symbol`.
     pub fn get(&self, vt_symbol: &str) -> Option<&BarData> {
         self.bars.get(vt_symbol)
     }
 
-    /// List all vt_symbols present in this synchronized batch.
+    /// List all `vt_symbols` present in this synchronized batch.
     pub fn symbols(&self) -> Vec<&String> {
         self.bars.keys().collect()
     }
@@ -60,14 +60,14 @@ impl SynchronizedBars {
 /// timestamps are left pending — they will only emit once their
 /// own set of symbols is complete.
 pub struct SynchronizedBarGenerator {
-    /// The set of vt_symbols that must all be present for a sync emit.
+    /// The set of `vt_symbols` that must all be present for a sync emit.
     vt_symbols: HashSet<String>,
-    /// Buffered bars: timestamp -> (vt_symbol -> BarData).
+    /// Buffered bars: timestamp -> (`vt_symbol` -`>` `BarData`).
     buffer: BTreeMap<DateTime<Utc>, HashMap<String, BarData>>,
 }
 
 impl SynchronizedBarGenerator {
-    /// Create a new generator for the given list of vt_symbols.
+    /// Create a new generator for the given list of `vt_symbols`.
     ///
     /// At least one symbol is required. Duplicate symbols are deduplicated.
     pub fn new(vt_symbols: Vec<String>) -> Self {
@@ -77,7 +77,7 @@ impl SynchronizedBarGenerator {
         }
     }
 
-    /// Ingest a bar for the given vt_symbol.
+    /// Ingest a bar for the given `vt_symbol`.
     ///
     /// Returns `Some(SynchronizedBars)` when all registered symbols have
     /// a bar for the same timestamp as this incoming bar.

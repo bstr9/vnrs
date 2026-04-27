@@ -1,4 +1,4 @@
-//! OrderFactory and PyOrder — typed order creation for Python strategies
+//! `OrderFactory` and `PyOrder` — typed order creation for Python strategies
 //!
 //! Provides `OrderFactory` with `market()`, `limit()`, `stop()`, `stop_limit()` methods
 //! that return typed `PyOrder` objects. `PyOrder` supports a builder pattern for optional
@@ -126,31 +126,31 @@ impl PyOrder {
         direction_to_side(self.side)
     }
 
-    /// Order type: "MARKET", "LIMIT", "STOP", "STOP_LIMIT"
+    /// Order type: "MARKET", "LIMIT", "STOP", "`STOP_LIMIT`"
     #[getter]
     fn order_type(&self) -> &str {
         order_type_to_str(self.order_type)
     }
 
-    /// Limit price (for LIMIT and STOP_LIMIT orders)
+    /// Limit price (for LIMIT and `STOP_LIMIT` orders)
     #[getter]
     fn price(&self) -> Option<f64> {
         self.price
     }
 
-    /// Trigger price (for STOP and STOP_LIMIT orders)
+    /// Trigger price (for STOP and `STOP_LIMIT` orders)
     #[getter]
     fn trigger_price(&self) -> Option<f64> {
         self.trigger_price
     }
 
-    /// Limit price for STOP_LIMIT orders
+    /// Limit price for `STOP_LIMIT` orders
     #[getter]
     fn limit_price(&self) -> Option<f64> {
         self.limit_price
     }
 
-    /// Offset: "NONE", "OPEN", "CLOSE", "CLOSE_TODAY", "CLOSE_YESTERDAY"
+    /// Offset: "NONE", "OPEN", "CLOSE", "`CLOSE_TODAY`",` `"`CLOSE_YESTERDAY`"
     #[getter]
     fn offset(&self) -> &str {
         match self.offset {
@@ -182,7 +182,7 @@ impl PyOrder {
 
     // ---- Builder pattern ----
 
-    /// Set the reference tag. Returns a new PyOrder (builder pattern).
+    /// Set the reference tag. Returns a new `PyOrder` (builder pattern).
     fn with_reference(&self, py: Python, reference: &str) -> Self {
         PyOrder {
             instrument_id: self.instrument_id.clone(),
@@ -200,7 +200,7 @@ impl PyOrder {
         }
     }
 
-    /// Set the client order ID. Returns a new PyOrder (builder pattern).
+    /// Set the client order ID. Returns a new `PyOrder` (builder pattern).
     fn with_client_order_id(&self, py: Python, id: &str) -> Self {
         PyOrder {
             instrument_id: self.instrument_id.clone(),
@@ -218,7 +218,7 @@ impl PyOrder {
         }
     }
 
-    /// Set the time-in-force. Returns a new PyOrder (builder pattern).
+    /// Set the time-in-force. Returns a new `PyOrder` (builder pattern).
     fn with_time_in_force(&self, py: Python, tif: &str) -> Self {
         PyOrder {
             instrument_id: self.instrument_id.clone(),
@@ -236,9 +236,9 @@ impl PyOrder {
         }
     }
 
-    /// Set the offset. Returns a new PyOrder (builder pattern).
+    /// Set the offset. Returns a new `PyOrder` (builder pattern).
     ///
-    /// Accepts: "NONE", "OPEN", "CLOSE", "CLOSE_TODAY", "CLOSE_YESTERDAY" (case-insensitive)
+    /// Accepts: "NONE", "OPEN", "CLOSE", "`CLOSE_TODAY`",` `"`CLOSE_YESTERDAY`" (case-insensitive)
     fn with_offset(&self, py: Python, offset: &str) -> PyResult<Self> {
         let parsed = match offset.to_uppercase().as_str() {
             "NONE" => Offset::None,
@@ -272,7 +272,7 @@ impl PyOrder {
 
     /// Submit this order through the engine.
     ///
-    /// Returns a list of vt_orderid strings on success, or an empty list if
+    /// Returns a list of `vt_orderid` strings on success, or an empty list if
     /// the engine is not available.
     fn submit(&self, py: Python) -> PyResult<Vec<String>> {
         if let Some(ref engine) = self.engine {
@@ -396,8 +396,8 @@ pub struct OrderFactory {
 }
 
 impl OrderFactory {
-    /// Create an OrderFactory from Rust code with an engine reference.
-    /// This is used by Strategy.order_factory() and PythonEngineWrapper.create_order_factory().
+    /// Create an `OrderFactory` from Rust code with an engine reference.
+    /// This is used by `Strategy`.`order_factory`() and `PythonEngineWrapper`.`create_order_factory`().
     pub fn from_engine(engine: Py<PyAny>, gateway_name: &str) -> Self {
         OrderFactory {
             engine: Some(engine),
@@ -405,7 +405,7 @@ impl OrderFactory {
         }
     }
 
-    /// Create an OrderFactory with no engine (for testing).
+    /// Create an `OrderFactory` with no engine (for testing).
     pub fn empty() -> Self {
         OrderFactory {
             engine: None,
@@ -552,12 +552,12 @@ impl OrderFactory {
     /// Create a market order.
     ///
     /// Args:
-    ///     instrument_id: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
+    ///     `instrument_id`: Symbol in SYMBOL.EXCHANGE format (e.g., "BTCUSDT.BINANCE")
     ///     quantity: Order volume
     ///     side: "BUY"/"SELL" or "LONG"/"SHORT" (case-insensitive)
     ///
     /// Returns:
-    ///     PyOrder with order_type="MARKET"
+    ///     `PyOrder` `with` `order_type`="MARKET"
     fn market(
         &self,
         py: Python,
@@ -572,13 +572,13 @@ impl OrderFactory {
     /// Create a limit order.
     ///
     /// Args:
-    ///     instrument_id: Symbol in SYMBOL.EXCHANGE format
+    ///     `instrument_id`: Symbol in SYMBOL.EXCHANGE format
     ///     price: Limit price
     ///     quantity: Order volume
     ///     side: "BUY"/"SELL" or "LONG"/"SHORT" (case-insensitive)
     ///
     /// Returns:
-    ///     PyOrder with order_type="LIMIT"
+    ///     `PyOrder` `with` `order_type`="LIMIT"
     fn limit(
         &self,
         py: Python,
@@ -591,16 +591,16 @@ impl OrderFactory {
         self.build_limit_order(instrument_id, price, quantity, side, engine)
     }
 
-    /// Create a stop order (market triggered at trigger_price).
+    /// Create a stop order (market triggered at `trigger_price`).
     ///
     /// Args:
-    ///     instrument_id: Symbol in SYMBOL.EXCHANGE format
-    ///     trigger_price: Price at which the stop order is triggered
+    ///     `instrument_id`: Symbol in SYMBOL.EXCHANGE format
+    ///     `trigger_price`: Price at which the stop order is triggered
     ///     quantity: Order volume
     ///     side: "BUY"/"SELL" or "LONG"/"SHORT" (case-insensitive)
     ///
     /// Returns:
-    ///     PyOrder with order_type="STOP"
+    ///     `PyOrder` `with` `order_type`="STOP"
     fn stop(
         &self,
         py: Python,
@@ -616,14 +616,14 @@ impl OrderFactory {
     /// Create a stop-limit order.
     ///
     /// Args:
-    ///     instrument_id: Symbol in SYMBOL.EXCHANGE format
-    ///     trigger_price: Price at which the stop is triggered
-    ///     limit_price: Limit price after trigger
+    ///     `instrument_id`: Symbol in SYMBOL.EXCHANGE format
+    ///     `trigger_price`: Price at which the stop is triggered
+    ///     `limit_price`: Limit price after trigger
     ///     quantity: Order volume
     ///     side: "BUY"/"SELL" or "LONG"/"SHORT" (case-insensitive)
     ///
     /// Returns:
-    ///     PyOrder with order_type="STOP_LIMIT"
+    ///     `PyOrder` `with` `order_type`="`STOP_LIMIT`"
     fn stop_limit(
         &self,
         py: Python,

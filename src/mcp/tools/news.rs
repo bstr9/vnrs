@@ -1,10 +1,10 @@
 //! MCP News Tools — 新闻与事件数据工具集
 //!
-//! 提供 get_news / get_economic_calendar / get_market_events 等 MCP Tool，
+//! 提供 `get_news` `/` `get_economic_calendar` / `get_market_events` 等 MCP Tool，
 //! 用于获取市场新闻、经济日历和市场事件数据。
 //!
 //! NOTE: These tools provide placeholder/stub implementations. Real implementations
-//! would require integration with news APIs (e.g., NewsAPI, Bloomberg, Reuters) and
+//! would require integration with news APIs (e.g., `NewsAPI`, Bloomberg, Reuters) and
 //! economic calendar services.
 
 use rmcp::{
@@ -68,7 +68,7 @@ pub struct NewsTools;
 
 #[allow(dead_code)]
 impl NewsTools {
-    /// 创建 NewsTools 实例
+    /// 创建 `NewsTools` 实例
     pub fn new() -> Self {
         Self
     }

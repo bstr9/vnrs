@@ -144,7 +144,7 @@ pub trait AsyncStrategy: Send + Sync {
     /// Human-readable strategy name (must be unique within an `AsyncStrategyEngine`)
     fn strategy_name(&self) -> &str;
 
-    /// List of vt_symbols this strategy subscribes to
+    /// List of `vt_symbols` this strategy subscribes to
     fn vt_symbols(&self) -> &[String];
 
     /// Initialize the strategy (load model, warm up indicators, etc.)
@@ -171,7 +171,7 @@ pub trait AsyncStrategy: Send + Sync {
 
     /// Return the current portfolio weight vector.
     ///
-    /// Keys are vt_symbols, values are signed weights in (-∞, +∞).
+    /// Keys are `vt_symbols`, values are signed weights in (-∞, +∞).
     /// A weight of 0.0 means "no position / close". The sum of absolute
     /// weights need not equal 1.0 — position sizing is handled downstream.
     fn target_weights(&self) -> HashMap<String, f64>;

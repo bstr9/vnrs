@@ -94,7 +94,7 @@ impl McpTransport {
 pub struct McpConfig {
     /// 传输模式
     pub transport: McpTransport,
-    /// 只读模式：禁用所有写操作工具（send_order, cancel_order, set_stop_loss 等）
+    /// `只读模式`：禁用所有写操作工具（`send_order,` `cancel_order`, `set_stop_loss` 等）
     #[serde(default)]
     pub read_only: bool,
     /// 允许的工具模块（空 = 全部允许）
@@ -235,7 +235,7 @@ pub enum UICommand {
 /// UI 状态，由 UI 线程共享给 MCP Server 读取
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UIState {
-    /// 当前选中标的（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `当前选中标的`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub current_symbol: Option<String>,
     /// 当前 K 线周期
     pub current_interval: Option<String>,
@@ -256,7 +256,7 @@ pub type UICommandReceiver = mpsc::UnboundedReceiver<UICommand>;
 /// MCP Sampling 配置参数
 ///
 /// 控制 Server 向 Client 发起 LLM Sampling 请求时的默认行为，
-/// 包括 max_tokens、temperature 和模型偏好。
+/// 包括 `max_tokens`、temperature 和模型偏好。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SamplingConfig {
     /// 最大生成 token 数（默认 1024）
@@ -287,10 +287,10 @@ pub struct SamplingAuditEntry {
     pub tool_name: String,
     /// 输入消息数量
     pub message_count: usize,
-    /// 使用的 max_tokens
+    /// 使用的 `max_tokens`
     pub max_tokens: u32,
     /// 使用的 temperature
     pub temperature: Option<f32>,
-    /// 使用的 system_prompt（截断到前 100 字符）
+    /// 使用的 `system_prompt`（截断到前 100 字符）
     pub system_prompt_preview: Option<String>,
 }

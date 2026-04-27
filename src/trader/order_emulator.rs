@@ -7,8 +7,8 @@
 //! - **MIT (Market-If-Touched)** orders
 //! - **LIT (Limit-If-Touched)** orders
 //!
-//! Unlike StopOrderEngine which handles native exchange stop orders,
-//! OrderEmulator handles order types that exchanges don't support directly.
+//! Unlike `StopOrderEngine` which handles native exchange stop orders,
+//! `OrderEmulator` handles order types that exchanges don't support directly.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -33,9 +33,9 @@ pub enum EmulatedOrderType {
     TrailingStopPct,
     /// Trailing stop with absolute price distance
     TrailingStopAbs,
-    /// Stop-limit: trigger at stop_price, then submit limit at limit_price
+    /// Stop-limit: trigger at `stop_price`, then submit limit at `limit_price`
     StopLimit,
-    /// Iceberg: display only visible_volume, replenish as fills occur
+    /// Iceberg: display only `visible_volume`, replenish as fills occur
     Iceberg,
     /// Market-If-Touched: trigger at price, submit market order
     Mit,
@@ -110,9 +110,9 @@ pub struct EmulatedOrder {
     pub volume: f64,
     /// Remaining volume (for iceberg, this is hidden quantity)
     pub remaining_volume: f64,
-    /// Trailing percentage (for TrailingStopPct)
+    /// Trailing percentage (for `TrailingStopPct`)
     pub trail_pct: Option<f64>,
-    /// Trailing absolute distance (for TrailingStopAbs)
+    /// Trailing absolute distance (for `TrailingStopAbs`)
     pub trail_abs: Option<f64>,
     /// Current stop price (computed for trailing stops)
     pub current_stop: Option<f64>,
@@ -120,17 +120,17 @@ pub struct EmulatedOrder {
     pub highest_price: Option<f64>,
     /// Lowest price seen (for short trailing stops)
     pub lowest_price: Option<f64>,
-    /// Trigger price (for StopLimit, MIT, LIT)
+    /// Trigger price (for `StopLimit`, MIT, LIT)
     pub trigger_price: Option<f64>,
-    /// Limit price (for StopLimit, LIT)
+    /// Limit price (for `StopLimit`, LIT)
     pub limit_price: Option<f64>,
     /// Visible volume per slice (for Iceberg)
     pub visible_volume: Option<f64>,
     /// Price for iceberg slices
     pub iceberg_price: Option<f64>,
-    /// Price offset from best bid/ask (for PeggedBest)
+    /// Price offset from best bid/ask (for `PeggedBest`)
     pub pegged_offset: Option<f64>,
-    /// Current pegged limit price (for PeggedBest — updated when best price moves)
+    /// Current pegged limit price (for `PeggedBest` — updated when best price moves)
     pub pegged_price: Option<f64>,
     /// Real order ID from exchange (after trigger)
     pub real_order_id: Option<String>,
@@ -150,7 +150,7 @@ impl EmulatedOrder {
         matches!(self.status, EmulatedOrderStatus::Pending | EmulatedOrderStatus::Triggered)
     }
 
-    /// Get the vt_symbol for this order
+    /// Get the `vt_symbol` for this order
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -180,19 +180,19 @@ pub struct EmulatedOrderRequest {
     pub offset: Offset,
     /// Total volume
     pub volume: f64,
-    /// Trailing percentage (TrailingStopPct only)
+    /// Trailing percentage (`TrailingStopPct` only)
     pub trail_pct: Option<f64>,
-    /// Trailing absolute distance (TrailingStopAbs only)
+    /// Trailing absolute distance (`TrailingStopAbs` only)
     pub trail_abs: Option<f64>,
-    /// Trigger price (StopLimit, MIT, LIT)
+    /// Trigger price (`StopLimit`, MIT, LIT)
     pub trigger_price: Option<f64>,
-    /// Limit price (StopLimit, LIT)
+    /// Limit price (`StopLimit`, LIT)
     pub limit_price: Option<f64>,
     /// Visible volume per slice (Iceberg only)
     pub visible_volume: Option<f64>,
     /// Price for iceberg slices (Iceberg only)
     pub iceberg_price: Option<f64>,
-    /// Price offset from best bid/ask (PeggedBest only)
+    /// Price offset from best bid/ask (`PeggedBest` only)
     pub pegged_offset: Option<f64>,
     /// Expiration time
     pub expires_at: Option<DateTime<Utc>>,
@@ -420,7 +420,7 @@ pub struct OrderEmulator {
 }
 
 impl OrderEmulator {
-    /// Create a new OrderEmulator engine
+    /// Create a new `OrderEmulator` engine
     pub fn new() -> Self {
         Self {
             name: "OrderEmulator".to_string(),
@@ -448,7 +448,7 @@ impl OrderEmulator {
 
     /// Add a new emulated order
     ///
-    /// Returns the assigned EmulatedOrderId on success, or an error message on failure.
+    /// Returns the assigned `EmulatedOrderId` on success, or an error message on failure.
     pub fn add_order(&self, req: &EmulatedOrderRequest) -> Result<EmulatedOrderId, String> {
         // Validate parameters based on order type
         match req.order_type {
@@ -1118,7 +1118,7 @@ impl OrderEmulator {
         }
     }
 
-    /// Create an OrderRequest from an emulated order
+    /// Create an `OrderRequest` from an emulated order
     fn create_order_request(&self, order: &EmulatedOrder) -> Option<OrderRequest> {
         let (order_type, price) = match order.order_type {
             EmulatedOrderType::TrailingStopPct |

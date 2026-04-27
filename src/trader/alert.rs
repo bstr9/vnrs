@@ -56,9 +56,9 @@ pub struct AlertMessage {
     pub timestamp: DateTime<Utc>,
     /// Source engine/gateway
     pub source: String,
-    /// Related vt_symbol (if applicable)
+    /// Related `vt_symbol` (if applicable)
     pub vt_symbol: Option<String>,
-    /// Related vt_orderid (if applicable)
+    /// Related `vt_orderid` (if applicable)
     pub vt_orderid: Option<String>,
 }
 
@@ -76,13 +76,13 @@ impl AlertMessage {
         }
     }
 
-    /// Add vt_symbol
+    /// Add `vt_symbol`
     pub fn with_symbol(mut self, vt_symbol: impl Into<String>) -> Self {
         self.vt_symbol = Some(vt_symbol.into());
         self
     }
 
-    /// Add vt_orderid
+    /// Add `vt_orderid`
     pub fn with_orderid(mut self, vt_orderid: impl Into<String>) -> Self {
         self.vt_orderid = Some(vt_orderid.into());
         self
@@ -309,17 +309,17 @@ pub struct AlertEngine {
     channels: RwLock<Vec<Arc<dyn AlertChannel>>>,
     running: AtomicBool,
     enabled: AtomicBool,
-    /// Channel to publish EVENT_ALERT events to MainEngine's event pipeline
+    /// Channel to publish `EVENT_ALERT` events to `MainEngine`'s event pipeline
     event_tx: RwLock<Option<mpsc::UnboundedSender<(String, GatewayEvent)>>>,
 }
 
 impl AlertEngine {
-    /// Create a new AlertEngine with default configuration
+    /// Create a new `AlertEngine` with default configuration
     pub fn new() -> Self {
         Self::with_config(AlertConfig::default())
     }
 
-    /// Create a new AlertEngine with custom configuration
+    /// Create a new `AlertEngine` with custom configuration
     pub fn with_config(config: AlertConfig) -> Self {
         Self {
             name: "AlertEngine".to_string(),
@@ -377,7 +377,7 @@ impl AlertEngine {
         self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    /// Set the event_tx channel for publishing EVENT_ALERT events
+    /// Set the `event_tx` channel for `publishing` `EVENT_ALERT` events
     pub fn set_event_tx(&self, tx: mpsc::UnboundedSender<(String, GatewayEvent)>) {
         let mut slot = self.event_tx.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *slot = Some(tx);

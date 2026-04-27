@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use pyo3::types::PyAnyMethods;
 
-/// Python wrapper for BacktestingEngine
+/// Python wrapper for `BacktestingEngine`
 #[pyclass]
 pub struct PyBacktestingEngine {
     engine: Mutex<BacktestingEngine>,
@@ -50,10 +50,10 @@ impl PyBacktestingEngine {
     /// Set fill model by name.
     ///
     /// Args:
-    ///     model_name: One of "best_price", "ideal", "two_tier", "size_aware", "probabilistic"
+    ///     `model_name`: One `of `"`best_price`", "`ideal"`, "`two_tier`",` `"`size_aware`", "probabilistic"
     ///
     /// Raises:
-    ///     ValueError if the model name is not recognized
+    ///     `ValueError` if the model name is not recognized
     fn set_fill_model(&self, model_name: String) -> PyResult<()> {
         self.engine
             .lock()
@@ -230,8 +230,8 @@ impl PyBacktestingEngine {
         Ok(())
     }
 
-    /// Add strategy by instantiating a class with vnpy CtaTemplate signature
-    /// vnpy CtaTemplate: __init__(self, engine, strategy_name, vt_symbol, setting)
+    /// Add strategy by instantiating a class with vnpy `CtaTemplate` signature
+    /// vnpy `CtaTemplate`: __init__(self, `engine,` `strategy_name`, `vt_symbol`, setting)
     fn add_strategy_with_class(
         slf: &Bound<'_, Self>,
         py: Python,
@@ -409,7 +409,7 @@ impl PyBacktestingEngine {
         }
     }
 
-    /// Buy (long open) — convenience method matching Strategy.buy() signature
+    /// Buy (long open) — convenience method matching `Strategy`.`buy`() signature
     fn buy(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
         let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
@@ -435,7 +435,7 @@ impl PyBacktestingEngine {
         }
     }
 
-    /// Sell (long close) — convenience method matching Strategy.sell() signature
+    /// Sell (long close) — convenience method matching `Strategy`.`sell`() signature
     fn sell(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
         let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
@@ -461,7 +461,7 @@ impl PyBacktestingEngine {
         }
     }
 
-    /// Short (short open, futures only) — convenience method matching Strategy.short() signature
+    /// Short (short open, futures only) — convenience method matching `Strategy`.`short`() signature
     fn short(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
         let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
@@ -487,7 +487,7 @@ impl PyBacktestingEngine {
         }
     }
 
-    /// Cover (short close, futures only) — convenience method matching Strategy.cover() signature
+    /// Cover (short close, futures only) — convenience method matching `Strategy`.`cover`() signature
     fn cover(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
         let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
@@ -521,11 +521,11 @@ impl PyBacktestingEngine {
     /// Get instrument metadata for the backtesting symbol.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format (ignored in backtesting,
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format (ignored in backtesting,
     ///                always returns the engine's contract data)
     ///
     /// Returns:
-    ///     PyInstrument if the engine is configured, None otherwise
+    ///     `PyInstrument` if the engine is configured, None otherwise
     fn get_instrument(&self, _vt_symbol: Option<&str>) -> PyResult<Option<PyInstrument>> {
         let contract = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_contract_data();
         Ok(contract.map(|c| PyInstrument::from_contract_data(&c)))
@@ -543,17 +543,17 @@ impl PyBacktestingEngine {
         Ok(())
     }
 
-    /// Write log — matches Strategy.write_log() signature (single msg argument)
+    /// Write log — matches `Strategy`.`write_log`() signature (single msg argument)
     fn write_log(&self, msg: String) {
         println!("[Strategy Log] {msg}");
     }
 
-    /// Send email — matches Strategy.send_email() signature (no-op in backtesting)
+    /// Send email — matches `Strategy`.`send_email`() signature (no-op in backtesting)
     fn send_email(&self, _msg: String) {
         // No-op in backtesting
     }
 
-    /// Cancel order — matches Strategy.cancel_order() signature
+    /// Cancel order — matches `Strategy`.`cancel_order`() signature
     fn cancel_order(&self, vt_orderid: String) {
         self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner).cancel_order(&vt_orderid);
     }
@@ -561,7 +561,7 @@ impl PyBacktestingEngine {
     /// Load bar data from the backtesting engine's cached history.
     ///
     /// Called by Python strategies in `on_init()` to warm up indicators.
-    /// Returns bars for the given vt_symbol within the last `days` days.
+    /// Returns bars for the given `vt_symbol` within the last `days` days.
     #[pyo3(signature = (vt_symbol, days, interval=None, _callback=None, _use_database=false))]
     fn load_bar(
         &self,
@@ -590,7 +590,7 @@ impl PyBacktestingEngine {
 
     /// Load tick data from the backtesting engine's cached history.
     ///
-    /// Returns tick data for the given vt_symbol within the last `days` days.
+    /// Returns tick data for the given `vt_symbol` within the last `days` days.
     /// If tick data is not available in the backtesting engine, returns an empty Vec.
     #[pyo3(signature = (vt_symbol, days, _callback=None, _use_database=false))]
     fn load_tick(
@@ -619,7 +619,7 @@ impl PyBacktestingEngine {
     }
 }
 
-/// Python wrapper for BarData
+/// Python wrapper for `BarData`
 #[pyclass]
 #[derive(Clone)]
 pub struct PyBarData {
@@ -720,7 +720,7 @@ impl PyBarData {
         Ok(())
     }
 
-    /// Support dict-style access: bar["close_price"] → bar.close_price
+    /// Support dict-style access: bar["`close_price`"] `→` `bar`.`close_price`
     /// Many vnpy-style strategies use bar["key"] syntax.
     fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
         match key {
@@ -746,7 +746,7 @@ impl PyBarData {
         }
     }
 
-    /// Support dict-style .get() method: bar.get("close_price", 0.0)
+    /// Support dict-style .`get`() `method:` `bar`.`get`("`close_price`", 0.0)
     fn get(&self, py: Python<'_>, key: &str, default_value: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
         match self.__getitem__(py, key) {
             Ok(val) => Ok(val),
@@ -756,7 +756,7 @@ impl PyBarData {
 }
 
 impl PyBarData {
-    /// Convert a Rust BarData into a PyBarData
+    /// Convert a Rust `BarData` into `a` `PyBarData`
     pub fn from_rust(bar: &BarData) -> Self {
         let exchange_str = bar.exchange.value().to_string();
         let interval_str = bar.interval
@@ -814,7 +814,7 @@ impl PyBarData {
     }
 }
 
-/// Python wrapper for BacktestingStatistics
+/// Python wrapper for `BacktestingStatistics`
 #[pyclass]
 pub struct PyBacktestingStatistics {
     inner: BacktestingStatistics,

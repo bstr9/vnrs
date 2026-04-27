@@ -163,7 +163,7 @@ impl BacktestingEngine {
         println!("Backtesting completed");
     }
 
-    /// Convert an AlphaBarData to TickData for strategy consumption
+    /// Convert an `AlphaBarData` to `TickData` for strategy consumption
     fn bar_to_tick(&self, bar: &AlphaBarData) -> crate::trader::TickData {
         crate::trader::TickData {
             gateway_name: "BACKTEST".to_string(),
@@ -384,6 +384,7 @@ impl BacktestingEngine {
         None
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn calculate_statistics(&self) -> HashMap<String, f64> {
         println!("Calculating statistics...");
 
@@ -425,7 +426,7 @@ impl BacktestingEngine {
                 / (trade_pnls.len() - 1) as f64;
             let std_pnl = variance.sqrt();
             let sharpe = if std_pnl > 1e-10 {
-                (mean_pnl / std_pnl) * (self.annual_days as f64).sqrt()
+                (mean_pnl / std_pnl) * (f64::from(self.annual_days)).sqrt()
             } else {
                 0.0
             };

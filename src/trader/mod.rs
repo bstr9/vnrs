@@ -3,8 +3,8 @@
 //! This module provides the essential components for building a trading platform,
 //! including:
 //!
-//! - **constant**: Trading constants like Direction, Exchange, OrderType, etc.
-//! - **object**: Data structures for TickData, BarData, OrderData, etc.
+//! - **constant**: Trading constants like Direction, Exchange, `OrderType`, etc.
+//! - **object**: Data structures for `TickData`, `BarData,` `OrderData`, etc.
 //! - **event**: Event type definitions for the event-driven architecture
 //! - **gateway**: Abstract gateway trait for exchange connections
 //! - **engine**: Main engine and OMS engine for order management

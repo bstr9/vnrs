@@ -21,12 +21,12 @@ use super::object::{ContractData, OrderRequest};
 /// Automatically updates when contract events arrive from gateways.
 /// Provides price/volume rounding and order validation utilities.
 pub struct ContractManager {
-    /// Contract data cache: vt_symbol -> ContractData
+    /// Contract data cache: `vt_symbol` -`>` `ContractData`
     contracts: RwLock<HashMap<String, ContractData>>,
 }
 
 impl ContractManager {
-    /// Create a new empty ContractManager
+    /// Create a new empty `ContractManager`
     pub fn new() -> Self {
         Self {
             contracts: RwLock::new(HashMap::new()),
@@ -58,7 +58,7 @@ impl ContractManager {
     // Lookup
     // ========================================================================
 
-    /// Get contract data by vt_symbol
+    /// Get contract data by `vt_symbol`
     pub fn get_contract(&self, vt_symbol: &str) -> Option<ContractData> {
         let contracts = self.contracts.read().unwrap_or_else(|e| {
             warn!("ContractManager lock poisoned, recovering");
@@ -122,10 +122,10 @@ impl ContractManager {
         Some(rounded)
     }
 
-    /// Round a volume to the min_volume step for the given symbol.
+    /// Round a volume to the `min_volume` step for the given symbol.
     ///
     /// Returns the rounded volume, or `None` if the symbol is not found
-    /// or the min_volume is zero.
+    /// or the `min_volume` is zero.
     pub fn round_to_volume(&self, vt_symbol: &str, volume: f64) -> Option<f64> {
         let min_vol = self.get_min_volume(vt_symbol)?;
         if min_vol <= 0.0 {
@@ -144,7 +144,7 @@ impl ContractManager {
     /// Checks:
     /// - Contract exists for the symbol
     /// - Price is properly rounded to tick
-    /// - Volume is properly rounded to min_volume step
+    /// - Volume is properly rounded to `min_volume` step
     /// - Volume is within min/max bounds
     ///
     /// Returns `Ok(())` if valid, or `Err(reason)` with a description.
@@ -206,7 +206,7 @@ impl ContractManager {
     /// Auto-correct an order request's price and volume to valid values.
     ///
     /// Rounds price up/down to nearest tick and volume down to nearest
-    /// min_volume step. Returns the corrected request, or `None` if
+    /// `min_volume` step. Returns the corrected request, or `None` if
     /// the symbol has no contract data.
     pub fn correct_order(&self, req: &OrderRequest) -> Option<OrderRequest> {
         let vt_symbol = req.vt_symbol();

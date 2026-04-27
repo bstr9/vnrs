@@ -1,4 +1,4 @@
-//! Advanced Orders Panel — GUI for StopOrderEngine + OrderEmulator.
+//! Advanced Orders Panel — GUI for `StopOrderEngine` `+` `OrderEmulator`.
 //!
 //! Two-tab panel: 止损单 (Stop Orders) and 模拟委托 (Emulated Orders).
 //! Each tab has a form to create orders and a table to view/cancel active orders.
@@ -116,13 +116,13 @@ pub struct AdvancedOrdersPanel {
     stop_orders_cache: Vec<StopOrder>,
     /// Cached emulated orders for display (refreshed each frame).
     emul_orders_cache: Vec<EmulatedOrder>,
-    /// Pending cancel-stop-order action (consumed by MainWindow).
+    /// Pending cancel-stop-order action (consumed by `MainWindow`).
     pending_cancel_stop: Option<u64>,
-    /// Pending cancel-emulated-order action (consumed by MainWindow).
+    /// Pending cancel-emulated-order action (consumed by `MainWindow`).
     pending_cancel_emul: Option<u64>,
-    /// Pending stop order request for MainWindow to execute on the engine.
+    /// Pending stop order request for `MainWindow` to execute on the engine.
     pending_stop_request: Option<StopOrderRequest>,
-    /// Pending emulated order request for MainWindow to execute on the engine.
+    /// Pending emulated order request for `MainWindow` to execute on the engine.
     pending_emul_request: Option<EmulatedOrderRequest>,
 }
 
@@ -147,7 +147,7 @@ impl AdvancedOrdersPanel {
         }
     }
 
-    /// Refresh cached data from engines (call once per frame from MainWindow).
+    /// Refresh cached data from engines (call once per frame from `MainWindow`).
     pub fn refresh_data(
         &mut self,
         stop_engine: Option<&StopOrderEngine>,

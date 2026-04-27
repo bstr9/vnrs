@@ -50,7 +50,7 @@ impl OptimizationSetting {
                 let mut value_list = Vec::new();
                 let mut i = 0;
                 loop {
-                    let value = start + i as f64 * step_val;
+                    let value = start + f64::from(i) * step_val;
                     if value > end_val + 1e-10 {
                         break;
                     }
@@ -198,6 +198,7 @@ impl Individual {
 }
 
 /// Run genetic algorithm optimization
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
 pub fn run_ga_optimization<F, K>(
     evaluate_func: F,
     optimization_setting: &OptimizationSetting,

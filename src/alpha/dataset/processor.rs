@@ -47,6 +47,7 @@ pub fn normalize_zscore(df: &DataFrame, col_name: &str) -> PolarsResult<DataFram
 
 /// Cross-sectional rank normalization
 #[cfg(feature = "alpha")]
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 pub fn normalize_rank(df: &DataFrame, col_name: &str) -> PolarsResult<DataFrame> {
     let series = df.column(col_name)?;
     let ca = series.f64()?;

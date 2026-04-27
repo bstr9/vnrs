@@ -1,4 +1,4 @@
-//! MessageBus — inter-component communication via pub/sub pattern.
+//! `MessageBus` — inter-component communication via pub/sub pattern.
 //!
 //! Allows strategies and engine components to communicate by publishing
 //! messages to named topics. Components subscribe to topics by name;

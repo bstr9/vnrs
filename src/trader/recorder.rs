@@ -1,6 +1,6 @@
-//! DataRecorder engine for automatically recording tick/bar data to database.
+//! `DataRecorder` engine for automatically recording tick/bar data to database.
 //!
-//! Inspired by vn.py's DataRecorder module. Subscribes to market data events
+//! Inspired by vn.py's `DataRecorder` module. Subscribes to market data events
 //! and persists them to a database for backtesting and analysis.
 
 use std::collections::{HashMap, HashSet};
@@ -58,7 +58,7 @@ impl Default for RecorderConfig {
     }
 }
 
-/// DataRecorder engine
+/// `DataRecorder` engine
 ///
 /// Automatically records tick and bar data to a database.
 /// Buffers data in memory and flushes periodically or when batch size is reached.
@@ -69,9 +69,9 @@ pub struct DataRecorder {
     database: Arc<dyn BaseDatabase>,
     /// Configuration
     config: RecorderConfig,
-    /// Active recording symbols for ticks (vt_symbol)
+    /// Active recording symbols for ticks (`vt_symbol`)
     tick_symbols: RwLock<HashSet<String>>,
-    /// Active recording symbols for bars (vt_symbol with interval)
+    /// Active recording symbols for bars (`vt_symbol` with interval)
     bar_symbols: RwLock<HashSet<String>>,
     /// Tick buffer
     tick_buffer: RwLock<Vec<TickData>>,
@@ -97,12 +97,12 @@ pub enum RecorderEvent {
 }
 
 impl DataRecorder {
-    /// Create a new DataRecorder with a database backend
+    /// Create a new `DataRecorder` with a database backend
     pub fn new(database: Arc<dyn BaseDatabase>) -> Self {
         Self::with_config(database, RecorderConfig::default())
     }
 
-    /// Create a new DataRecorder with custom configuration
+    /// Create a new `DataRecorder` with custom configuration
     pub fn with_config(database: Arc<dyn BaseDatabase>, config: RecorderConfig) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         

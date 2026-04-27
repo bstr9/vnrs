@@ -70,7 +70,7 @@ fn ensure_overflow_dir() -> Result<(), String> {
     Ok(())
 }
 
-/// Attempt to send a PersistTask through the bounded channel.
+/// Attempt to send a `PersistTask` through the bounded channel.
 /// On failure (channel full), serialize to the overflow file instead.
 fn persist_with_overflow(
     tx: &mpsc::Sender<PersistTask>,
@@ -121,7 +121,7 @@ fn persist_with_overflow(
 }
 
 /// Read and remove up to `limit` overflow records from the overflow file,
-/// returning them as deserialized PersistTask instances.
+/// returning them as deserialized `PersistTask` instances.
 fn read_overflow_records(limit: usize) -> Vec<PersistTask> {
     let path = overflow_file_path();
     if !path.exists() {
@@ -177,7 +177,7 @@ fn read_overflow_records(limit: usize) -> Vec<PersistTask> {
     tasks
 }
 
-/// Categorise a single PersistTask into typed vectors for batch processing.
+/// Categorise a single `PersistTask` into typed vectors for batch processing.
 fn categorize_persist_task(
     task: PersistTask,
 ) -> (Vec<OrderData>, Vec<TradeData>, Vec<PositionData>, Vec<EventRecord>) {
@@ -246,7 +246,7 @@ pub struct OmsEngine {
 }
 
 impl OmsEngine {
-    /// Create a new OmsEngine
+    /// Create a new `OmsEngine`
     pub fn new() -> Self {
         Self {
             data: RwLock::new(OmsData::new()),
@@ -345,7 +345,7 @@ impl OmsEngine {
         data.quotes.insert(vt_quoteid, quote);
     }
 
-    /// Get latest tick data by vt_symbol
+    /// Get latest tick data by `vt_symbol`
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -354,7 +354,7 @@ impl OmsEngine {
         data.ticks.get(vt_symbol).cloned()
     }
 
-    /// Get latest bar data by vt_symbol
+    /// Get latest bar data by `vt_symbol`
     pub fn get_bar(&self, vt_symbol: &str) -> Option<BarData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -363,7 +363,7 @@ impl OmsEngine {
         data.bars.get(vt_symbol).cloned()
     }
 
-    /// Get latest order data by vt_orderid
+    /// Get latest order data by `vt_orderid`
     pub fn get_order(&self, vt_orderid: &str) -> Option<OrderData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -372,7 +372,7 @@ impl OmsEngine {
         data.orders.get(vt_orderid).cloned()
     }
 
-    /// Get trade data by vt_tradeid
+    /// Get trade data by `vt_tradeid`
     pub fn get_trade(&self, vt_tradeid: &str) -> Option<TradeData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -381,7 +381,7 @@ impl OmsEngine {
         data.trades.get(vt_tradeid).cloned()
     }
 
-    /// Get latest position data by vt_positionid
+    /// Get latest position data by `vt_positionid`
     pub fn get_position(&self, vt_positionid: &str) -> Option<PositionData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -390,7 +390,7 @@ impl OmsEngine {
         data.positions.get(vt_positionid).cloned()
     }
 
-    /// Get latest account data by vt_accountid
+    /// Get latest account data by `vt_accountid`
     pub fn get_account(&self, vt_accountid: &str) -> Option<AccountData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -399,7 +399,7 @@ impl OmsEngine {
         data.accounts.get(vt_accountid).cloned()
     }
 
-    /// Get contract data by vt_symbol
+    /// Get contract data by `vt_symbol`
     pub fn get_contract(&self, vt_symbol: &str) -> Option<ContractData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -408,7 +408,7 @@ impl OmsEngine {
         data.contracts.get(vt_symbol).cloned()
     }
 
-    /// Get latest quote data by vt_quoteid
+    /// Get latest quote data by `vt_quoteid`
     pub fn get_quote(&self, vt_quoteid: &str) -> Option<QuoteData> {
         let data = self.data.read().unwrap_or_else(|e| {
             warn!("OmsEngine lock poisoned, recovering");
@@ -570,7 +570,7 @@ pub struct LogEngine {
 }
 
 impl LogEngine {
-    /// Create a new LogEngine
+    /// Create a new `LogEngine`
     pub fn new() -> Self {
         let active = SETTINGS.get_bool("log.active").unwrap_or(true);
         Self { active }
@@ -663,7 +663,7 @@ pub struct MainEngine {
 }
 
 impl MainEngine {
-    /// Create a new MainEngine without database persistence
+    /// Create a new `MainEngine` without database persistence
     pub fn new() -> Arc<Self> {
         let engine = Self::new_internal(None);
         let arc = Arc::new(engine);
@@ -671,7 +671,7 @@ impl MainEngine {
         arc
     }
 
-    /// Create a new MainEngine with database persistence for event journaling and crash recovery
+    /// Create a new `MainEngine` with database persistence for event journaling and crash recovery
     pub fn new_with_database(database: Arc<dyn BaseDatabase>) -> Arc<Self> {
         let engine = Self::new_internal(Some(database));
         let arc = Arc::new(engine);
@@ -801,9 +801,9 @@ impl MainEngine {
         engine
     }
 
-    /// Wire all sub-engine callbacks to go through MainEngine.send_order()/cancel_order().
+    /// Wire all sub-engine callbacks to go through `MainEngine`.`send_order`()/`cancel_order`().
     ///
-    /// This MUST be called after the MainEngine is wrapped in Arc.
+    /// This MUST be called after the `MainEngine` is wrapped in Arc.
     /// All callback-wired orders go through risk checks and offset conversion.
     pub fn init_callbacks(self: &Arc<Self>) {
         // --- StopOrderEngine callback ---
@@ -1207,7 +1207,7 @@ impl MainEngine {
     }
 
     /// Add a sub-engine for event routing
-    /// The engine will receive all gateway events via its process_event() method
+    /// The engine will receive all gateway events via its `process_event`() method
     pub fn add_engine(&self, engine: Arc<dyn BaseEngine>) {
         let engine_name = engine.engine_name().to_string();
         let mut engines = self.engines.write().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1586,12 +1586,12 @@ impl MainEngine {
         &self.message_bus
     }
 
-    /// Create and register a ReconciliationEngine for this MainEngine.
+    /// Create and register a `ReconciliationEngine` for `this` `MainEngine`.
     ///
-    /// The ReconciliationEngine will auto-trigger reconciliation on gateway
+    /// The `ReconciliationEngine` will auto-trigger reconciliation on gateway
     /// reconnect events and can be used to manually sync local vs venue state.
     ///
-    /// Returns the created ReconciliationEngine, already registered as a sub-engine.
+    /// Returns the created `ReconciliationEngine`, already registered as a sub-engine.
     pub fn add_reconciliation_engine(self: &Arc<Self>) -> Arc<ReconciliationEngine> {
         let recon = Arc::new(ReconciliationEngine::new(self.clone()));
         self.add_engine(recon.clone());
@@ -1600,7 +1600,7 @@ impl MainEngine {
         recon
     }
 
-    /// Get the ReconciliationEngine if one has been added
+    /// Get the `ReconciliationEngine` if one has been added
     pub fn reconciliation_engine(&self) -> Option<Arc<ReconciliationEngine>> {
         self.reconciliation_engine.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
@@ -1620,16 +1620,16 @@ impl MainEngine {
         Ok(())
     }
 
-    /// Add a DataEngine for centralized subscription management and tick→bar aggregation
+    /// Add a `DataEngine` for centralized subscription management and tick→bar aggregation
     ///
-    /// The DataEngine will:
+    /// The `DataEngine` will:
     /// - De-duplicate gateway subscriptions when multiple strategies subscribe to same symbol
     /// - Aggregate ticks into 1-minute bars centrally
     /// - Synthesize higher-timeframe bars (5m/15m/1h/4h/1d) from 1m bars
-    /// - Emit bar events into the event stream for StrategyEngine consumption
+    /// - Emit bar events into the event stream for `StrategyEngine` consumption
     ///
     /// # Returns
-    /// The created DataEngine, already registered as a sub-engine
+    /// The created `DataEngine`, already registered as a sub-engine
     pub fn add_data_engine(self: &Arc<Self>) -> Arc<DataEngine> {
         let data_engine = Arc::new(DataEngine::new(self.event_tx.clone()));
         self.add_engine(data_engine.clone());
@@ -1638,22 +1638,22 @@ impl MainEngine {
         data_engine
     }
 
-    /// Get the DataEngine if one has been added
+    /// Get the `DataEngine` if one has been added
     pub fn data_engine(&self) -> Option<Arc<DataEngine>> {
         self.data_engine.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    /// Set the StrategyEngine reference for strategy control RPC functions
+    /// Set the `StrategyEngine` reference for strategy control RPC functions
     pub fn set_strategy_engine(&self, engine: Arc<StrategyEngine>) {
         *self.strategy_engine.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(engine);
     }
 
-    /// Get the StrategyEngine if one has been set
+    /// Get the `StrategyEngine` if one has been set
     pub fn strategy_engine(&self) -> Option<Arc<StrategyEngine>> {
         self.strategy_engine.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    /// Start a strategy by name (delegates to StrategyEngine)
+    /// Start a strategy by name (delegates to `StrategyEngine`)
     pub async fn start_strategy(&self, strategy_name: &str) -> Result<(), String> {
         match self.strategy_engine() {
             Some(se) => se.start_strategy(strategy_name),
@@ -1661,7 +1661,7 @@ impl MainEngine {
         }
     }
 
-    /// Stop a strategy by name (delegates to StrategyEngine)
+    /// Stop a strategy by name (delegates to `StrategyEngine`)
     pub async fn stop_strategy(&self, strategy_name: &str) -> Result<(), String> {
         match self.strategy_engine() {
             Some(se) => se.stop_strategy(strategy_name).await,
@@ -1669,7 +1669,7 @@ impl MainEngine {
         }
     }
 
-    /// Reset a strategy by name (delegates to StrategyEngine)
+    /// Reset a strategy by name (delegates to `StrategyEngine`)
     ///
     /// Clears strategy state and returns it to the Initialized state.
     /// The strategy can then be started again with `start_strategy()`.
@@ -1680,7 +1680,7 @@ impl MainEngine {
         }
     }
 
-    /// Restart a strategy by name (delegates to StrategyEngine)
+    /// Restart a strategy by name (delegates to `StrategyEngine`)
     ///
     /// Performs a full stop → init → start cycle.
     pub async fn restart_strategy(&self, strategy_name: &str) -> Result<(), String> {
@@ -1810,7 +1810,7 @@ impl MainEngine {
         self.event_tx.clone()
     }
 
-    /// Subscribe to MainEngine events for external consumers (e.g., RPC event broadcasting).
+    /// Subscribe to `MainEngine` events for external consumers (e.g., RPC event broadcasting).
     ///
     /// Returns a `broadcast::Receiver` that yields `(event_type, GatewayEvent)` tuples.
     /// The receiver capacity is 4096; slow consumers will miss messages on overflow
@@ -1822,9 +1822,9 @@ impl MainEngine {
     /// Restore engine state from database after crash (#11)
     ///
     /// Loads orders, trades, and positions from the database and re-populates
-    /// OmsEngine's in-memory state. Must be called before `start()`.
+    /// `OmsEngine`'s in-memory state. Must be called before `start()`.
     ///
-    /// **Important**: This only populates OmsEngine. It does NOT re-emit events
+    /// **Important**: This only populates `OmsEngine`. It does NOT re-emit events
     /// to sub-engines (strategy engine, etc.) to avoid side effects. Active orders
     /// should be reconciled against the exchange on gateway reconnect.
     pub async fn restore(&self) -> Result<(), String> {
@@ -1863,7 +1863,7 @@ impl MainEngine {
     // DataRecorder management
     // ========================================================================
 
-    /// Add a DataRecorder with default configuration
+    /// Add a `DataRecorder` with default configuration
     ///
     /// The recorder will automatically receive tick/bar events from all gateways
     /// and persist them to the database. Call `start_recorder()` after `start()`.
@@ -1872,19 +1872,19 @@ impl MainEngine {
     /// * `database` - Database backend for persisting recorded data
     ///
     /// # Returns
-    /// The created DataRecorder, already registered as a sub-engine
+    /// The created `DataRecorder`, already registered as a sub-engine
     pub fn add_recorder(&self, database: Arc<dyn BaseDatabase>) -> Arc<DataRecorder> {
         self.add_recorder_with_config(database, RecorderConfig::default())
     }
 
-    /// Add a DataRecorder with custom configuration
+    /// Add a `DataRecorder` with custom configuration
     ///
     /// # Arguments
     /// * `database` - Database backend for persisting recorded data
     /// * `config` - Recorder configuration (flush interval, batch size, etc.)
     ///
     /// # Returns
-    /// The created DataRecorder, already registered as a sub-engine
+    /// The created `DataRecorder`, already registered as a sub-engine
     pub fn add_recorder_with_config(
         &self,
         database: Arc<dyn BaseDatabase>,
@@ -1902,12 +1902,12 @@ impl MainEngine {
         recorder
     }
 
-    /// Get the DataRecorder if one has been added
+    /// Get the `DataRecorder` if one has been added
     pub fn get_recorder(&self) -> Option<Arc<DataRecorder>> {
         self.recorder.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    /// Start the DataRecorder event loop in a background task
+    /// Start the `DataRecorder` event loop in a background task
     ///
     /// This should be called after `start()` to begin recording tick/bar data.
     /// The recorder will spawn its own async task that runs until `close()` is called.
@@ -1970,9 +1970,9 @@ impl MainEngine {
     /// Get persistence statistics for monitoring
     ///
     /// Returns a tuple of:
-    /// - total_sent: Number of records successfully sent through the channel
-    /// - total_overflowed: Number of records that overflowed to file
-    /// - overflow_file_size: Current size of the overflow file in bytes (0 if none)
+    /// - `total_sent`: Number of records successfully sent through the channel
+    /// - `total_overflowed`: Number of records that overflowed to file
+    /// - `overflow_file_size`: Current size of the overflow file in bytes (0 if none)
     pub fn get_persist_stats(&self) -> (u64, u64, u64) {
         let sent = self.persist_sent_count.load(Ordering::Relaxed);
         let overflowed = self.persist_overflowed_count.load(Ordering::Relaxed);
@@ -1987,7 +1987,7 @@ impl MainEngine {
     /// Shutdown order is critical to prevent event loss:
     /// 1. Close gateways first (stops new events from being generated)
     /// 2. Wait briefly for in-flight events to be queued
-    /// 3. Set running=false (allows start() loop to exit and drain remaining events)
+    /// 3. Set running=false (allows `start`() loop to exit and drain remaining events)
     /// 4. Close sub-engines
     pub async fn close(&self) {
         // 1. Close all gateways FIRST — stops WebSocket streams and prevents new events
@@ -2131,7 +2131,7 @@ mod tests {
     }
 }
 
-/// Implement OrderExecutor for MainEngine so AlgoEngine can send child orders
+/// Implement `OrderExecutor` for `MainEngine so` `AlgoEngine` can send child orders
 #[async_trait::async_trait]
 impl super::algo::OrderExecutor for MainEngine {
     async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String> {

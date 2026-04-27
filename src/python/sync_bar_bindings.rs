@@ -1,4 +1,4 @@
-//! PyO3 bindings for SynchronizedBarGenerator.
+//! `PyO3` bindings for `SynchronizedBarGenerator`.
 //!
 //! Exposes the multi-symbol bar synchronizer to Python strategies.
 
@@ -37,13 +37,13 @@ impl PySynchronizedBars {
         &self.datetime
     }
 
-    /// List of vt_symbols present in this synchronized batch.
+    /// List of `vt_symbols` present in this synchronized batch.
     #[getter]
     fn symbols(&self) -> Vec<String> {
         self.bars.iter().map(|(s, _)| s.clone()).collect()
     }
 
-    /// Get bar data for a specific vt_symbol as a dict, or None.
+    /// Get bar data for a specific `vt_symbol` as a dict, or None.
     fn get_bar(&self, vt_symbol: &str, py: Python) -> Option<Py<PyDict>> {
         self.bars
             .iter()
@@ -51,7 +51,7 @@ impl PySynchronizedBars {
             .map(|(_, bar)| bar.to_py_dict(py))
     }
 
-    /// All bars as a dict of vt_symbol -> bar dict.
+    /// All bars as a dict of `vt_symbol` -> bar dict.
     fn to_dict(&self, py: Python) -> PyResult<Py<PyDict>> {
         let dict = PyDict::new(py);
         for (sym, bar) in &self.bars {
@@ -150,10 +150,10 @@ pub struct PySyncBarGenerator {
 
 #[pymethods]
 impl PySyncBarGenerator {
-    /// Create a new generator for the given list of vt_symbols.
+    /// Create a new generator for the given list of `vt_symbols`.
     ///
     /// Args:
-    ///     vt_symbols: List of symbol identifiers (e.g. ["BTCUSDT.BINANCE", "ETHUSDT.BINANCE"])
+    ///     `vt_symbols`: List of symbol identifiers (e.g. ["BTCUSDT.BINANCE", "ETHUSDT.BINANCE"])
     #[new]
     fn new(vt_symbols: Vec<String>) -> Self {
         Self {
@@ -173,13 +173,13 @@ impl PySyncBarGenerator {
             SynchronizedBarGenerator::new(symbols.clone());
     }
 
-    /// Feed a bar for a given vt_symbol.
+    /// Feed a bar for a given `vt_symbol`.
     ///
-    /// Returns a SyncBarEvent when all registered symbols have a bar
+    /// Returns a `SyncBarEvent` when all registered symbols have a bar
     /// for the same timestamp, or None if still waiting.
     ///
     /// Args:
-    ///     vt_symbol: Symbol identifier (must be registered)
+    ///     `vt_symbol`: Symbol identifier (must be registered)
     ///     bar: Dict with keys: datetime, open, high, low, close, volume
     fn update_bar(
         &self,
@@ -193,7 +193,7 @@ impl PySyncBarGenerator {
         Ok(result.map(|sync| PySynchronizedBars::from_rust(sync, py)))
     }
 
-    /// Alias for update_bar — accepts tick-like dict data.
+    /// Alias for `update_bar` — accepts tick-like dict data.
     fn update_tick(
         &self,
         vt_symbol: &str,
@@ -221,7 +221,7 @@ impl PySyncBarGenerator {
         self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
     }
 
-    /// List of registered vt_symbols.
+    /// List of registered `vt_symbols`.
     #[getter]
     fn vt_symbols(&self) -> Vec<String> {
         self.vt_symbols
@@ -310,7 +310,7 @@ fn dict_to_bar(vt_symbol: &str, dict: &Bound<'_, PyDict>) -> PyResult<BarData> {
 // Registration helper (called from bindings.rs)
 // ---------------------------------------------------------------------------
 
-/// Register PySyncBarGenerator and PySynchronizedBars with the PyO3 module.
+/// Register `PySyncBarGenerator` and `PySynchronizedBars` with the `PyO3` module.
 pub fn register_sync_bar_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySyncBarGenerator>()?;
     m.add_class::<PySynchronizedBars>()?;

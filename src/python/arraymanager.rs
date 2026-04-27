@@ -1,4 +1,4 @@
-//! PyO3 bindings for ArrayManager — technical indicator calculator.
+//! `PyO3` bindings for `ArrayManager` — technical indicator calculator.
 //!
 //! Exposes 25+ indicators (SMA, EMA, MACD, RSI, ATR, Bollinger, KDJ, CCI,
 //! OBV, ADX, Aroon, Stochastic, Donchian, Keltner, SAR, etc.) to Python
@@ -31,7 +31,7 @@ pub struct PyArrayManager {
 
 #[pymethods]
 impl PyArrayManager {
-    /// Create a new ArrayManager with the given window size.
+    /// Create a new `ArrayManager` with the given window size.
     ///
     /// Args:
     ///     size: Number of bars to keep in the rolling window (default 100).
@@ -76,7 +76,7 @@ impl PyArrayManager {
         self.inner.update_bar(&bar);
     }
 
-    /// Whether the ArrayManager has received enough bars to fill its window.
+    /// Whether the `ArrayManager` has received enough bars to fill its window.
     #[getter]
     fn inited(&self) -> bool {
         self.inner.is_inited()
@@ -249,7 +249,7 @@ impl PyArrayManager {
     ///     signal: Signal EMA period (default 9)
     ///
     /// Returns:
-    ///     Tuple of (macd_line, signal_line, histogram).
+    ///     Tuple of (`macd_line`, `signal_line`, histogram).
     #[pyo3(signature = (fast=12, slow=26, signal=9))]
     fn macd(&self, fast: usize, slow: usize, signal: usize) -> (f64, f64, f64) {
         self.inner.macd(fast, slow, signal)
@@ -258,7 +258,7 @@ impl PyArrayManager {
     /// MACD arrays.
     ///
     /// Returns:
-    ///     Tuple of (macd_array, signal_array, histogram_array).
+    ///     Tuple of (`macd_array`, `signal_array,` `histogram_array`).
     #[pyo3(signature = (fast=12, slow=26, signal=9))]
     fn macd_array(&self, fast: usize, slow: usize, signal: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         self.inner.macd_array(fast, slow, signal)
@@ -295,7 +295,7 @@ impl PyArrayManager {
     /// Bollinger Bands arrays.
     ///
     /// Returns:
-    ///     Tuple of (upper_array, middle_array, lower_array).
+    ///     Tuple of (`upper_array`, `middle_array,` `lower_array`).
     #[pyo3(signature = (n=20, dev=2.0))]
     fn boll_array(&self, n: usize, dev: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         self.inner.boll_array(n, dev)
@@ -349,8 +349,8 @@ impl PyArrayManager {
     /// Slow Stochastic Oscillator (smoothed %K).
     ///
     /// Args:
-    ///     stochastic_period: Raw %K period.
-    ///     ema_period:        Smoothing period.
+    ///     `stochastic_period`: Raw %K period.
+    ///     `ema_period`:        Smoothing period.
     fn stoch_slow(&self, stochastic_period: usize, ema_period: usize) -> f64 {
         self.inner.stoch_slow(stochastic_period, ema_period)
     }
@@ -358,8 +358,8 @@ impl PyArrayManager {
     /// Full Stochastic Oscillator.
     ///
     /// Args:
-    ///     k_period: %K look-back period.
-    ///     d_period: %D smoothing period.
+    ///     `k_period`: %K look-back period.
+    ///     `d_period`: %D smoothing period.
     ///
     /// Returns:
     ///     Tuple of (%K, %D).
@@ -461,7 +461,7 @@ impl PyArrayManager {
     ///     n: Look-back period.
     ///
     /// Returns:
-    ///     Tuple of (aroon_up, aroon_down).
+    ///     Tuple of (`aroon_up`, `aroon_down`).
     fn aroon(&self, n: usize) -> (f64, f64) {
         self.inner.aroon(n)
     }
@@ -495,7 +495,7 @@ impl PyArrayManager {
     }
 }
 
-/// Register the ArrayManager submodule with the parent trade_engine module.
+/// Register the `ArrayManager` submodule with the `parent` `trade_engine` module.
 pub fn register_arraymanager_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyArrayManager>()?;
     Ok(())

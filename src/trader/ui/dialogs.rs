@@ -177,7 +177,7 @@ impl ConnectDialog {
             });
     }
 
-    /// Get settings as JSON-compatible HashMap
+    /// Get settings as JSON-compatible `HashMap`
     pub fn get_settings(&self) -> HashMap<String, serde_json::Value> {
         let mut result = HashMap::new();
 
@@ -365,7 +365,7 @@ impl GlobalSettingsDialog {
             });
     }
 
-    /// Get settings as JSON-compatible HashMap
+    /// Get settings as JSON-compatible `HashMap`
     pub fn get_settings(&self) -> HashMap<String, serde_json::Value> {
         self.settings
             .iter()

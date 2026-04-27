@@ -22,7 +22,7 @@ pub struct JournalEntry {
     pub event_type: String,
     /// Serialized event payload
     pub payload: Vec<u8>,
-    /// CRC32 checksum of (timestamp + sequence + event_type + payload)
+    /// CRC32 checksum of (timestamp + sequence + `event_type` + payload)
     pub checksum: u32,
 }
 
@@ -48,7 +48,8 @@ impl Ord for EntryOrd {
 /// Computes CRC32 checksum over the journal entry components.
 ///
 /// Checksum covers: timestamp (8 bytes LE) + sequence (8 bytes LE) +
-/// event_type length (4 bytes LE) + event_type bytes + payload.
+/// `event_type` length (4 bytes LE) `+` `event_type` bytes + payload.
+#[allow(clippy::cast_possible_truncation)] // value fits in target type
 fn compute_checksum(timestamp: i64, sequence: u64, event_type: &str, payload: &[u8]) -> u32 {
     let mut hasher = Hasher::new();
     hasher.update(&timestamp.to_le_bytes());
@@ -105,7 +106,7 @@ impl EventJournal {
 
     /// Append an event to the journal with the current timestamp and auto-incremented sequence.
     ///
-    /// The event is serialized as: event_type string bytes (no Arc<dyn Any> payload
+    /// The event is serialized as: `event_type` string bytes (no Arc<dyn Any> payload
     /// since it's not serializable). The payload field is left empty for events
     /// without serializable data.
     pub fn append(&mut self, event: &Event) -> Result<(), String> {
@@ -122,7 +123,7 @@ impl EventJournal {
         self.write_entry(timestamp, sequence, &event.event_type, &payload, checksum)
     }
 
-    /// Append a pre-built JournalEntry (for replay/restore scenarios).
+    /// Append a pre-built `JournalEntry` (for replay/restore scenarios).
     pub fn append_entry(&mut self, entry: &JournalEntry) -> Result<(), String> {
         // Verify checksum before writing
         let computed = compute_checksum(entry.timestamp, entry.sequence, &entry.event_type, &entry.payload);
@@ -143,6 +144,7 @@ impl EventJournal {
     }
 
     /// Low-level write of a journal entry to the file.
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn write_entry(
         &mut self,
         timestamp: i64,
@@ -210,7 +212,7 @@ impl EventJournal {
         Ok(entries)
     }
 
-    /// Replay all journal entries into an EventEngine in timestamp order.
+    /// Replay all journal entries into an `EventEngine` in timestamp order.
     ///
     /// Returns the number of events replayed.
     pub fn replay(&self, engine: &EventEngine) -> Result<usize, String> {

@@ -1,8 +1,8 @@
 //! Binance exchange gateway implementations.
 //!
 //! Supports:
-//! - Spot trading (BinanceSpotGateway)
-//! - USDT-M Futures trading (BinanceUsdtGateway)
+//! - Spot trading (`BinanceSpotGateway`)
+//! - USDT-M Futures trading (`BinanceUsdtGateway`)
 
 mod config;
 mod constants;

@@ -48,7 +48,7 @@ macro_rules! get_required {
     };
 }
 
-/// Convert Rust BarData to Python dict
+/// Convert Rust `BarData` to Python dict
 pub fn bar_to_py<'py>(py: Python<'py>, bar: &BarData) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
     dict.set_item("symbol", &bar.symbol)?;
@@ -70,7 +70,7 @@ pub fn bar_to_py<'py>(py: Python<'py>, bar: &BarData) -> PyResult<Bound<'py, PyD
     Ok(dict)
 }
 
-/// Convert Python dict to Rust BarData
+/// Convert Python dict to Rust `BarData`
 pub fn py_to_bar(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<BarData> {
     let symbol: String = get_required!(py_dict, "symbol", String);
     let datetime_str: String = get_required!(py_dict, "datetime", String);
@@ -113,7 +113,7 @@ pub fn py_to_bar(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<BarData> 
     })
 }
 
-/// Convert vector of BarData to Polars DataFrame representation
+/// Convert vector of `BarData` to `Polars` `DataFrame` representation
 #[cfg(feature = "alpha")]
 pub fn bars_to_arrow(bars: &[BarData]) -> Result<DataFrame, Box<dyn std::error::Error>> {
     let mut symbols = Vec::new();
@@ -166,7 +166,7 @@ pub fn bars_to_arrow(bars: &[BarData]) -> Result<DataFrame, Box<dyn std::error::
     Ok(df)
 }
 
-/// Convert Polars DataFrame to vector of BarData
+/// Convert Polars `DataFrame` to vector of `BarData`
 #[cfg(feature = "alpha")]
 pub fn arrow_to_bars(df: &DataFrame) -> Result<Vec<BarData>, Box<dyn std::error::Error>> {
     let mut bars = Vec::new();
@@ -226,7 +226,7 @@ pub fn arrow_to_bars(df: &DataFrame) -> Result<Vec<BarData>, Box<dyn std::error:
     Ok(bars)
 }
 
-/// Convert Rust TickData to Python PyTickData
+/// Convert Rust `TickData` to `Python` `PyTickData`
 pub fn tick_to_py(py: Python, tick: &TickData) -> PyResult<Py<crate::python::data_types::PyTickData>> {
     let py_tick = crate::python::data_types::PyTickData::from_rust(tick);
     Py::new(py, py_tick)
@@ -271,7 +271,7 @@ fn get_optional<T: for<'a, 'py> pyo3::FromPyObject<'a, 'py>>(dict: &Bound<'_, Py
     dict.get_item(key).ok().flatten().and_then(|v| v.extract::<T>().ok())
 }
 
-/// Convert Python dict to Rust TickData
+/// Convert Python dict to Rust `TickData`
 pub fn py_to_tick(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<TickData> {
     let symbol: String = get_required!(py_dict, "symbol", String);
     let datetime_str: String = get_required!(py_dict, "datetime", String);
@@ -328,7 +328,7 @@ pub fn py_to_tick(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<TickData
     })
 }
 
-/// Convert Python dict to Rust OrderData
+/// Convert Python dict to Rust `OrderData`
 pub fn py_to_order(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::trader::OrderData> {
     let symbol: String = get_required!(py_dict, "symbol", String);
     let orderid: String = get_required!(py_dict, "orderid", String);
@@ -375,7 +375,7 @@ pub fn py_to_order(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::
     })
 }
 
-/// Convert Python dict to Rust TradeData
+/// Convert Python dict to Rust `TradeData`
 pub fn py_to_trade(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::trader::TradeData> {
     let symbol: String = get_required!(py_dict, "symbol", String);
     let orderid: String = get_required!(py_dict, "orderid", String);

@@ -28,7 +28,7 @@ pub struct TradingSession {
     pub open_time: NaiveTime,
     /// Session close time (local time)
     pub close_time: NaiveTime,
-    /// Whether this session crosses midnight (close_time < open_time)
+    /// Whether this session crosses midnight (`close_time` `<` `open_time`)
     pub is_overnight: bool,
 }
 
@@ -57,6 +57,7 @@ impl TradingSession {
     }
     
     /// Get remaining time until session close
+    #[allow(clippy::cast_lossless)] // lossless cast kept as-is
     pub fn remaining_time(&self, now: NaiveTime) -> Option<Duration> {
         if !self.contains_time(now) {
             return None;
@@ -72,12 +73,12 @@ impl TradingSession {
             } else {
                 // Before close_time
                 let secs = self.close_time.num_seconds_from_midnight() - now.num_seconds_from_midnight();
-                Some(Duration::seconds(secs as i64))
+                Some(Duration::seconds(i64::from(secs)))
             }
         } else {
             let secs = self.close_time.num_seconds_from_midnight() - now.num_seconds_from_midnight();
             if secs > 0 {
-                Some(Duration::seconds(secs as i64))
+                Some(Duration::seconds(i64::from(secs)))
             } else {
                 None
             }
@@ -96,7 +97,7 @@ pub struct TradingSessionManager {
 }
 
 impl TradingSessionManager {
-    /// Create a new TradingSessionManager with pre-defined sessions
+    /// Create a new `TradingSessionManager` with pre-defined sessions
     pub fn new() -> Self {
         let mut sessions: HashMap<Exchange, Vec<TradingSession>> = HashMap::new();
         

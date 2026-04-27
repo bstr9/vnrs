@@ -181,19 +181,19 @@ impl Default for VwapConfig {
 /// Callback when algo order state changes
 pub type AlgoCallback = Box<dyn Fn(&AlgoOrderState) + Send + Sync>;
 
-/// Order executor trait - abstracts MainEngine's send_order
+/// Order executor trait - abstracts `MainEngine`'`s` `send_order`
 #[async_trait]
 pub trait OrderExecutor: Send + Sync {
-    /// Send a child order, returns vt_orderid or error
+    /// Send a child order, returns `vt_orderid` or error
     async fn send_order(&self, req: OrderRequest, gateway_name: &str) -> Result<String, String>;
 }
 
 /// Algo Engine - manages algorithmic order execution
 pub struct AlgoEngine {
     name: String,
-    /// Active algo orders by algo_id
+    /// Active algo orders by `algo_id`
     algo_orders: Arc<RwLock<HashMap<AlgoId, AlgoOrderState>>>,
-    /// Map from vt_orderid to algo_id for routing trade/order events
+    /// Map from `vt_orderid` to `algo_id` for routing trade/order events
     orderid_to_algo: Arc<RwLock<HashMap<String, AlgoId>>>,
     /// Next algo ID
     next_algo_id: AtomicU64,
@@ -201,12 +201,12 @@ pub struct AlgoEngine {
     running: AtomicBool,
     /// Callbacks for algo state changes
     callbacks: Arc<RwLock<Vec<AlgoCallback>>>,
-    /// Order executor (set after MainEngine is available)
+    /// Order executor (set after `MainEngine` is available)
     executor: Arc<RwLock<Option<Arc<dyn OrderExecutor>>>>,
 }
 
 impl AlgoEngine {
-    /// Create a new AlgoEngine
+    /// Create a new `AlgoEngine`
     pub fn new() -> Self {
         Self {
             name: "AlgoEngine".to_string(),
@@ -219,7 +219,7 @@ impl AlgoEngine {
         }
     }
 
-    /// Set the order executor (called by MainEngine after initialization)
+    /// Set the order executor (called by `MainEngine` after initialization)
     pub fn set_executor(&self, executor: Arc<dyn OrderExecutor>) {
         let mut exec = self.executor.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *exec = Some(executor);
@@ -377,6 +377,7 @@ impl AlgoEngine {
         Ok(algo_id)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn spawn_twap_task(&self, state: AlgoOrderState, config: TwapConfig) {
         let algo_id = state.algo_id;
         let slice_volume = state.total_volume / config.slice_count as f64;
@@ -472,6 +473,7 @@ impl AlgoEngine {
         });
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn spawn_vwap_task(&self, state: AlgoOrderState, config: VwapConfig) {
         let algo_id = state.algo_id;
         let interval = Duration::from_secs(config.interval_secs);

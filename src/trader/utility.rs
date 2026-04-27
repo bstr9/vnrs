@@ -22,7 +22,7 @@ use ta::{Close, High, Low, Next, Open, Volume};
 use super::constant::{Exchange, Interval};
 use super::object::{BarData, TickData};
 
-/// Extract symbol and exchange from vt_symbol
+/// Extract symbol and exchange from `vt_symbol`
 pub fn extract_vt_symbol(vt_symbol: &str) -> Option<(String, Exchange)> {
     let parts: Vec<&str> = vt_symbol.rsplitn(2, '.').collect();
     if parts.len() != 2 {
@@ -56,7 +56,7 @@ pub fn extract_vt_symbol(vt_symbol: &str) -> Option<(String, Exchange)> {
     Some((symbol, exchange))
 }
 
-/// Generate vt_symbol from symbol and exchange
+/// Generate `vt_symbol` from symbol and exchange
 pub fn generate_vt_symbol(symbol: &str, exchange: Exchange) -> String {
     format!("{}.{}", symbol, exchange.value())
 }
@@ -228,7 +228,7 @@ where
     F: FnMut(BarData),
     W: FnMut(BarData),
 {
-    /// Create a new BarGenerator
+    /// Create a new `BarGenerator`
     pub fn new(on_bar: F, window: i32, on_window_bar: Option<W>, interval: Interval) -> Self {
         Self {
             bar: None,
@@ -313,7 +313,7 @@ where
         self.last_tick = Some(tick);
     }
 
-    /// Update with a completed bar (e.g., from another BarGenerator's on_bar callback).
+    /// Update with a completed bar (e.g., from another `BarGenerator`'`s` `on_bar` callback).
     /// This is the primary method for multi-period bar synthesis.
     /// When `window` bars have been accumulated, fires `on_window_bar`.
     pub fn update_bar(&mut self, bar: BarData) {
@@ -430,7 +430,7 @@ impl Volume for BarDataItem {
 }
 
 impl ArrayManager {
-    /// Create a new ArrayManager
+    /// Create a new `ArrayManager`
     pub fn new(size: usize) -> Self {
         Self {
             count: 0,
@@ -513,7 +513,7 @@ impl ArrayManager {
         &self.open_interest_array
     }
 
-    /// Create DataItem for ta-rs from index
+    /// Create `DataItem` for ta-rs from index
     fn get_data_item(&self, i: usize) -> BarDataItem {
         BarDataItem {
             open: self.open_array[i],
@@ -749,7 +749,7 @@ impl ArrayManager {
         (result.macd, result.signal, result.histogram)
     }
 
-    /// MACD - returns arrays (macd_array, signal_array, histogram_array)
+    /// MACD - returns arrays (`macd_array`, `signal_array,` `histogram_array`)
     pub fn macd_array(
         &self,
         fast: usize,
@@ -1237,6 +1237,7 @@ impl ArrayManager {
     }
 
     /// Wilder's smoothing method (used for ADX/DI calculations)
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn wilder_smooth(data: &[f64], n: usize) -> Vec<f64> {
         if data.len() < n {
             return vec![];
@@ -1325,7 +1326,8 @@ impl ArrayManager {
     // ==================== Aroon Indicator ====================
 
     /// Aroon Indicator
-    /// Returns (aroon_up, aroon_down)
+    /// Returns (`aroon_up`, `aroon_down`)
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn aroon(&self, n: usize) -> (f64, f64) {
         if n > self.size || n == 0 {
             return (0.0, 0.0);

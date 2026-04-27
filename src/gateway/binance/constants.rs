@@ -102,7 +102,7 @@ pub static STATUS_BINANCE2VT: Lazy<HashMap<&'static str, Status>> = Lazy::new(||
 
 /// Map VT order type to Binance order type (Spot)
 /// Fak (Fill-and-Kill) and Fok (Fill-or-Kill) map to LIMIT with timeInForce set in gateway
-/// StopLimit maps to STOP (Binance Spot STOP = stop-limit with stopPrice + price)
+/// `StopLimit` maps to STOP (Binance Spot STOP = stop-limit with stopPrice + price)
 pub static ORDERTYPE_VT2BINANCE: Lazy<HashMap<OrderType, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::new();
     m.insert(OrderType::Limit, "LIMIT");
@@ -117,8 +117,8 @@ pub static ORDERTYPE_VT2BINANCE: Lazy<HashMap<OrderType, &'static str>> = Lazy::
 
 /// Map Binance order type to VT order type (Spot)
 /// STOP on Binance Spot = stop-limit (requires stopPrice + price)
-/// STOP_LOSS on Binance Spot = stop market (requires stopPrice only)
-/// TAKE_PROFIT on Binance Spot = take-profit limit (requires stopPrice + price)
+/// `STOP_LOSS` on Binance Spot = stop market (requires stopPrice only)
+/// `TAKE_PROFIT` on Binance Spot = take-profit limit (requires stopPrice + price)
 pub static ORDERTYPE_BINANCE2VT: Lazy<HashMap<&'static str, OrderType>> = Lazy::new(|| {
     let mut m = HashMap::new();
     m.insert("LIMIT", OrderType::Limit);
@@ -131,7 +131,7 @@ pub static ORDERTYPE_BINANCE2VT: Lazy<HashMap<&'static str, OrderType>> = Lazy::
 
 /// Map Binance order type with time-in-force to VT order type (Spot)
 /// Used to disambiguate LIMIT orders by their timeInForce value.
-/// For example, LIMIT+GTD maps to OrderType::Gtd, while LIMIT+GTC maps to OrderType::Limit.
+/// For example, LIMIT+GTD maps to `OrderType::Gtd`, while LIMIT+GTC maps to `OrderType::Limit`.
 pub static ORDERTYPE_BINANCE2VT_TIF: Lazy<HashMap<(&'static str, &'static str), OrderType>> =
     Lazy::new(|| {
         let mut m = HashMap::new();
@@ -140,8 +140,8 @@ pub static ORDERTYPE_BINANCE2VT_TIF: Lazy<HashMap<(&'static str, &'static str), 
     });
 
 /// Map VT order type to Binance order type with time-in-force (Futures)
-/// Stop → STOP_MARKET (stop market order on futures)
-/// StopLimit → STOP (stop-limit order on futures, requires stopPrice + price)
+/// Stop → `STOP_MARKET` (stop market order on futures)
+/// `StopLimit` → STOP (stop-limit order on futures, requires stopPrice + price)
 pub static ORDERTYPE_VT2BINANCE_FUTURES: Lazy<HashMap<OrderType, (&'static str, &'static str)>> =
     Lazy::new(|| {
         let mut m = HashMap::new();
@@ -156,7 +156,7 @@ pub static ORDERTYPE_VT2BINANCE_FUTURES: Lazy<HashMap<OrderType, (&'static str, 
     });
 
 /// Map Binance order type with time-in-force to VT order type (Futures)
-/// STOP = stop-limit, STOP_MARKET = stop market, TAKE_PROFIT = take-profit limit
+/// STOP = stop-limit, `STOP_MARKET` = stop `market,` `TAKE_PROFIT` = take-profit limit
 pub static ORDERTYPE_BINANCE2VT_FUTURES: Lazy<HashMap<(&'static str, &'static str), OrderType>> =
     Lazy::new(|| {
         let mut m = HashMap::new();

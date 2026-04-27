@@ -329,7 +329,7 @@ impl AsyncStrategyEngine {
         strategies.keys().cloned().collect()
     }
 
-    /// Get a reference to the MainEngine (for external order routing).
+    /// Get a reference to the `MainEngine` (for external order routing).
     pub fn main_engine(&self) -> &Arc<MainEngine> {
         &self.main_engine
     }
@@ -338,7 +338,7 @@ impl AsyncStrategyEngine {
     // Order forwarding helper
     // -----------------------------------------------------------------------
 
-    /// Forward collected orders to MainEngine.
+    /// Forward collected orders to `MainEngine`.
     ///
     /// This is a convenience method that takes the output of `on_bar` / `on_tick`
     /// and routes each `OrderRequest` through `MainEngine::send_order`.

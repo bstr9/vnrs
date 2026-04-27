@@ -1,8 +1,8 @@
 //! MCP Resources 实现
 //!
-//! 实现 ServerHandler 的 list_resources 和 read_resource 方法，
+//! 实现 `ServerHandler` `的` `list_resources` 和 `read_resource` 方法，
 //! 提供交易数据（ticks / orders / positions / accounts / trades / contracts）
-//! 和 UI 状态（current_symbol / chart_indicators）作为 MCP Resource。
+//! 和 UI `状态`（`current_symbol` `/` `chart_indicators`）作为 MCP Resource。
 
 use rmcp::{model::*, ErrorData as McpError};
 use serde_json::json;

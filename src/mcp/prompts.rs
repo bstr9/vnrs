@@ -29,7 +29,7 @@ use serde_json::{json, Map, Value};
 /// 交易前分析检查清单参数
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct PreTradeCheckParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
     /// 时间周期（如 1m, 5m, 15m, 1h, 4h, 1d）
     #[serde(default = "default_timeframe")]
@@ -91,7 +91,7 @@ fn default_period() -> String {
 pub struct BacktestAnalysisParams {
     /// 回测ID
     pub backtest_id: String,
-    /// 关注指标（如 sharpe_ratio, max_drawdown, win_rate）
+    /// 关注指标（如 `sharpe_ratio`, `max_drawdown,` `win_rate`）
     #[serde(default)]
     pub metrics: Option<String>,
 }

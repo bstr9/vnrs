@@ -1,4 +1,4 @@
-//! PyPortfolioStatistics — PyO3 class exposing portfolio-level performance metrics to Python.
+//! `PyPortfolioStatistics` `—` `PyO3` class exposing portfolio-level performance metrics to Python.
 //!
 //! Wraps `BacktestingStatistics` computed from the daily result history stored
 //! in `PortfolioState`. Python strategies call `portfolio.statistics()` to get
@@ -213,7 +213,7 @@ impl PyPortfolioStatistics {
 // Registration helper (called from bindings.rs)
 // ---------------------------------------------------------------------------
 
-/// Register `PyPortfolioStatistics` with the PyO3 module.
+/// Register `PyPortfolioStatistics` with the `PyO3` module.
 pub fn register_portfolio_stats_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPortfolioStatistics>()?;
     Ok(())

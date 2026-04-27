@@ -1,14 +1,14 @@
 //! Order Book module — L2 order book management for market data
 //!
 //! Provides `OrderBook` for maintaining per-symbol order book state and
-//! `OrderBookManager` as a BaseEngine sub-engine integrated into MainEngine.
+//! `OrderBookManager` as a `BaseEngine` sub-engine integrated `into` `MainEngine`.
 //!
 //! ## Design Decisions (from Oracle consultation)
-//! - BTreeMap<Reverse<Decimal>, Decimal> for bids (descending order)
-//! - BTreeMap<Decimal, Decimal> for asks (ascending order)
-//! - std::sync::RwLock (100ms depth updates are low frequency)
-//! - OrderBookManager implements BaseEngine, registers as sub-engine
-//! - Both on_depth() callback + direct access pattern for strategies
+//! - `BTreeMap`<Reverse<Decimal>, Decimal> for bids (descending order)
+//! - `BTreeMap`<Decimal, Decimal> for asks (ascending order)
+//! - `std::sync::RwLock` (100ms depth updates are low frequency)
+//! - `OrderBookManager` `implements` `BaseEngine`, registers as sub-engine
+//! - Both `on_depth`() callback + direct access pattern for strategies
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
@@ -44,7 +44,7 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
-    /// Create a new empty OrderBook for the given instrument
+    /// Create a new empty `OrderBook` for the given instrument
     pub fn new(vt_symbol: String) -> Self {
         Self {
             vt_symbol,
@@ -54,7 +54,7 @@ impl OrderBook {
         }
     }
 
-    /// Update the order book from a DepthData snapshot
+    /// Update the order book from a `DepthData` snapshot
     pub fn update_from_depth(&mut self, depth: &DepthData) {
         self.last_update = depth.datetime;
 
@@ -117,7 +117,7 @@ impl OrderBook {
         self.asks.iter().next().map(|(_, v)| *v)
     }
 
-    /// Calculate mid price = (best_bid + best_ask) / 2
+    /// Calculate mid price = (`best_bid` `+` `best_ask`) / 2
     pub fn mid_price(&self) -> Option<Decimal> {
         match (self.best_bid_price(), self.best_ask_price()) {
             (Some(bid), Some(ask)) => Some((bid + ask) / Decimal::TWO),
@@ -125,7 +125,7 @@ impl OrderBook {
         }
     }
 
-    /// Calculate spread = best_ask - best_bid
+    /// Calculate spread = `best_ask` `-` `best_bid`
     pub fn spread(&self) -> Option<Decimal> {
         match (self.best_ask_price(), self.best_bid_price()) {
             (Some(ask), Some(bid)) => Some(ask - bid),
@@ -133,7 +133,7 @@ impl OrderBook {
         }
     }
 
-    /// Calculate volume imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol)
+    /// Calculate volume imbalance = (`bid_vol` `-` `ask_vol`)` `/ (`bid_vol` `+` `ask_vol`)
     ///
     /// Returns value in [-1, 1]. Positive means more bid volume (buying pressure),
     /// negative means more ask volume (selling pressure).
@@ -193,7 +193,7 @@ impl OrderBook {
 
     /// Calculate micro-price — weighted mid price using volume imbalance.
     ///
-    /// micro_price = best_bid + spread * (ask_vol / (bid_vol + ask_vol))
+    /// `micro_price` `=` `best_bid` + `spread `* (`ask_vol` / (`bid_vol` `+` `ask_vol`))
     ///
     /// This is more informative than simple mid-price for short-term direction.
     pub fn micro_price(&self) -> Option<Decimal> {
@@ -284,22 +284,22 @@ impl OrderBook {
 
 /// Manages order books for all subscribed instruments.
 ///
-/// Registered as a sub-engine in MainEngine, receives DepthBook events
-/// and maintains per-symbol OrderBook instances for direct access.
+/// Registered as a sub-engine in `MainEngine`, `receives` `DepthBook` events
+/// and maintains per-symbol `OrderBook` instances for direct access.
 pub struct OrderBookManager {
-    /// Order books by vt_symbol
+    /// Order books by `vt_symbol`
     books: RwLock<HashMap<String, OrderBook>>,
 }
 
 impl OrderBookManager {
-    /// Create a new OrderBookManager
+    /// Create a new `OrderBookManager`
     pub fn new() -> Self {
         Self {
             books: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Process a DepthData event — create or update the order book
+    /// Process a `DepthData` event — create or update the order book
     pub fn process_depth(&self, depth: &DepthData) {
         let vt_symbol = depth.vt_symbol();
         let mut books = self.books.write().unwrap_or_else(|e| {
@@ -319,7 +319,7 @@ impl OrderBookManager {
         }
     }
 
-    /// Get the OrderBook for a given instrument
+    /// Get the `OrderBook` for a given instrument
     pub fn get_book(&self, vt_symbol: &str) -> Option<OrderBookSnapshot> {
         let books = self.books.read().unwrap_or_else(|e| {
             warn!("OrderBookManager lock poisoned, recovering");
@@ -392,7 +392,7 @@ impl BaseEngine for OrderBookManager {
 /// A read-only snapshot of an order book at a point in time.
 ///
 /// Safe to pass around without holding the lock. Provides commonly needed
-/// computed values (mid_price, spread, imbalance) to avoid recomputation.
+/// computed values (`mid_price`, spread, imbalance) to avoid recomputation.
 #[derive(Debug, Clone)]
 pub struct OrderBookSnapshot {
     pub vt_symbol: String,

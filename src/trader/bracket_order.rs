@@ -1,7 +1,7 @@
 //! Bracket/OCO/OTO contingent order engine.
 //!
 //! Manages groups of related orders with contingent execution logic:
-//! - **Bracket**: Entry → TakeProfit + StopLoss (one-cancels-other on exit)
+//! - **Bracket**: Entry → `TakeProfit` `+` `StopLoss` (one-cancels-other on exit)
 //! - **OCO**: Two orders where fill of one cancels the other
 //! - **OTO**: Primary order fill triggers secondary order submission
 
@@ -237,7 +237,7 @@ pub struct OtoOrderRequest {
 // ---------------------------------------------------------------------------
 
 /// Callback invoked to send an order through the OMS / gateway.
-/// Returns the vt_orderid on success.
+/// Returns the `vt_orderid` on success.
 pub type SendOrderCallback = Box<dyn Fn(&OrderRequest) -> Result<String, String> + Send + Sync>;
 
 /// Callback invoked to cancel an order through the OMS / gateway.

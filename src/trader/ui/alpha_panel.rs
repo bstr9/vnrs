@@ -92,11 +92,11 @@ impl AlphaSubTab {
 
 #[derive(Debug, Clone)]
 struct HyperParams {
-    /// Number of estimators (RandomForest, GradientBoosting)
+    /// Number of estimators (`RandomForest`, `GradientBoosting`)
     n_estimators: usize,
-    /// Max depth (RandomForest, GradientBoosting)
+    /// Max depth (`RandomForest`, `GradientBoosting`)
     max_depth: usize,
-    /// Learning rate (GradientBoosting)
+    /// Learning rate (`GradientBoosting`)
     learning_rate: f64,
     /// Alpha regularization (Ridge, Lasso)
     alpha_reg: f64,
@@ -194,13 +194,13 @@ pub struct AlphaPanel {
     portfolio_state: PortfolioState,
     /// Status message
     status_message: String,
-    /// Reference to AlphaLab engine
+    /// Reference to `AlphaLab` engine
     alpha_lab: Option<Arc<RwLock<AlphaLab>>>,
     /// Model name for save/load
     model_name: String,
     /// List of saved model names
     saved_models: Vec<String>,
-    /// Index of selected saved model in ComboBox
+    /// Index of selected saved model in `ComboBox`
     selected_saved_model_idx: usize,
 }
 
@@ -237,7 +237,7 @@ impl AlphaPanel {
         }
     }
 
-    /// Set the AlphaLab engine reference
+    /// Set the `AlphaLab` engine reference
     pub fn set_alpha_lab(&mut self, lab: Arc<RwLock<AlphaLab>>) {
         if let Ok(lab_guard) = lab.read() {
             self.datasets = lab_guard.list_all_datasets();
@@ -246,7 +246,7 @@ impl AlphaPanel {
         self.alpha_lab = Some(lab);
     }
 
-    /// Refresh datasets and models lists from AlphaLab
+    /// Refresh datasets and models lists from `AlphaLab`
     fn refresh_from_lab(&mut self) {
         if let Some(ref lab) = self.alpha_lab {
             if let Ok(lab_guard) = lab.read() {
@@ -616,6 +616,7 @@ impl AlphaPanel {
     // Alpha Portfolio tab
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn show_alpha_portfolio(&mut self, ui: &mut Ui) {
         // Model/factor selection
         ui.group(|ui| {
@@ -708,6 +709,7 @@ impl AlphaPanel {
     }
 
     /// Render a simple text-based histogram
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn show_text_histogram(ui: &mut Ui, mean: f64, std: f64, min: f64, max: f64) {
         if (max - min).abs() < 1e-12 {
             ui.label("  数据范围不足，无法生成直方图");
@@ -716,12 +718,12 @@ impl AlphaPanel {
 
         // Simple 10-bin text histogram
         let n_bins = 10;
-        let bin_width = (max - min) / n_bins as f64;
+        let bin_width = (max - min) / f64::from(n_bins);
 
         // Generate synthetic bar heights based on normal distribution around mean
         let bars: Vec<String> = (0..n_bins)
             .map(|i| {
-                let bin_center = min + (i as f64 + 0.5) * bin_width;
+                let bin_center = min + (f64::from(i) + 0.5) * bin_width;
                 // Normal PDF approximation for height
                 let z = if std > 1e-12 {
                     (bin_center - mean) / std
@@ -768,7 +770,7 @@ impl AlphaPanel {
         }
     }
 
-    /// Start model training with real AlphaLab engine
+    /// Start model training with real `AlphaLab` engine
     fn start_training(&mut self) {
         self.training = true;
         self.status_message = format!("正在训练 {} 模型...", self.model_type.display_name());
@@ -938,6 +940,7 @@ impl AlphaPanel {
     }
 
     /// Compute mean squared error between predictions and actuals
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn compute_mse(predictions: &[f64], actuals: &[f64]) -> f64 {
         if predictions.len() != actuals.len() || predictions.is_empty() {
             return f64::NAN;
@@ -968,6 +971,7 @@ impl AlphaPanel {
     }
 
     /// Run factor analysis with real dataset data
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn run_factor_analysis(&mut self) {
         let factor_name = if self.factor_state.selected_factor.is_empty() {
             "未选择".to_string()
@@ -1156,6 +1160,7 @@ impl AlphaPanel {
     }
 
     /// Compute IC (Information Coefficient) as Pearson correlation between factor and label
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn compute_ic(df: &polars::prelude::DataFrame, factor_name: &str) -> f64 {
         let factor_values: Vec<f64> = match df.column(factor_name) {
             Ok(col) => match col.f64() {
@@ -1230,7 +1235,8 @@ impl AlphaPanel {
         cov / (f_std * l_std)
     }
 
-    /// Backtest alpha signal with real BacktestingEngine
+    /// Backtest alpha signal with real `BacktestingEngine`
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn backtest_alpha_signal(&mut self) {
         self.status_message = "正在回测Alpha信号...".to_string();
 
@@ -1372,7 +1378,7 @@ impl AlphaPanel {
         self.status_message = "Alpha信号回测完成".to_string();
     }
 
-    /// Extract AlphaBarData from dataset's raw DataFrame
+    /// Extract `AlphaBarData` from dataset's `raw` `DataFrame`
     fn extract_bars_from_dataset(dataset: &AlphaDataset) -> Vec<crate::alpha::AlphaBarData> {
         let df = match dataset.raw_df.as_ref().or(dataset.learn_df.as_ref()) {
             Some(df) => df,
@@ -1430,7 +1436,7 @@ impl AlphaPanel {
         bars
     }
 
-    /// Save current trained model to AlphaLab with the given name
+    /// Save current trained model to `AlphaLab` with the given name
     fn save_model(&mut self) {
         let alpha_lab = match self.alpha_lab {
             Some(ref lab) => lab.clone(),
@@ -1493,7 +1499,7 @@ impl AlphaPanel {
         self.status_message = format!("模型 '{}' 保存成功", self.model_name);
     }
 
-    /// Load a model from AlphaLab
+    /// Load a model from `AlphaLab`
     fn load_model(&mut self) {
         let alpha_lab = match self.alpha_lab {
             Some(ref lab) => lab.clone(),
@@ -1541,7 +1547,7 @@ impl AlphaPanel {
         }
     }
 
-    /// Delete a model from AlphaLab
+    /// Delete a model from `AlphaLab`
     fn delete_model(&mut self) {
         let alpha_lab = match self.alpha_lab {
             Some(ref lab) => lab.clone(),

@@ -64,7 +64,7 @@ pub struct StopOrder {
     pub volume: f64,
     /// Order type after trigger
     pub order_type: OrderType,
-    /// Limit price for StopLimit orders (None for Stop/Market)
+    /// Limit price for `StopLimit` orders (None for Stop/Market)
     pub limit_price: Option<f64>,
     /// Strategy name that created this order
     pub strategy_name: String,
@@ -133,13 +133,13 @@ pub struct StrategyRiskConfig {
     pub max_order_notional: f64,
     /// Maximum active (pending) orders for this strategy (0 = unlimited)
     pub max_active_orders: usize,
-    /// Whether to enforce max_order_volume
+    /// Whether to enforce `max_order_volume`
     pub check_order_volume: bool,
-    /// Whether to enforce max_position_volume
+    /// Whether to enforce `max_position_volume`
     pub check_position_volume: bool,
-    /// Whether to enforce max_order_notional
+    /// Whether to enforce `max_order_notional`
     pub check_order_notional: bool,
-    /// Whether to enforce max_active_orders
+    /// Whether to enforce `max_active_orders`
     pub check_active_orders: bool,
 }
 
@@ -202,7 +202,7 @@ pub const STOPORDER_PREFIX: &str = "STOP";
 /// Request to create a stop order (used for routing from strategy to engine)
 #[derive(Debug, Clone)]
 pub struct StopOrderRequest {
-    /// Symbol in vt_symbol format (e.g., "BTCUSDT.BINANCE")
+    /// Symbol in `vt_symbol` format (e.g., "BTCUSDT.BINANCE")
     pub vt_symbol: String,
     /// Order direction
     pub direction: Direction,
@@ -214,7 +214,7 @@ pub struct StopOrderRequest {
     pub volume: f64,
     /// Order type after trigger
     pub order_type: OrderType,
-    /// Limit price for StopLimit orders (None for Stop/Market)
+    /// Limit price for `StopLimit` orders (None for Stop/Market)
     pub limit_price: Option<f64>,
     /// Lock flag (for position management)
     pub lock: bool,
@@ -246,8 +246,8 @@ impl StopOrderRequest {
 /// Cancellation request (used for routing from strategy to engine)
 #[derive(Debug, Clone)]
 pub enum CancelRequestType {
-    /// Cancel a regular order by vt_orderid
+    /// Cancel a regular order by `vt_orderid`
     Order(String),
-    /// Cancel a stop order by stop_orderid
+    /// Cancel a stop order by `stop_orderid`
     StopOrder(String),
 }

@@ -1,5 +1,5 @@
 //! Event engine for the trading system.
-//! This module provides an event-driven framework similar to VeighNa's event system
+//! This module provides an event-driven framework similar to `VeighNa`'s event system
 //! but implemented in Rust with thread-safe event handling.
 
 use std::collections::HashMap;

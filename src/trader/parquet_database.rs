@@ -2,7 +2,7 @@
 //!
 //! Stores bar and tick data in Parquet files via Polars for high-performance
 //! analytical queries. Order, trade, position, and event data use JSON sidecar
-//! files (same pattern as FileDatabase).
+//! files (same pattern as `FileDatabase`).
 
 #[cfg(feature = "alpha")]
 use polars::prelude::*;
@@ -22,7 +22,7 @@ use crate::error::DatabaseError;
 // Helper: Exchange / Interval from string
 // ---------------------------------------------------------------------------
 
-/// Parse an Exchange from its value() string.
+/// Parse an Exchange from its `value`() string.
 fn exchange_from_str(s: &str) -> Option<Exchange> {
     match s {
         "CFFEX" => Some(Exchange::Cffex),
@@ -83,7 +83,7 @@ fn exchange_from_str(s: &str) -> Option<Exchange> {
     }
 }
 
-/// Parse an Interval from its value() string.
+/// Parse an Interval from its `value`() string.
 fn interval_from_str(s: &str) -> Option<Interval> {
     match s {
         "1s" => Some(Interval::Second),
@@ -129,7 +129,7 @@ pub struct ParquetDatabase {
 }
 
 impl ParquetDatabase {
-    /// Create a new ParquetDatabase with the given base directory.
+    /// Create a new `ParquetDatabase` with the given base directory.
     pub fn new(base_dir: PathBuf) -> Self {
         if let Err(e) = std::fs::create_dir_all(&base_dir) {
             tracing::warn!("创建Parquet数据库目录失败: {}", e);
@@ -141,7 +141,7 @@ impl ParquetDatabase {
         }
     }
 
-    /// Create a ParquetDatabase using the default data directory.
+    /// Create a `ParquetDatabase` using the default data directory.
     pub fn with_default_dir() -> Self {
         let base_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -547,6 +547,7 @@ impl BaseDatabase for ParquetDatabase {
         }
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn delete_bar_data(&self, symbol: &str, exchange: Exchange, interval: Interval) -> Result<i64, DatabaseError> {
         let path = self.bar_path(symbol, exchange, interval);
         if !path.exists() {
@@ -580,6 +581,7 @@ impl BaseDatabase for ParquetDatabase {
 
         Ok(count)
     }
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError> {
         let bars_dir = self.base_dir.join("bars");
         if !bars_dir.exists() {
@@ -773,6 +775,7 @@ impl BaseDatabase for ParquetDatabase {
         Ok(Vec::new())
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {
         let path = self.tick_path(symbol, exchange);
         if !path.exists() {
@@ -805,6 +808,7 @@ impl BaseDatabase for ParquetDatabase {
         Ok(count)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError> {
         let ticks_dir = self.base_dir.join("ticks");
         if !ticks_dir.exists() {

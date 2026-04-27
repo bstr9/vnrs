@@ -72,7 +72,7 @@ impl StrategyContext {
         }
     }
 
-    /// Create a StrategyContext with a database backend
+    /// Create a `StrategyContext` with a database backend
     pub fn with_database(database: Arc<dyn BaseDatabase>) -> Self {
         Self {
             tick_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -123,6 +123,7 @@ impl StrategyContext {
 
     /// Load historical bars from database (synchronous wrapper for async operation)
     /// Returns bars for the specified symbol, exchange, and interval over the given number of days
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     pub fn load_bar(
         &self,
         vt_symbol: &str,
@@ -343,19 +344,19 @@ pub trait StrategyTemplate: Send + Sync {
     /// Stop order callback
     fn on_stop_order(&mut self, stop_orderid: &str);
 
-    /// Drain pending orders placed during on_bar/on_tick callback
-    /// This is called by BacktestingEngine after each callback to collect orders
+    /// Drain pending orders placed during `on_bar`/`on_tick` callback
+    /// This is called by `BacktestingEngine` after each callback to collect orders
     /// that were placed by the strategy (e.g., via Python's buy/sell methods)
     fn drain_pending_orders(&mut self) -> Vec<OrderRequest> {
         Vec::new() // Default: no pending orders
     }
 
-    /// Drain pending stop orders placed during on_bar/on_tick callback
+    /// Drain pending stop orders placed during `on_bar`/`on_tick` callback
     fn drain_pending_stop_orders(&mut self) -> Vec<StopOrderRequest> {
         Vec::new() // Default: no pending stop orders
     }
 
-    /// Drain pending cancellations placed during on_bar/on_tick callback
+    /// Drain pending cancellations placed during `on_bar`/`on_tick` callback
     fn drain_pending_cancellations(&mut self) -> Vec<CancelRequestType> {
         Vec::new() // Default: no pending cancellations
     }
@@ -528,7 +529,7 @@ impl BaseStrategy {
         vt_orderid
     }
 
-    /// Create an OrderRequest from the given parameters
+    /// Create an `OrderRequest` from the given parameters
     fn create_order_request(
         &self,
         vt_symbol: &str,
@@ -584,7 +585,7 @@ impl BaseStrategy {
         }
     }
 
-    /// Drain pending orders (called by engine after on_bar/on_tick callback)
+    /// Drain pending orders (called by engine after `on_bar`/`on_tick` callback)
     pub fn drain_pending_orders(&self) -> Vec<OrderRequest> {
         let mut orders = self
             .pending_orders
@@ -593,7 +594,7 @@ impl BaseStrategy {
         std::mem::take(&mut *orders)
     }
 
-    /// Drain pending stop orders (called by engine after on_bar/on_tick callback)
+    /// Drain pending stop orders (called by engine after `on_bar`/`on_tick` callback)
     pub fn drain_pending_stop_orders(&self) -> Vec<StopOrderRequest> {
         let mut orders = self
             .pending_stop_orders
@@ -602,7 +603,7 @@ impl BaseStrategy {
         std::mem::take(&mut *orders)
     }
 
-    /// Drain pending cancellations (called by engine after on_bar/on_tick callback)
+    /// Drain pending cancellations (called by engine after `on_bar`/`on_tick` callback)
     pub fn drain_pending_cancellations(&self) -> Vec<CancelRequestType> {
         let mut cancellations = self
             .pending_cancellations
@@ -611,7 +612,7 @@ impl BaseStrategy {
         std::mem::take(&mut *cancellations)
     }
 
-    /// Load historical bar data (placeholder — use StrategyContext.load_bar instead)
+    /// Load historical bar data (placeholder — use `StrategyContext`.`load_bar` instead)
     pub fn load_bar(&self, _vt_symbol: &str, _days: i64, _interval: Interval) -> Vec<BarData> {
         // This cannot access the database directly. Use context.load_bar() in on_init instead.
         Vec::new()

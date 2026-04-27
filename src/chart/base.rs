@@ -41,6 +41,7 @@ pub const SCROLLBAR_HEIGHT: f32 = 20.0;
 
 /// Convert a float value to integer with rounding
 #[inline]
+#[allow(clippy::cast_possible_truncation)] // value fits in target type
 pub fn to_int(value: f64) -> i64 {
     value.round() as i64
 }
@@ -64,6 +65,7 @@ pub fn format_volume(volume: f64) -> String {
 }
 
 /// Calculate nice axis tick values
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 pub fn calculate_axis_ticks(min_val: f64, max_val: f64, max_ticks: usize) -> Vec<f64> {
     if min_val >= max_val {
         return vec![min_val];

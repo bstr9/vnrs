@@ -177,7 +177,7 @@ pub fn apply_light_theme(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-/// Get color based on PnL value
+/// Get color based on `PnL` value
 pub fn get_pnl_color(value: f64) -> Color32 {
     if value >= 0.0 {
         COLOR_POSITIVE
@@ -264,6 +264,7 @@ impl ToastManager {
     }
 
     /// Show all active toasts and remove expired ones
+    #[allow(clippy::cast_lossless, clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // lossless cast kept as-is; value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     pub fn show(&mut self, ctx: &egui::Context) {
         // Remove expired toasts
         self.toasts.retain(|t| !t.is_expired());
@@ -332,7 +333,7 @@ impl ToastManager {
                 // Left border (colored by type)
                 let border_rect =
                     egui::Rect::from_min_size(toast_rect.min, egui::Vec2::new(4.0, toast_height));
-                let border_alpha = (alpha as f32 / 200.0 * 255.0) as u8;
+                let border_alpha = (f32::from(alpha) / 200.0 * 255.0) as u8;
                 painter.rect_filled(
                     border_rect,
                     2.0,

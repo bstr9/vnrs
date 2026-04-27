@@ -94,12 +94,12 @@ pub type GatewaySettings = HashMap<String, GatewaySettingValue>;
 /// - Automatically reconnect if connection lost
 ///
 /// ## Callbacks that must respond manually:
-/// - on_tick
-/// - on_trade  
-/// - on_order
-/// - on_position
-/// - on_account
-/// - on_contract
+/// - `on_tick`
+/// - `on_trade`  
+/// - `on_order`
+/// - `on_position`
+/// - `on_account`
+/// - `on_contract`
 ///
 /// All data passed to callbacks should be constant (immutable).
 #[async_trait]
@@ -131,11 +131,11 @@ pub trait BaseGateway: Send + Sync {
     /// - Connect to server if necessary
     /// - Log connected if all necessary connections established
     /// - Query and respond with:
-    ///   - contracts: on_contract
-    ///   - account asset: on_account
-    ///   - account holding: on_position
-    ///   - orders of account: on_order
-    ///   - trades of account: on_trade
+    ///   - contracts: `on_contract`
+    ///   - account asset: `on_account`
+    ///   - account holding: `on_position`
+    ///   - orders of account: `on_order`
+    ///   - trades of account: `on_trade`
     /// - Write log if any query fails
     async fn connect(&self, setting: GatewaySettings) -> Result<(), GatewayError>;
 
@@ -155,13 +155,13 @@ pub trait BaseGateway: Send + Sync {
     /// Send a new order to server.
     ///
     /// Implementation should:
-    /// - Create an OrderData from req using OrderRequest.create_order_data
+    /// - Create an `OrderData` from req `using` `OrderRequest`.`create_order_data`
     /// - Assign a unique (gateway instance scope) id to OrderData.orderid
     /// - Send request to server
-    ///   - If request is sent, OrderData.status should be set to Status::Submitting
-    ///   - If request failed, OrderData.status should be set to Status::Rejected
-    /// - Response on_order
-    /// - Return vt_orderid
+    ///   - If request is sent, OrderData.status should be set to `Status::Submitting`
+    ///   - If request failed, OrderData.status should be set to `Status::Rejected`
+    /// - Response `on_order`
+    /// - Return `vt_orderid`
     async fn send_order(&self, req: OrderRequest) -> Result<String, GatewayError>;
 
     /// Cancel an existing order.

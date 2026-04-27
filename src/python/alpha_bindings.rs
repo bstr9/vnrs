@@ -1,7 +1,7 @@
 //! Python bindings for Alpha research module
 //!
-//! Provides PyO3 wrappers for the Alpha module: models, datasets, factor analysis.
-//! Connected to the real Rust AlphaLab engine, ML models, and backtesting.
+//! Provides `PyO3` wrappers for the Alpha module: models, datasets, factor analysis.
+//! Connected to the real Rust `AlphaLab` engine, ML models, and backtesting.
 
 use crate::alpha::dataset::{AlphaDataset, Segment};
 use crate::alpha::lab::AlphaLab;
@@ -207,10 +207,11 @@ impl PyBacktestResult {
 // Helper: build a temporary AlphaDataset from X/y arrays
 // ---------------------------------------------------------------------------
 
-/// Build a temporary AlphaDataset from 2D feature array X and 1D label array y.
+/// Build a temporary `AlphaDataset` from 2D feature array X and 1D label array y.
 ///
 /// The dataset is split into train/valid/test using an 80/10/10 ratio.
 /// Feature columns are named f0, f1, ..., fN. Label column is "label".
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_precision_loss)] // value fits in target type; value fits in target type; usize-to-f64 cast acceptable for practical counts
 fn build_dataset_from_arrays(x: &[Vec<f64>], y: &[f64]) -> Result<AlphaDataset, String> {
     use polars::prelude::*;
 
@@ -289,6 +290,7 @@ fn build_dataset_from_arrays(x: &[Vec<f64>], y: &[f64]) -> Result<AlphaDataset, 
 // Helper: compute MSE
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 fn compute_mse(actual: &[f64], predicted: &[f64]) -> f64 {
     if actual.len() != predicted.len() || actual.is_empty() {
         return f64::NAN;
@@ -306,6 +308,7 @@ fn compute_mse(actual: &[f64], predicted: &[f64]) -> f64 {
 // Helper: compute Information Coefficient (rank correlation)
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 fn compute_ic(actual: &[f64], predicted: &[f64]) -> f64 {
     if actual.len() != predicted.len() || actual.len() < 2 {
         return f64::NAN;
@@ -364,12 +367,12 @@ fn compute_ic(actual: &[f64], predicted: &[f64]) -> f64 {
 
 /// Python-facing Alpha ML model.
 ///
-/// Wraps a Rust AlphaModel implementation. Supports `fit(X, y)` and `predict(X)`.
-/// Available model types: LinearRegression, Ridge, Lasso, RandomForest, GradientBoosting.
+/// Wraps a Rust `AlphaModel` implementation. Supports `fit(X, y)` and `predict(X)`.
+/// Available model types: `LinearRegression`, Ridge, `Lasso,` `RandomForest`, `GradientBoosting`.
 ///
-/// Ridge and Lasso use LinearRegressionModel internally (regularization not yet
+/// Ridge and Lasso use `LinearRegressionModel` internally (regularization not yet
 /// implemented as separate model types).
-/// GradientBoosting corresponds to XGBoost-style boosting.
+/// `GradientBoosting` corresponds to XGBoost-style boosting.
 #[pyclass]
 pub struct PyAlphaModel {
     model_type: PyAlphaModelType,
@@ -382,13 +385,13 @@ pub struct PyAlphaModel {
 
 #[pymethods]
 impl PyAlphaModel {
-    /// Create a new PyAlphaModel.
+    /// Create a new `PyAlphaModel`.
     ///
     /// Args:
-    ///     model_type: One of "LinearRegression", "Ridge", "Lasso", "RandomForest", "GradientBoosting"
-    ///     n_estimators: Number of trees (for RandomForest/GradientBoosting), default 100
-    ///     max_depth: Maximum tree depth (for RandomForest/GradientBoosting), default None
-    ///     learning_rate: Learning rate (for GradientBoosting), default 0.1
+    ///     `model_type`: One `of `"`LinearRegression`", "Ridge", "`Lasso"`, "`RandomForest`",` `"`GradientBoosting`"
+    ///     `n_estimators`: Number of trees (for RandomForest/GradientBoosting), default 100
+    ///     `max_depth`: Maximum tree depth (for RandomForest/GradientBoosting), default None
+    ///     `learning_rate`: Learning rate (for `GradientBoosting`), default 0.1
     #[new]
     #[pyo3(signature = (model_type, n_estimators=100, max_depth=None, learning_rate=0.1))]
     fn new(
@@ -427,8 +430,8 @@ impl PyAlphaModel {
     /// Fit the model using feature matrix X and label vector y.
     ///
     /// Args:
-    ///     X: 2D list of floats (n_samples x n_features)
-    ///     y: 1D list of floats (n_samples)
+    ///     X: 2D list of floats (`n_samples` `x` `n_features`)
+    ///     y: 1D list of floats (`n_samples`)
     ///
     /// Returns:
     ///     self (for method chaining)
@@ -489,7 +492,7 @@ impl PyAlphaModel {
     /// Make predictions using the trained model.
     ///
     /// Args:
-    ///     x: 2D list of floats (n_samples x n_features)
+    ///     x: 2D list of floats (`n_samples` `x` `n_features`)
     ///
     /// Returns:
     ///     1D list of float predictions
@@ -564,16 +567,17 @@ impl PyAlphaModule {
     ///
     /// Args:
     ///     name: Model name for later reference
-    ///     model_type: One of "LinearRegression", "Ridge", "Lasso", "RandomForest", "GradientBoosting"
-    ///     x: 2D feature array (n_samples x n_features)
-    ///     y: 1D label array (n_samples)
-    ///     n_estimators: Number of trees (RandomForest/GradientBoosting), default 100
-    ///     max_depth: Max tree depth (RandomForest/GradientBoosting), default None
-    ///     learning_rate: Learning rate (GradientBoosting), default 0.1
+    ///     `model_type`: One `of `"`LinearRegression`", "Ridge", "`Lasso"`, "`RandomForest`",` `"`GradientBoosting`"
+    ///     x: 2D feature array (`n_samples` `x` `n_features`)
+    ///     y: 1D label array (`n_samples`)
+    ///     `n_estimators`: Number of trees (RandomForest/GradientBoosting), default 100
+    ///     `max_depth`: Max tree depth (RandomForest/GradientBoosting), default None
+    ///     `learning_rate`: Learning `rate `(`GradientBoosting`), default 0.1
     ///
     /// Returns:
-    ///     PyAlphaTrainResult with training metrics
+    ///     `PyAlphaTrainResult` with training metrics
     #[pyo3(signature = (name, model_type, x, y, n_estimators=100, max_depth=None, learning_rate=0.1))]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn train(
         &mut self,
         name: String,
@@ -627,12 +631,13 @@ impl PyAlphaModule {
     /// Make predictions using a trained model.
     ///
     /// Args:
-    ///     name: Model name (as used in train())
+    ///     name: Model name (as used in `train`())
     ///     x: 2D feature array
     ///     segment: Data segment ("Train", "Valid", or "Test")
     ///
     /// Returns:
-    ///     PyAlphaPrediction with predictions and statistics
+    ///     `PyAlphaPrediction` with predictions and statistics
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn predict(&self, name: &str, x: Vec<Vec<f64>>, segment: &str) -> PyResult<PyAlphaPrediction> {
         let py_model = self
             .models
@@ -673,12 +678,13 @@ impl PyAlphaModule {
     /// between the factor values and the label values.
     ///
     /// Args:
-    ///     factor_name: Name of the factor
-    ///     factor_values: 1D array of factor values
-    ///     label_values: 1D array of corresponding label/return values
+    ///     `factor_name`: Name of the factor
+    ///     `factor_values`: 1D array of factor values
+    ///     `label_values`: 1D array of corresponding label/return values
     ///
     /// Returns:
-    ///     PyFactorAnalysisResult with statistics and IC
+    ///     `PyFactorAnalysisResult` with statistics and IC
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn analyze_factor(
         &self,
         factor_name: &str,
@@ -737,12 +743,13 @@ impl PyAlphaModule {
     ///
     /// Args:
     ///     date: Date string (e.g., "2024-01-15")
-    ///     factor_name: Name of the factor
+    ///     `factor_name`: Name of the factor
     ///     symbols: List of symbol identifiers
     ///     values: Factor values corresponding to each symbol
     ///
     /// Returns:
-    ///     PyCrossSectionResult with cross-sectional statistics
+    ///     `PyCrossSectionResult` with cross-sectional statistics
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn cross_section_analysis(
         &self,
         date: &str,
@@ -789,11 +796,12 @@ impl PyAlphaModule {
     /// absolute IC value, normalized to sum to 1.0.
     ///
     /// Args:
-    ///     factor_names: List of factor names
-    ///     ic_values: Corresponding IC values for each factor
+    ///     `factor_names`: List of factor names
+    ///     `ic_values`: Corresponding IC values for each factor
     ///
     /// Returns:
     ///     Dict mapping factor name to its weight
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn compute_alpha_weights(
         &self,
         factor_names: Vec<String>,
@@ -834,7 +842,7 @@ impl PyAlphaModule {
     /// - prediction == 0 → signal = 0 (flat)
     ///
     /// Args:
-    ///     model_name: Name of the trained model
+    ///     `model_name`: Name of the trained model
     ///     x: 2D feature array
     ///
     /// Returns:
@@ -872,8 +880,9 @@ impl PyAlphaModule {
     ///     capital: Starting capital, default 1,000,000
     ///
     /// Returns:
-    ///     PyBacktestResult with backtest statistics
+    ///     `PyBacktestResult` with backtest statistics
     #[pyo3(signature = (predictions, prices, capital=1_000_000.0))]
+    #[allow(clippy::cast_lossless, clippy::cast_precision_loss)] // lossless cast kept as-is; usize-to-f64 cast acceptable for practical counts
     fn run_backtest_with_factors(
         &self,
         predictions: Vec<f64>,
@@ -1011,7 +1020,7 @@ impl PyAlphaModule {
         self.models.keys().cloned().collect()
     }
 
-    /// List all datasets in the AlphaLab.
+    /// List all datasets in the `AlphaLab`.
     fn list_datasets(&self) -> Vec<String> {
         self.lab.list_all_datasets()
     }

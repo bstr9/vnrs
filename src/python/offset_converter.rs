@@ -1,8 +1,8 @@
-//! Python bindings for OffsetConverter
+//! Python bindings for `OffsetConverter`
 //!
-//! Exposes the OffsetConverter's order conversion logic to Python strategies,
+//! Exposes the `OffsetConverter`'s order conversion logic to Python strategies,
 //! allowing them to preview how a close order would be split into
-//! CloseToday / CloseYesterday legs on SHFE/INE exchanges.
+//! `CloseToday` `/` `CloseYesterday` legs on SHFE/INE exchanges.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,10 +16,10 @@ use crate::trader::{ContractData, Direction, Exchange, MainEngine, Offset, Order
 // PyOrderRequest
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for OrderRequest
+/// Python wrapper for `OrderRequest`
 ///
 /// Mirrors the fields of `crate::trader::object::OrderRequest` using
-/// Python-friendly string enums (exchange, direction, offset, order_type).
+/// Python-friendly string enums (exchange, direction, offset, `order_type`).
 #[pyclass]
 #[derive(Clone)]
 pub struct PyOrderRequest {
@@ -79,7 +79,7 @@ impl PyOrderRequest {
 }
 
 impl PyOrderRequest {
-    /// Convert to Rust OrderRequest
+    /// Convert to Rust `OrderRequest`
     pub fn to_rust(&self) -> PyResult<OrderRequest> {
         let exchange = parse_exchange(&self.exchange);
         let direction = parse_direction(&self.direction)?;
@@ -102,7 +102,7 @@ impl PyOrderRequest {
         })
     }
 
-    /// Convert from Rust OrderRequest
+    /// Convert from Rust `OrderRequest`
     pub fn from_rust(req: &OrderRequest) -> Self {
         Self {
             symbol: req.symbol.clone(),
@@ -121,12 +121,12 @@ impl PyOrderRequest {
 // PyOffsetConverter
 // ---------------------------------------------------------------------------
 
-/// Python wrapper for OffsetConverter
+/// Python wrapper for `OffsetConverter`
 ///
-/// The OffsetConverter handles position offset conversion for exchanges that
-/// require explicit CloseToday / CloseYesterday legs (e.g., SHFE, INE).
+/// The `OffsetConverter` handles position offset conversion for exchanges that
+/// require explicit `CloseToday` `/` `CloseYesterday` legs (e.g., SHFE, INE).
 ///
-/// Usage::
+/// `Usage`::
 ///
 ///     converter = OffsetConverter()
 ///     converter.add_contract(vt_symbol="au2312.SHFE", exchange="SHFE", ...)
@@ -134,18 +134,18 @@ impl PyOrderRequest {
 ///     requests = converter.convert_order_request(req, lock=False, net=False)
 ///
 /// When a close order on SHFE/INE needs to be split, the converter returns
-/// multiple OrderRequest objects with appropriate CloseToday/CloseYesterday
+/// multiple `OrderRequest` objects with appropriate CloseToday/CloseYesterday
 /// offsets and volume allocations.
 #[pyclass(name = "OffsetConverter")]
 pub struct PyOffsetConverter {
-    /// Internal contract store — shared with the Rust OffsetConverter's
+    /// Internal contract store — shared with the Rust `OffsetConverter`'s
     /// contract lookup closure so Python can register contracts.
     contracts: Arc<Mutex<HashMap<String, ContractData>>>,
     inner: OffsetConverter,
 }
 
 impl PyOffsetConverter {
-    /// Create a new OffsetConverter wired to the MainEngine's OmsEngine
+    /// Create a new `OffsetConverter` wired to the `MainEngine`'s `OmsEngine`
     /// for contract lookups. This allows Python to query/preview offset
     /// conversion using live contract data without duplicating state.
     pub fn from_main_engine(main_engine: &Arc<MainEngine>) -> PyResult<Self> {
@@ -163,7 +163,7 @@ impl PyOffsetConverter {
 
 #[pymethods]
 impl PyOffsetConverter {
-    /// Create a new OffsetConverter.
+    /// Create a new `OffsetConverter`.
     ///
     /// Optionally seed it with an existing contract map.  If omitted, the
     /// converter starts empty and contracts are added via `add_contract()`.
@@ -194,13 +194,13 @@ impl PyOffsetConverter {
     /// offset conversion (i.e., `net_position == false`).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     exchange: Exchange string (e.g., "SHFE", "INE")
     ///     name: Human-readable name
     ///     product: Product type string ("FUTURES", "SPOT", etc.)
     ///     size: Contract multiplier
     ///     pricetick: Minimum price movement
-    ///     net_position: Whether the contract uses net position mode
+    ///     `net_position`: Whether the contract uses net position mode
     #[pyo3(signature = (vt_symbol, exchange, name, product="FUTURES".into(), size=1.0, pricetick=0.01, net_position=false))]
     #[allow(clippy::too_many_arguments)]
     pub fn add_contract(
@@ -245,16 +245,16 @@ impl PyOffsetConverter {
     /// Convert an order request according to offset rules.
     ///
     /// For SHFE/INE exchanges with long-short position mode, a single close
-    /// order may be split into multiple legs (CloseToday + CloseYesterday).
+    /// order may be split into multiple legs (`CloseToday` `+` `CloseYesterday`).
     /// For lock/net mode, the conversion follows the respective strategy.
     ///
     /// Args:
-    ///     req: PyOrderRequest to convert
+    ///     req: `PyOrderRequest` to convert
     ///     lock: Whether to use lock mode (for lock-strategy accounts)
     ///     net: Whether to use net mode (for net-position accounts)
     ///
     /// Returns:
-    ///     List of PyOrderRequest objects (may be 1 if no split needed)
+    ///     List of `PyOrderRequest` objects (may be 1 if no split needed)
     #[pyo3(signature = (req, lock=false, net=false))]
     pub fn convert_order_request(
         &mut self,
@@ -270,10 +270,10 @@ impl PyOffsetConverter {
     /// Update position data for a symbol.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "LONG", "SHORT", or "NET"
     ///     volume: Total position volume
-    ///     yd_volume: Yesterday's position volume
+    ///     `yd_volume`: Yesterday's position volume
     #[pyo3(signature = (vt_symbol, direction, volume, yd_volume=0.0))]
     pub fn update_position(
         &mut self,
@@ -313,7 +313,7 @@ impl PyOffsetConverter {
     /// Update trade data for a symbol.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     direction: "LONG" or "SHORT"
     ///     offset: "OPEN", "CLOSE", "CLOSETODAY", "CLOSEYESTERDAY"
     ///     price: Trade price
@@ -367,7 +367,7 @@ impl PyOffsetConverter {
     /// CloseToday/CloseYesterday splitting, False otherwise.
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///
     /// Returns:
     ///     True if the contract requires offset conversion, False otherwise

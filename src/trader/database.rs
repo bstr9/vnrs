@@ -123,13 +123,13 @@ pub trait BaseDatabase: Send + Sync {
     /// Save an event record into database (event journaling)
     async fn save_event(&self, event: EventRecord) -> Result<bool, DatabaseError>;
 
-    /// Load order data from database, optionally filtered by gateway_name
+    /// Load order data from database, optionally filtered by `gateway_name`
     async fn load_orders(&self, gateway_name: Option<&str>) -> Result<Vec<OrderData>, DatabaseError>;
 
-    /// Load trade data from database, optionally filtered by gateway_name
+    /// Load trade data from database, optionally filtered by `gateway_name`
     async fn load_trades(&self, gateway_name: Option<&str>) -> Result<Vec<TradeData>, DatabaseError>;
 
-    /// Load position data from database, optionally filtered by gateway_name
+    /// Load position data from database, optionally filtered by `gateway_name`
     async fn load_positions(&self, gateway_name: Option<&str>) -> Result<Vec<PositionData>, DatabaseError>;
 }
 
@@ -271,6 +271,7 @@ impl BaseDatabase for MemoryDatabase {
         Ok(result)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn delete_bar_data(
         &self,
         symbol: &str,
@@ -287,6 +288,7 @@ impl BaseDatabase for MemoryDatabase {
         Ok((original_len - data.len()) as i64)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {
         let mut data = self.ticks.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let original_len = data.len();
@@ -294,6 +296,7 @@ impl BaseDatabase for MemoryDatabase {
         Ok((original_len - data.len()) as i64)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError> {
         let data = self.bars.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         
@@ -325,6 +328,7 @@ impl BaseDatabase for MemoryDatabase {
         Ok(overviews)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError> {
         let data = self.ticks.read().map_err(|e| DatabaseError::Other(e.to_string()))?;
         
@@ -473,12 +477,12 @@ pub struct FileDatabase {
 }
 
 impl FileDatabase {
-    /// Create a new FileDatabase with the given base directory
+    /// Create a new `FileDatabase` with the given base directory
     pub fn new(base_dir: std::path::PathBuf) -> Self {
         Self { base_dir }
     }
 
-    /// Create a FileDatabase using the default data directory
+    /// Create a `FileDatabase` using the default data directory
     pub fn with_default_dir() -> Self {
         let base_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -871,6 +875,7 @@ impl BaseDatabase for FileDatabase {
         Ok(result)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn delete_bar_data(
         &self,
         symbol: &str,
@@ -891,6 +896,7 @@ impl BaseDatabase for FileDatabase {
         Ok(count)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn delete_tick_data(&self, symbol: &str, exchange: Exchange) -> Result<i64, DatabaseError> {
         let path = self.tick_file_path(symbol, exchange);
         if !path.exists() {
@@ -906,6 +912,7 @@ impl BaseDatabase for FileDatabase {
         Ok(count)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn get_bar_overview(&self) -> Result<Vec<BarOverview>, DatabaseError> {
         let bars_dir = self.base_dir.join("bars");
         if !bars_dir.exists() {
@@ -957,6 +964,7 @@ impl BaseDatabase for FileDatabase {
         Ok(overviews)
     }
 
+    #[allow(clippy::cast_possible_wrap)] // value fits in target type
     async fn get_tick_overview(&self) -> Result<Vec<TickOverview>, DatabaseError> {
         let ticks_dir = self.base_dir.join("ticks");
         if !ticks_dir.exists() {

@@ -32,7 +32,7 @@ pub struct PositionHolding {
 }
 
 impl PositionHolding {
-    /// Create a new PositionHolding from contract data
+    /// Create a new `PositionHolding` from contract data
     pub fn new(contract: &ContractData) -> Self {
         Self {
             vt_symbol: contract.vt_symbol(),
@@ -419,7 +419,7 @@ impl PositionHolding {
     }
 }
 
-/// Type-erased contract lookup function for use in MainEngine
+/// Type-erased contract lookup function for use in `MainEngine`
 type ContractLookup = Box<dyn Fn(&str) -> Option<ContractData> + Send + Sync>;
 
 /// Offset converter for managing position holdings and order conversion
@@ -429,7 +429,7 @@ pub struct OffsetConverter {
 }
 
 impl OffsetConverter {
-    /// Create a new OffsetConverter with a boxed contract lookup function
+    /// Create a new `OffsetConverter` with a boxed contract lookup function
     pub fn new(get_contract: ContractLookup) -> Self {
         Self {
             holdings: HashMap::new(),

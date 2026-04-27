@@ -95,7 +95,7 @@ pub use alpha_bindings::PyAlphaModule;
 ///
 /// When running as a native binary (not in a Python venv), the embedded interpreter
 /// needs to know where to find:
-/// 1. The `trade_engine` native module (registered via append_to_inittab)
+/// 1. The `trade_engine` native module (registered via `append_to_inittab`)
 /// 2. The project's `.venv/site-packages` for pure-Python dependencies
 /// 3. The `strategies/` directory for strategy files
 ///

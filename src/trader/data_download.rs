@@ -3,7 +3,7 @@
 //! Provides functionality to:
 //! - Download historical klines (candlestick) data from Binance
 //! - Paginate through large date ranges automatically
-//! - Convert raw API data to BarData and persist to database
+//! - Convert raw API data to `BarData` and persist to database
 //! - Track download progress
 
 use std::collections::HashMap;
@@ -84,6 +84,7 @@ impl Default for DownloadProgress {
 
 impl DownloadProgress {
     /// Calculate completion percentage
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn percentage(&self) -> f64 {
         if self.estimated_total == 0 {
             return 0.0;
@@ -137,7 +138,7 @@ fn klines_path(exchange: Exchange) -> &'static str {
 /// Data download manager engine
 ///
 /// Manages downloading of historical market data from exchanges.
-/// Implements BaseEngine for integration with the event system.
+/// Implements `BaseEngine` for integration with the event system.
 pub struct DataDownloadManager {
     /// Engine name
     name: String,
@@ -152,12 +153,12 @@ pub struct DataDownloadManager {
 }
 
 impl DataDownloadManager {
-    /// Create a new DataDownloadManager with default configuration
+    /// Create a new `DataDownloadManager` with default configuration
     pub fn new() -> Self {
         Self::with_config(DownloadConfig::default())
     }
 
-    /// Create a new DataDownloadManager with custom configuration
+    /// Create a new `DataDownloadManager` with custom configuration
     pub fn with_config(config: DownloadConfig) -> Self {
         Self {
             name: "DataDownloadManager".to_string(),
@@ -214,19 +215,19 @@ impl DataDownloadManager {
     /// Download historical klines from Binance REST API
     ///
     /// Automatically paginates through the date range, converting
-    /// raw klines to BarData. Does NOT persist to database —
-    /// the caller is responsible for saving via BaseDatabase.
+    /// raw klines to `BarData`. Does NOT persist to database —
+    /// the caller is responsible for saving via `BaseDatabase`.
     ///
     /// # Arguments
-    /// * `rest_client` - BinanceRestClient for making API requests
+    /// * `rest_client` - `BinanceRestClient` for making API requests
     /// * `symbol` - Trading symbol (e.g., "BTCUSDT")
-    /// * `exchange` - Exchange (Binance for Spot, BinanceUsdm for Futures)
+    /// * `exchange` - Exchange (Binance for Spot, `BinanceUsdm` for Futures)
     /// * `interval` - Bar interval
     /// * `start` - Start datetime
     /// * `end` - End datetime
     ///
     /// # Returns
-    /// Vector of BarData or error string
+    /// Vector of `BarData` or error string
     pub async fn download_klines(
         &self,
         rest_client: &crate::gateway::binance::BinanceRestClient,
@@ -440,7 +441,7 @@ impl DataDownloadManager {
         Ok(all_bars)
     }
 
-    /// Convert raw kline JSON array to BarData
+    /// Convert raw kline JSON array to `BarData`
     ///
     /// Utility method for converting individual kline responses.
     pub fn kline_to_bar(

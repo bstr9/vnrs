@@ -1,6 +1,6 @@
 //! Fill Models for Backtesting
 //!
-//! Inspired by nautilus_trader's FillModel system
+//! Inspired by `nautilus_trader`'`s` `FillModel` system
 //! Provides realistic order fill simulation with multiple strategies
 
 use serde::{Deserialize, Serialize};
@@ -619,7 +619,7 @@ impl FillModel for SizeAwareFillModel {
 
 /// Probabilistic fill model - uses random fill probability
 ///
-/// Based on nautilus_trader's prob_fill_on_limit logic
+/// Based on `nautilus_trader`'`s` `prob_fill_on_limit` logic
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbabilisticFillModel {
     /// Base slippage

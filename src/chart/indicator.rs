@@ -150,7 +150,7 @@ impl IndicatorBase {
         self.initialized
     }
 
-    /// Common get_y_range implementation for a single value series
+    /// Common `get_y_range` implementation for a single value series
     pub fn get_y_range_for_values(
         values: &[Option<f64>],
         min_ix: usize,
@@ -233,7 +233,7 @@ pub trait Indicator: Send + Sync {
     fn reset(&mut self);
 
     /// Calculate indicator values for given bar data.
-    /// Default implementation uses reset() + update() loop for backward compatibility.
+    /// Default implementation uses `reset`() `+` `update`() loop for backward compatibility.
     fn calculate(&mut self, bars: &[BarData]) {
         self.reset();
         for bar in bars {
@@ -253,14 +253,14 @@ pub trait Indicator: Send + Sync {
     /// Get Y-axis range for this indicator
     fn get_y_range(&self, min_ix: usize, max_ix: usize) -> Option<(f64, f64)>;
 
-    /// Get the configurable parameters of this indicator as a HashMap
+    /// Get the configurable parameters of this indicator as a `HashMap`
     fn get_parameters(&self) -> HashMap<String, f64> {
         HashMap::new()
     }
 
     /// Push an externally-computed value into this indicator.
-    /// Default is no-op — only CustomIndicator overrides this to support
-    /// Python-computed indicators whose values arrive via on_indicator.
+    /// Default is no-op — only `CustomIndicator` overrides this to support
+    /// Python-computed indicators whose values arrive via `on_indicator`.
     fn update_raw(&mut self, _value: f64) {}
 }
 
@@ -301,6 +301,7 @@ impl Indicator for MA {
         self.location
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn update(&mut self, bar: &BarData) -> bool {
         let value = bar.close_price;
         self.base.count += 1;
@@ -359,6 +360,7 @@ impl Indicator for MA {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -396,6 +398,7 @@ impl EMA {
     }
 
     /// Update with a raw value (for use as a composable sub-indicator)
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn update_raw(&mut self, value: f64) -> bool {
         self.base.count += 1;
         self.base.has_inputs = true;
@@ -488,6 +491,7 @@ impl Indicator for EMA {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -671,6 +675,7 @@ impl Indicator for BOLL {
         )
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -716,6 +721,7 @@ impl Indicator for WMA {
         self.location
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn update(&mut self, bar: &BarData) -> bool {
         let value = bar.close_price;
         self.base.count += 1;
@@ -780,6 +786,7 @@ impl Indicator for WMA {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -1172,8 +1179,9 @@ impl EmaState {
         }
     }
 
-    /// Returns Some(ema_value) when the EMA has enough data, None otherwise.
+    /// Returns `Some`(`ema_value`) when the EMA has enough data, None otherwise.
     /// The returned value is the NEW EMA output (only produced after initialization).
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn update_raw(&mut self, value: f64) -> Option<f64> {
         self.count += 1;
 
@@ -1383,6 +1391,7 @@ impl Indicator for TRIX {
         )
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -1391,7 +1400,7 @@ impl Indicator for TRIX {
     }
 }
 
-/// SuperTrend Indicator
+/// `SuperTrend` Indicator
 pub struct SUPER {
     trend_values: Vec<Option<f64>>,
     trend_direction: Vec<Option<i32>>,
@@ -1458,6 +1467,7 @@ impl Indicator for SUPER {
         self.location
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn update(&mut self, bar: &BarData) -> bool {
         self.base.count += 1;
         self.base.has_inputs = true;
@@ -1614,6 +1624,7 @@ impl Indicator for SUPER {
         IndicatorBase::get_y_range_for_values(&self.trend_values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -1636,8 +1647,8 @@ pub struct CustomIndicator {
     config: IndicatorLineConfig,
     location: IndicatorLocation,
     base: IndicatorBase,
-    /// When true, this indicator's values come exclusively from update_raw()
-    /// (e.g., Python-computed indicators via on_indicator). update() and calculate()
+    /// When true, this indicator's values come exclusively from `update_raw`()
+    /// (e.g., Python-computed indicators via `on_indicator`)`.` `update`() and `calculate`()
     /// are no-ops to prevent misaligned value vectors.
     externally_computed: bool,
 }
@@ -1684,8 +1695,8 @@ impl CustomIndicator {
     }
 
     /// Set whether this indicator is externally computed.
-    /// When true, update() and calculate() are no-ops — values come
-    /// exclusively from update_raw() (e.g., Python on_indicator values).
+    /// When true, `update`() and `calculate`() are no-ops — values come
+    /// exclusively from `update_raw`() (e.g., `Python` `on_indicator` values).
     pub fn set_externally_computed(&mut self, value: bool) {
         self.externally_computed = value;
     }
@@ -2073,6 +2084,7 @@ impl Indicator for RSI {
         self.location
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn update(&mut self, bar: &BarData) -> bool {
         self.base.count += 1;
         self.base.has_inputs = true;
@@ -2154,6 +2166,7 @@ impl Indicator for RSI {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -2319,6 +2332,7 @@ impl Indicator for MACD {
         )
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("fast_period".to_string(), self.fast_period as f64);
@@ -2370,6 +2384,7 @@ impl Indicator for ATR {
         self.location
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn update(&mut self, bar: &BarData) -> bool {
         self.base.count += 1;
         self.base.has_inputs = true;
@@ -2443,6 +2458,7 @@ impl Indicator for ATR {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -2619,6 +2635,7 @@ impl Indicator for KDJ {
         )
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.k_period as f64);
@@ -2665,6 +2682,7 @@ impl Indicator for CCI {
         self.location
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn update(&mut self, bar: &BarData) -> bool {
         self.base.count += 1;
         self.base.has_inputs = true;
@@ -2724,6 +2742,7 @@ impl Indicator for CCI {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);
@@ -2853,6 +2872,7 @@ impl Indicator for MFI {
         IndicatorBase::get_y_range_for_values(&self.values, min_ix, max_ix)
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn get_parameters(&self) -> HashMap<String, f64> {
         let mut params = HashMap::new();
         params.insert("period".to_string(), self.period as f64);

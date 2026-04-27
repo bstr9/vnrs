@@ -71,7 +71,7 @@ impl BaseDatafeed for EmptyDatafeed {
 /// Supports both Spot and USDT-M Futures via the Binance klines API.
 /// Does not require API keys for public historical data.
 ///
-/// For tick-level history, falls back to local SQLite database since
+/// For tick-level history, falls back to local `SQLite` database since
 /// Binance REST API doesn't provide tick data via klines endpoint.
 pub struct BinanceDatafeed {
     /// REST client for Binance API
@@ -83,7 +83,7 @@ pub struct BinanceDatafeed {
 }
 
 impl BinanceDatafeed {
-    /// Create a new BinanceDatafeed for Spot
+    /// Create a new `BinanceDatafeed` for Spot
     pub fn new_spot() -> Self {
         Self {
             rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
@@ -92,7 +92,7 @@ impl BinanceDatafeed {
         }
     }
 
-    /// Create a new BinanceDatafeed for USDT-M Futures
+    /// Create a new `BinanceDatafeed` for USDT-M Futures
     pub fn new_futures() -> Self {
         Self {
             rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
@@ -101,7 +101,7 @@ impl BinanceDatafeed {
         }
     }
 
-    /// Create a new BinanceDatafeed for Spot with database for tick history
+    /// Create a new `BinanceDatafeed` for Spot with database for tick history
     pub fn new_spot_with_database(database: Arc<dyn BaseDatabase>) -> Self {
         Self {
             rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),
@@ -110,7 +110,7 @@ impl BinanceDatafeed {
         }
     }
 
-    /// Create a new BinanceDatafeed for USDT-M Futures with database for tick history
+    /// Create a new `BinanceDatafeed` for USDT-M Futures with database for tick history
     pub fn new_futures_with_database(database: Arc<dyn BaseDatabase>) -> Self {
         Self {
             rest_client: crate::gateway::binance::BinanceRestClient::new().unwrap_or_default(),

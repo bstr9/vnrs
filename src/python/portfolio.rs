@@ -1,4 +1,4 @@
-//! PortfolioFacade — a read-only PyO3 class exposing portfolio state to Python strategies.
+//! `PortfolioFacade` — a read-`only` `PyO3` class exposing portfolio state to Python strategies.
 //!
 //! The facade wraps a snapshot of engine state (balance + positions) behind
 //! `Arc<Mutex<PortfolioState>>`. Engines (live or backtest) push updates via
@@ -44,7 +44,7 @@ impl PositionSnapshot {
         format!("{vt_symbol}.{dir_str}")
     }
 
-    /// Build the map key from a vt_symbol and direction string.
+    /// Build the map key from a `vt_symbol` and direction string.
     fn key_from_str(vt_symbol: &str, direction: &str) -> String {
         format!("{vt_symbol}.{direction}")
     }
@@ -86,17 +86,17 @@ impl PortfolioState {
         self.balance - self.frozen
     }
 
-    /// Sum of unrealized PnL across all positions.
+    /// Sum of unrealized `PnL` across all positions.
     pub fn total_unrealized_pnl(&self) -> f64 {
         self.positions.values().map(|p| p.unrealized_pnl).sum()
     }
 
-    /// Equity = balance + total unrealized PnL.
+    /// Equity = balance + total unrealized `PnL`.
     pub fn equity(&self) -> f64 {
         self.balance + self.total_unrealized_pnl()
     }
 
-    /// Net signed position for a given vt_symbol (long positive, short negative).
+    /// Net signed position for a given `vt_symbol` (long positive, short negative).
     /// Aggregates across all direction buckets for that symbol.
     pub fn net_position(&self, vt_symbol: &str) -> f64 {
         self.positions
@@ -115,7 +115,7 @@ impl PortfolioState {
             .sum()
     }
 
-    /// Look up a single position by vt_symbol.
+    /// Look up a single position by `vt_symbol`.
     /// Returns the first matching position (preferring LONG if both exist).
     pub fn get_position(&self, vt_symbol: &str) -> Option<&PositionSnapshot> {
         // Try LONG first, then SHORT, then NET
@@ -169,7 +169,7 @@ impl PortfolioState {
     }
 
     /// Update balance (used by backtesting engine).
-    /// On the first call when start_capital is 0, also records it as start_capital.
+    /// On the first call when `start_capital` is 0, also records it as `start_capital`.
     pub fn update_balance(&mut self, capital: f64) {
         if self.start_capital == 0.0 && capital > 0.0 {
             self.start_capital = capital;
@@ -216,7 +216,7 @@ impl PortfolioState {
         self.positions.insert(key, snapshot);
     }
 
-    /// Update unrealized PnL for a position given a mark price.
+    /// Update unrealized `PnL` for a position given a mark price.
     pub fn update_mark_price(&mut self, vt_symbol: &str, direction: &Direction, mark_price: f64) {
         let key = PositionSnapshot::key(vt_symbol, direction);
         if let Some(pos) = self.positions.get_mut(&key) {
@@ -406,7 +406,7 @@ impl PortfolioFacade {
             .update_position_fill(vt_symbol, direction, quantity, avg_price, realized);
     }
 
-    /// Update mark price for a position (recalculates unrealized PnL).
+    /// Update mark price for a position (recalculates unrealized `PnL`).
     pub fn update_mark_price(&self, vt_symbol: &str, direction: &Direction, mark_price: f64) {
         self.inner
             .lock()
@@ -448,7 +448,7 @@ impl PortfolioFacade {
             .available()
     }
 
-    /// Equity = balance + total unrealized PnL.
+    /// Equity = balance + total unrealized `PnL`.
     #[getter]
     fn equity(&self) -> f64 {
         self.inner
@@ -457,7 +457,7 @@ impl PortfolioFacade {
             .equity()
     }
 
-    /// Total unrealized PnL across all positions.
+    /// Total unrealized `PnL` across all positions.
     #[getter]
     fn unrealized_pnl(&self) -> f64 {
         self.inner
@@ -504,7 +504,7 @@ impl PortfolioFacade {
     /// Compute portfolio-level statistics from the accumulated daily results.
     ///
     /// Uses `calculate_statistics` from the backtesting module with default
-    /// parameters: risk_free = 0.0, annual_days = 252.
+    /// parameters: `risk_free` = 0.`0,` `annual_days` = 252.
     ///
     /// Returns an empty `PortfolioStatistics` if no daily results have been
     /// recorded yet.
@@ -541,7 +541,7 @@ impl Default for PortfolioFacade {
 // Registration helper (called from bindings.rs)
 // ---------------------------------------------------------------------------
 
-/// Register PortfolioFacade, PyPosition, and PyPortfolioStatistics with the PyO3 module.
+/// Register `PortfolioFacade`, `PyPosition`, and `PyPortfolioStatistics` with the `PyO3` module.
 pub fn register_portfolio_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PortfolioFacade>()?;
     m.add_class::<PyPosition>()?;

@@ -1,7 +1,7 @@
 //! MCP Server 主服务器实现
 //!
-//! TradingMcpServer 是 MCP 协议的核心入口，实现 ServerHandler trait，
-//! 聚合 TradingTools + UITools + Resources，支持 stdio 和 HTTP/SSE 两种传输模式。
+//! `TradingMcpServer` 是 MCP 协议的核心入口，`实现` `ServerHandler` trait，
+//! 聚合 `TradingTools` `+` `UITools` + Resources，支持 stdio 和 HTTP/SSE 两种传输模式。
 //! 支持 Sampling 能力：Server 可通过 `Peer::create_message()` 向 Client 请求 LLM 推理。
 
 use rmcp::{
@@ -112,7 +112,7 @@ pub type SamplingApprovalCallback =
 ///
 /// 支持两种传输模式：
 /// - **STDIO**：适用于 Claude Desktop 等本地 MCP 客户端
-/// - **HTTP/SSE**：适用于远程 Web 客户端，基于 rmcp 的 StreamableHttpService
+/// - **HTTP/SSE**：适用于远程 Web 客户端，基于 rmcp 的 `StreamableHttpService`
 #[allow(dead_code)]
 pub struct TradingMcpServer {
     pub(crate) engine: Arc<MainEngine>,
@@ -120,25 +120,25 @@ pub struct TradingMcpServer {
     pub(crate) ui_state: Arc<RwLock<UIState>>,
     pub(crate) sampling_config: SamplingConfig,
     tool_router: ToolRouter<Self>,
-    /// Optional StrategyEngine for strategy tools
+    /// Optional `StrategyEngine` for strategy tools
     pub(crate) strategy_engine: Option<Arc<StrategyEngine>>,
     /// Backtest results cache
     pub(crate) backtest_cache: Arc<tokio::sync::RwLock<Vec<BacktestEntry>>>,
-    /// MCP configuration (read_only, allowed_modules, transport)
+    /// MCP configuration (`read_only`, `allowed_modules`, transport)
     pub(crate) config: McpConfig,
     /// Optional human-in-the-loop approval callback for sampling requests
     pub(crate) approval_callback: Option<Arc<SamplingApprovalCallback>>,
 }
 
 impl TradingMcpServer {
-    /// 创建 TradingMcpServer 实例
+    /// 创建 `TradingMcpServer` 实例
     ///
     /// 返回 (server, UICommandReceiver)，Receiver 供 UI 线程消费命令。
     pub fn new(engine: Arc<MainEngine>) -> (Self, UICommandReceiver) {
         Self::with_sampling_config(engine, SamplingConfig::default())
     }
 
-    /// 创建带自定义 Sampling 配置的 TradingMcpServer 实例
+    /// 创建带自定义 Sampling 配置的 `TradingMcpServer` 实例
     pub fn with_sampling_config(
         engine: Arc<MainEngine>,
         sampling_config: SamplingConfig,
@@ -146,12 +146,12 @@ impl TradingMcpServer {
         Self::with_config_and_sampling(engine, McpConfig::default(), sampling_config)
     }
 
-    /// 创建带 McpConfig 的 TradingMcpServer 实例
+    /// 创建带 `McpConfig` `的` `TradingMcpServer` 实例
     pub fn with_config(engine: Arc<MainEngine>, config: McpConfig) -> (Self, UICommandReceiver) {
         Self::with_config_and_sampling(engine, config, SamplingConfig::default())
     }
 
-    /// 创建带 McpConfig 和 Sampling 配置的 TradingMcpServer 实例
+    /// 创建带 `McpConfig` 和 Sampling `配置的` `TradingMcpServer` 实例
     pub fn with_config_and_sampling(
         engine: Arc<MainEngine>,
         config: McpConfig,

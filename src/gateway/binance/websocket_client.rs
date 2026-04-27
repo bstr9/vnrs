@@ -263,7 +263,7 @@ pub struct BinanceWebSocketClient {
     proxy_settings: Arc<RwLock<(String, u16)>>,
     /// Tracked subscriptions for re-subscription after reconnect
     subscriptions: Arc<RwLock<Vec<String>>>,
-    /// Callback invoked when connection is lost unexpectedly (not via disconnect())
+    /// Callback invoked when connection is lost unexpectedly (not via `disconnect`())
     on_disconnect: Arc<RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>,
     /// Flag to distinguish intentional disconnect from unexpected connection loss
     graceful_shutdown: Arc<AtomicBool>,
@@ -576,6 +576,7 @@ impl BinanceWebSocketClient {
 
     /// Calculate exponential backoff delay with jitter for reconnect attempts.
     /// Base: 1s, doubles each attempt, capped at 60s, ±25% jitter.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     pub fn calculate_backoff_delay(attempt: u32) -> std::time::Duration {
         let base_secs: u64 = 1u64.checked_shl(attempt).unwrap_or(60).min(60);
         // Simple jitter using SystemTime as entropy source (no external rand crate)
@@ -584,7 +585,7 @@ impl BinanceWebSocketClient {
             .map(|d| d.subsec_nanos())
             .unwrap_or(0);
         // Map to [-0.25, +0.25] range
-        let jitter_pct = (jitter_nanos as f64 / u32::MAX as f64) * 0.5 - 0.25;
+        let jitter_pct = (f64::from(jitter_nanos) / f64::from(u32::MAX)) * 0.5 - 0.25;
         let final_secs = ((base_secs as f64) * (1.0 + jitter_pct)).max(1.0) as u64;
         std::time::Duration::from_secs(final_secs)
     }
@@ -703,7 +704,7 @@ impl BinanceWebSocketClient {
         self.send(message).await
     }
 
-    /// Set the on_disconnect callback, invoked when connection is lost unexpectedly
+    /// Set the `on_disconnect` callback, invoked when connection is lost unexpectedly
     pub async fn set_on_disconnect(&self, callback: Arc<dyn Fn() + Send + Sync>) {
         *self.on_disconnect.write().await = Some(callback);
     }

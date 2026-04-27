@@ -1,7 +1,7 @@
 //! Model module for alpha research
 //! Provides template for machine learning models in alpha research
 //!
-//! This module implements the AlphaModel trait and several example models
+//! This module implements the `AlphaModel` trait and several example models
 //! matching vnpy's functionality.
 
 use crate::alpha::dataset::{AlphaDataset, Segment};
@@ -127,6 +127,7 @@ impl Default for LinearRegressionModel {
 }
 
 impl AlphaModel for LinearRegressionModel {
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn fit(&mut self, dataset: &AlphaDataset) {
         logger::logger().info("Fitting Linear Regression model...");
 
@@ -355,7 +356,7 @@ impl DecisionTree {
         self.root = Some(self.build_tree(x, y, &indices, 0, rng, max_features, n_features));
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)] // usize-to-f64 cast acceptable for practical counts; intentional cast
     fn build_tree(
         &self,
         x: &[Vec<f64>],
@@ -535,6 +536,7 @@ impl DecisionTree {
     }
 }
 
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 fn mean(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -542,6 +544,7 @@ fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
 
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 fn mean_of_indices(y: &[f64], indices: &[usize]) -> f64 {
     if indices.is_empty() {
         return 0.0;
@@ -550,6 +553,7 @@ fn mean_of_indices(y: &[f64], indices: &[usize]) -> f64 {
     sum / indices.len() as f64
 }
 
+#[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
 fn variance_of_indices(y: &[f64], indices: &[usize]) -> f64 {
     if indices.len() < 2 {
         return 0.0;
@@ -689,6 +693,7 @@ impl Default for RandomForestModel {
 }
 
 impl AlphaModel for RandomForestModel {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts; value is non-negative
     fn fit(&mut self, dataset: &AlphaDataset) {
         logger::logger().info(&format!(
             "Fitting Random Forest model with {} estimators",
@@ -765,6 +770,7 @@ impl AlphaModel for RandomForestModel {
         ));
     }
 
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn predict(
         &self,
         dataset: &AlphaDataset,

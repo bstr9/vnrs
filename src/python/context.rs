@@ -1,4 +1,4 @@
-//! Python wrapper for StrategyContext
+//! Python wrapper for `StrategyContext`
 //!
 //! Exposes `get_tick`, `get_bar`, `get_bars`, `load_bar` to Python strategies
 //! via `self.context` on the Strategy class.
@@ -13,10 +13,10 @@ use crate::python::data_types::PyTickData;
 use crate::strategy::template::StrategyContext;
 use crate::trader::{BarData, TickData};
 
-/// Python wrapper for StrategyContext providing market data access.
+/// Python wrapper for `StrategyContext` providing market data access.
 ///
 /// Shared `Arc<Mutex<...>>` caches allow the context to reflect updates
-/// from the live StrategyEngine in real-time.
+/// from the live `StrategyEngine` in real-time.
 #[pyclass]
 pub struct PyStrategyContext {
     tick_cache: Arc<Mutex<HashMap<String, TickData>>>,
@@ -28,7 +28,7 @@ pub struct PyStrategyContext {
 impl PyStrategyContext {
     /// Get the latest tick data for a symbol.
     ///
-    /// Returns a PyTickData object if found, or None if no tick data is available.
+    /// Returns a `PyTickData` object if found, or None if no tick data is available.
     fn get_tick(&self, vt_symbol: String) -> Option<PyTickData> {
         self.tick_cache
             .lock()
@@ -39,7 +39,7 @@ impl PyStrategyContext {
 
     /// Get the latest bar data for a symbol.
     ///
-    /// Returns a PyBarData object if found, or None if no bar data is available.
+    /// Returns a `PyBarData` object if found, or None if no bar data is available.
     fn get_bar(&self, vt_symbol: String) -> Option<PyBarData> {
         self.bar_cache
             .lock()
@@ -50,7 +50,7 @@ impl PyStrategyContext {
 
     /// Get the last `count` historical bars for a symbol.
     ///
-    /// Returns a list of PyBarData objects. If the symbol has fewer than
+    /// Returns a list of `PyBarData` objects. If the symbol has fewer than
     /// `count` bars cached, all available bars are returned.
     fn get_bars(&self, vt_symbol: String, count: usize) -> Vec<PyBarData> {
         let guard = self
@@ -69,12 +69,13 @@ impl PyStrategyContext {
     /// Load historical bars for a symbol (simplified: returns from cache only).
     ///
     /// Args:
-    ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
+    ///     `vt_symbol`: Symbol in SYMBOL.EXCHANGE format
     ///     days: Number of days of history (used as a hint; actual data comes from cache)
     ///     interval: Bar interval string (e.g., "1m", "1h") — currently unused
     ///
-    /// Returns a list of PyBarData objects from the cached historical bars.
+    /// Returns a list of `PyBarData` objects from the cached historical bars.
     #[pyo3(signature = (vt_symbol, days, interval=None))]
+    #[allow(clippy::cast_sign_loss)] // value is non-negative
     fn load_bar(&self, vt_symbol: String, days: i32, interval: Option<&str>) -> Vec<PyBarData> {
         // Simplified: no DB access, just return from cache.
         // Use `days` as a rough estimate of bar count (days * ~1440 minute bars).
@@ -85,8 +86,8 @@ impl PyStrategyContext {
 }
 
 impl PyStrategyContext {
-    /// Create a PyStrategyContext from the shared caches of a live StrategyContext.
-    /// Updates to the StrategyContext's caches (e.g., from the live StrategyEngine)
+    /// Create a `PyStrategyContext` from the shared caches of a `live` `StrategyContext`.
+    /// Updates to the `StrategyContext`'s caches (e.g., from the `live` `StrategyEngine`)
     /// are immediately visible through this wrapper.
     pub fn from_caches(
         tick_cache: Arc<Mutex<HashMap<String, TickData>>>,
@@ -100,9 +101,9 @@ impl PyStrategyContext {
         }
     }
 
-    /// Create a PyStrategyContext that shares the same underlying caches
-    /// as an existing StrategyContext. Updates to the StrategyContext's caches
-    /// (e.g., from the live StrategyEngine) are immediately visible.
+    /// Create a `PyStrategyContext` that shares the same underlying caches
+    /// as an existing `StrategyContext`. Updates to the `StrategyContext`'s caches
+    /// (e.g., from the live `StrategyEngine`) are immediately visible.
     pub fn from_strategy_context(ctx: &StrategyContext) -> Self {
         Self {
             tick_cache: ctx.tick_cache.clone(),
@@ -111,8 +112,8 @@ impl PyStrategyContext {
         }
     }
 
-    /// Create a PyStrategyContext with fresh empty caches.
-    /// Used for backtesting where there is no live StrategyContext.
+    /// Create a `PyStrategyContext` with fresh empty caches.
+    /// Used for backtesting where there is no live `StrategyContext`.
     pub fn new_empty() -> Self {
         Self {
             tick_cache: Arc::new(Mutex::new(HashMap::new())),

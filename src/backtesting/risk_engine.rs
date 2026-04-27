@@ -1,7 +1,7 @@
 //! Pre-trade Risk Engine
 //!
 //! Validates orders before they are sent to the matching engine.
-//! Based on nautilus_trader's risk management approach.
+//! Based on `nautilus_trader`'s risk management approach.
 
 use crate::backtesting::margin_model::MarginModel;
 use crate::backtesting::position::Position;
@@ -403,7 +403,7 @@ impl RiskEngine {
         self.is_halted
     }
 
-    /// Create a RiskConfig with portfolio-level limits
+    /// Create a `RiskConfig` with portfolio-level limits
     pub fn portfolio_config(
         max_exposure: f64,
         max_leverage: f64,

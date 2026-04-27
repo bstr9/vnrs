@@ -45,10 +45,10 @@ pub struct StrategyEngine {
     main_engine: Arc<MainEngine>,
     /// Event engine (DEPRECATED: kept for backward compatibility only)
     /// 
-    /// **Note**: This sync EventEngine is never started. All event routing now flows
-    /// through MainEngine's async event loop via `process_event()`. This field exists
+    /// **Note**: This sync `EventEngine` is never started. All event routing now flows
+    /// through `MainEngine`'s async event loop via `process_event()`. This field exists
     /// solely to maintain backward compatibility with existing code that passes an
-    /// EventEngine to the constructor. It should be removed in a future major version.
+    /// `EventEngine` to the constructor. It should be removed in a future major version.
     #[allow(dead_code)]
     event_engine: Arc<EventEngine>,
     
@@ -73,32 +73,32 @@ pub struct StrategyEngine {
     
     /// Processed trade IDs (for deduplication)
     processed_tradeids: Arc<RwLock<std::collections::HashSet<String>>>,
-    /// Order tracker for LRU eviction of processed_tradeids
+    /// Order tracker for LRU eviction of `processed_tradeids`
     processed_tradeids_order: Arc<RwLock<Vec<String>>>,
     
-    /// Multi-period bar synthesis accumulators: (strategy_name, vt_symbol) �?(target_interval, bar_count, accumulated_bar)
+    /// Multi-period bar synthesis accumulators: (`strategy_name`, `vt_symbol`) �`?`(`target_interval`, `bar_count`, `accumulated_bar`)
     /// Accumulates 1-minute bars and delivers higher-timeframe bars when complete
     bar_synthesizers: Arc<RwLock<HashMap<(String, String), BarSynthesizer>>>,
     
-    /// Per-strategy realized PnL: strategy_name �?realized PnL
+    /// Per-strategy realized `PnL`: `strategy_name` �?`realized` `PnL`
     strategy_pnl: Arc<RwLock<HashMap<String, f64>>>,
-    /// Per-strategy unrealized PnL: strategy_name �?unrealized PnL
+    /// Per-strategy unrealized `PnL`: `strategy_name` �?`unrealized` `PnL`
     strategy_unrealized_pnl: Arc<RwLock<HashMap<String, f64>>>,
-    /// Per-strategy trade count: strategy_name �?number of trades
+    /// Per-strategy trade count: `strategy_name` �?number of trades
     strategy_trade_count: Arc<RwLock<HashMap<String, usize>>>,
-    /// Per-strategy average entry price: (strategy_name, vt_symbol) �?avg entry price
+    /// Per-strategy average entry price: (`strategy_name`, `vt_symbol`) �?avg entry price
     strategy_avg_price: Arc<RwLock<HashMap<(String, String), f64>>>,
     /// Frozen close volume per strategy per symbol (to prevent double-closing)
-    /// Key: strategy_name, Value: HashMap<vt_symbol, frozen_close_volume>
+    /// Key: `strategy_name`, `Value:` `HashMap`<`vt_symbol`, `frozen_close_volume`>
     strategy_frozen_closes: Arc<RwLock<HashMap<String, HashMap<String, f64>>>>,
-    /// Maps vt_orderid → CloseOrderInfo for unfreezing on fill/cancel/reject
+    /// Maps `vt_orderid` `→` `CloseOrderInfo` for unfreezing on fill/cancel/reject
     order_close_info: Arc<RwLock<HashMap<String, CloseOrderInfo>>>,
-    /// Per-strategy risk configuration (limits enforced before MainEngine)
+    /// Per-strategy risk configuration (limits enforced before `MainEngine`)
     strategy_risk_configs: Arc<RwLock<HashMap<String, StrategyRiskConfig>>>,
     /// Optional database for loading historical data
     database: Option<Arc<dyn BaseDatabase>>,
 
-    /// Scheduled timers: key = "{strategy_name}.{timer_id}"
+    /// Scheduled timers: key = "{`strategy_name`}.{`timer_id`}"
     timers: Arc<RwLock<HashMap<String, TimerEntry>>>,
 }
 
@@ -118,7 +118,7 @@ impl StrategyEngine {
         Self::with_database(main_engine, event_engine, None)
     }
 
-    /// Create a StrategyEngine with an optional database backend
+    /// Create a `StrategyEngine` with an optional database backend
     pub fn with_database(
         main_engine: Arc<MainEngine>,
         event_engine: Arc<EventEngine>,
@@ -163,7 +163,7 @@ impl StrategyEngine {
         tracing::info!("Strategy engine initialized successfully");
     }
 
-    /// Process gateway events from MainEngine (BaseEngine implementation)
+    /// Process gateway events from `MainEngine` (`BaseEngine` implementation)
     /// Routes tick/bar/order/trade events to the appropriate strategies
     fn process_event_internal(&self, event_type: &str, event: &GatewayEvent) {
         match event_type {
@@ -273,8 +273,8 @@ impl StrategyEngine {
 
     /// Process bar event and dispatch to subscribed strategies
     ///
-    /// Integration point for SignalBus (feature = "signal"):
-    /// Strategies can access cached AI signals during on_bar by holding a
+    /// Integration point for `SignalBus` (feature = "signal"):
+    /// Strategies can access cached AI signals during `on_bar` by holding a
     /// reference to a `SignalBus` and calling `get_latest(topic)`.
     /// Example:
     /// ```rust,ignore
@@ -429,7 +429,7 @@ impl StrategyEngine {
     }
 
     /// Process trade event and dispatch to owning strategy (with deduplication)
-    /// Also tracks per-strategy realized PnL and unfreezes close volume
+    /// Also tracks per-strategy realized `PnL` and unfreezes close volume
     fn process_trade_event(&self, trade: &TradeData) {
         // Deduplicate trades using LRU-style eviction instead of clear-all (#27)
         const TRADEID_CAPACITY: usize = 10000;
@@ -617,7 +617,7 @@ impl StrategyEngine {
     ///
     /// This method creates a `PythonStrategyAdapter` wrapping the Python strategy
     /// and inserts it into the engine so it receives live market data events
-    /// through the normal StrategyEngine event routing path.
+    /// through the normal `StrategyEngine` event routing path.
     #[cfg(feature = "python")]
     pub async fn add_python_strategy(
         &self,
@@ -658,11 +658,11 @@ impl StrategyEngine {
         Ok(())
     }
 
-    /// Get the shared caches from the StrategyContext for a given strategy name.
+    /// Get the shared caches from the `StrategyContext` for a given strategy name.
     ///
     /// Returns the `(tick_cache, bar_cache, historical_bars)` Arcs if the
     /// strategy's context exists, allowing Python code to read the same
-    /// live data that the StrategyEngine updates.
+    /// live data that the `StrategyEngine` updates.
     #[cfg(feature = "python")]
     #[allow(clippy::type_complexity)]
     pub fn get_context_caches(
@@ -718,7 +718,7 @@ impl StrategyEngine {
             .push(strategy_name.to_string());
     }
 
-    /// Parse a vt_symbol into (symbol, Exchange).
+    /// Parse a `vt_symbol` into (symbol, Exchange).
     /// Returns None if the format is invalid or the exchange is unsupported.
     pub fn parse_vt_symbol(vt_symbol: &str) -> Option<(String, Exchange)> {
         let parts: Vec<&str> = vt_symbol.split('.').collect();
@@ -1195,7 +1195,7 @@ impl StrategyEngine {
         Ok(())
     }
 
-    /// Load historical bars for a strategy (public API for on_init warmup)
+    /// Load historical bars for a strategy (public API for `on_init` warmup)
     ///
     /// This method can be called during strategy initialization to load historical
     /// bar data into the strategy's context. Data is loaded from the database first,
@@ -1204,7 +1204,7 @@ impl StrategyEngine {
     /// # Arguments
     /// * `strategy_name` - Name of the strategy
     /// * `vt_symbol` - Symbol in "SYMBOL.EXCHANGE" format
-    /// * `interval` - Bar interval (e.g., Interval::Minute)
+    /// * `interval` - Bar interval (e.g., `Interval::Minute`)
     /// * `days` - Number of days of history to load
     ///
     /// # Returns
@@ -1450,8 +1450,8 @@ impl StrategyEngine {
         self.strategy_risk_configs.write().unwrap_or_else(std::sync::PoisonError::into_inner).remove(strategy_name);
     }
 
-    /// Send an order on behalf of a strategy, routing through MainEngine (with risk check)
-    /// Also populates orderid_strategy_map and strategy_orderid_map for callback routing
+    /// Send an order on behalf of a strategy, routing through `MainEngine` (with risk check)
+    /// Also populates `orderid_strategy_map` and `strategy_orderid_map` for callback routing
     ///
     /// For close orders, this method:
     /// 1. Checks available position (actual position minus frozen close volume from pending orders)
@@ -1575,7 +1575,7 @@ impl StrategyEngine {
         Ok(result)
     }
 
-    /// Process pending orders from a strategy (called after on_bar/on_tick callbacks)
+    /// Process pending orders from a strategy (called after `on_bar`/`on_tick` callbacks)
     pub async fn process_pending_orders(&self, strategy_name: &str) -> Vec<Result<String, String>> {
         let pending: Vec<OrderRequest> = {
             let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1594,7 +1594,7 @@ impl StrategyEngine {
         results
     }
 
-    /// Process pending stop orders from a strategy (called after on_bar/on_tick callbacks)
+    /// Process pending stop orders from a strategy (called after `on_bar`/`on_tick` callbacks)
     ///
     /// Registers stop orders with the engine. When the trigger price is reached,
     /// the stop order will be converted to a market/limit order.
@@ -1616,7 +1616,7 @@ impl StrategyEngine {
         results
     }
 
-    /// Process pending cancellations from a strategy (called after on_bar/on_tick callbacks)
+    /// Process pending cancellations from a strategy (called after `on_bar`/`on_tick` callbacks)
     ///
     /// Handles both regular order and stop order cancellation requests.
     pub async fn process_pending_cancellations(&self, strategy_name: &str) -> Vec<Result<(), String>> {
@@ -1646,8 +1646,8 @@ impl StrategyEngine {
 
     /// Process pending indicator registrations from a strategy
     ///
-    /// Returns the registrations that the strategy queued during on_init/on_bar callbacks.
-    /// The caller (typically MainWindow) should forward these to the indicator panel.
+    /// Returns the registrations that the strategy queued during `on_init`/`on_bar` callbacks.
+    /// The caller (typically `MainWindow`) should forward these to the indicator panel.
     #[cfg(feature = "python")]
     pub fn get_pending_indicator_registrations(&self, strategy_name: &str) -> Vec<crate::python::PendingIndicatorRegistration> {
         let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1659,7 +1659,7 @@ impl StrategyEngine {
     }
 
     /// Drain pending indicator values for a strategy.
-    /// Called from MainWindow to propagate on_indicator values to GUI.
+    /// Called from `MainWindow` to `propagate` `on_indicator` values to GUI.
     #[cfg(feature = "python")]
     pub fn drain_pending_indicator_values(&self, strategy_name: &str) -> Vec<crate::python::PendingIndicatorValue> {
         let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1672,8 +1672,8 @@ impl StrategyEngine {
 
     /// Register a stop order for a strategy
     ///
-    /// Creates a StopOrder tracked by the engine. When the trigger price is reached
-    /// (checked in process_tick_event), the stop order will be submitted as a
+    /// Creates a `StopOrder` tracked by the engine. When the trigger price is reached
+    /// (checked in `process_tick_event`), the stop order will be submitted as a
     /// market/limit order through the gateway.
     fn register_stop_order(&self, strategy_name: &str, req: StopOrderRequest) -> String {
         let stop_orderid = {
@@ -1722,8 +1722,8 @@ impl StrategyEngine {
 
     /// Process all pending actions from a strategy (orders, stop orders, cancellations)
     ///
-    /// Convenience method that calls process_pending_orders, process_pending_stop_orders,
-    /// and process_pending_cancellations in sequence.
+    /// Convenience method that calls `process_pending_orders`, `process_pending_stop_orders`,
+    /// and `process_pending_cancellations` in sequence.
     pub async fn process_all_pending(&self, strategy_name: &str) {
         self.process_pending_orders(strategy_name).await;
         self.process_pending_stop_orders(strategy_name).await;
@@ -1749,7 +1749,7 @@ impl StrategyEngine {
 
     /// Register a multi-period bar synthesizer for a strategy symbol.
     /// When 1-minute bars arrive, they will be accumulated into the target interval
-    /// and delivered to the strategy via on_bar() when complete.
+    /// and delivered to the strategy via `on_bar`() when complete.
     /// 
     /// For example, if a strategy needs 5-minute bars for BTCUSDT.BINANCE,
     /// call `register_bar_synthesizer("MyStrategy", "BTCUSDT.BINANCE", Interval::Minute5)`.
@@ -1785,17 +1785,17 @@ impl StrategyEngine {
     // Per-strategy PnL tracking
     // ========================================================================
 
-    /// Get realized PnL for a strategy
+    /// Get realized `PnL` for a strategy
     pub fn get_strategy_pnl(&self, strategy_name: &str) -> f64 {
         self.strategy_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0)
     }
 
-    /// Get unrealized PnL for a strategy
+    /// Get unrealized `PnL` for a strategy
     pub fn get_strategy_unrealized_pnl(&self, strategy_name: &str) -> f64 {
         self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0)
     }
 
-    /// Get total PnL (realized + unrealized) for a strategy
+    /// Get total `PnL` (realized + unrealized) for a strategy
     pub fn get_strategy_total_pnl(&self, strategy_name: &str) -> f64 {
         let realized = self.strategy_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0);
         let unrealized = self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0);
@@ -1807,8 +1807,8 @@ impl StrategyEngine {
         self.strategy_trade_count.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0)
     }
 
-    /// Update unrealized PnL for a strategy based on current market prices
-    /// Call this when ticks arrive to keep unrealized PnL up to date
+    /// Update unrealized `PnL` for a strategy based on current market prices
+    /// Call this when ticks arrive to keep unrealized `PnL` up to date
     pub fn update_unrealized_pnl(&self, strategy_name: &str, vt_symbol: &str) {
         let strategies = self.strategies.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         let pos = strategies.get(strategy_name)
@@ -1895,6 +1895,7 @@ impl StrategyEngine {
     /// - `timer_id`: unique identifier within the strategy
     /// - `seconds`: delay until first fire (and interval if `repeat=true`)
     /// - `repeat`: whether the timer repeats
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     pub fn schedule_timer(&self, strategy_name: &str, timer_id: &str, seconds: f64, repeat: bool) {
         let key = format!("{strategy_name}.{timer_id}");
         let now = Utc::now();
@@ -1933,8 +1934,8 @@ impl StrategyEngine {
         tracing::debug!("Cancelled all timers for strategy {}", strategy_name);
     }
 
-    /// Check timers and return list of (strategy_name, timer_id) pairs that have fired
-    /// Used by BacktestingEngine before each bar/tick callback
+    /// Check timers and return list of (`strategy_name`, `timer_id`) pairs that have fired
+    /// Used by `BacktestingEngine` before each bar/tick callback
     pub fn check_timers(&self, current_time: chrono::DateTime<Utc>) -> Vec<(String, String)> {
         let mut timers = self.timers.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut fired: Vec<(String, String)> = Vec::new();
@@ -1959,7 +1960,7 @@ impl StrategyEngine {
         fired
     }
 
-    /// Process a timer event (dispatched from MainEngine in live mode)
+    /// Process a timer event (dispatched from `MainEngine` in live mode)
     fn process_timer_event(&self, strategy_name: &str, timer_id: &str) {
         let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(strategy) = strategies.get_mut(strategy_name) {
@@ -1968,7 +1969,7 @@ impl StrategyEngine {
     }
 }
 
-/// Implement BaseEngine for StrategyEngine so it can receive events directly from MainEngine
+/// Implement `BaseEngine` for `StrategyEngine` so it can receive events directly `from` `MainEngine`
 impl BaseEngine for StrategyEngine {
     fn engine_name(&self) -> &str {
         "strategy"

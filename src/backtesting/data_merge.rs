@@ -24,7 +24,7 @@ fn datetime_to_nanos(dt: DateTime<Utc>) -> i64 {
 /// Takes multiple sorted slices of `BarData` and yields references
 /// in ascending datetime order without cloning any data.
 pub struct BarMergeIterator<'a> {
-    /// Min-heap of (timestamp_nanos, source_index, position_in_source)
+    /// Min-heap of (`timestamp_nanos`, `source_index,` `position_in_source`)
     heap: BinaryHeap<Reverse<(i64, usize, usize)>>,
     /// Source data slices
     sources: Vec<&'a [BarData]>,
@@ -87,7 +87,7 @@ impl<'a> Iterator for BarMergeIterator<'a> {
 /// Takes multiple sorted slices of `TickData` and yields references
 /// in ascending datetime order without cloning any data.
 pub struct TickMergeIterator<'a> {
-    /// Min-heap of (timestamp_nanos, source_index, position_in_source)
+    /// Min-heap of (`timestamp_nanos`, `source_index,` `position_in_source`)
     heap: BinaryHeap<Reverse<(i64, usize, usize)>>,
     /// Source data slices
     sources: Vec<&'a [TickData]>,

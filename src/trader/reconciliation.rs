@@ -2,7 +2,7 @@
 //!
 //! When a gateway reconnects after a disconnection, local OMS state may have drifted
 //! from the actual venue state (filled orders, changed positions, etc.).
-//! The ReconciliationEngine detects this drift and alerts the operator.
+//! The `ReconciliationEngine` detects this drift and alerts the operator.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, atomic::{AtomicBool, Ordering}};
@@ -26,28 +26,28 @@ const DEFAULT_DRIFT_THRESHOLD_PERCENT: f64 = 5.0;
 /// Position drift detected during reconciliation
 #[derive(Debug, Clone)]
 pub struct PositionDrift {
-    /// vt_symbol (e.g., BTCUSDT.BINANCE)
+    /// `vt_symbol` (e.g., BTCUSDT.BINANCE)
     pub vt_symbol: String,
-    /// Volume from OmsEngine
+    /// Volume from `OmsEngine`
     pub local_volume: f64,
     /// Volume from exchange query
     pub venue_volume: f64,
-    /// venue_volume - local_volume
+    /// `venue_volume` `-` `local_volume`
     pub drift: f64,
-    /// drift / local_volume * 100 (0.0 if local_volume == 0)
+    /// drift / `local_volume` * 100 (0.0 if `local_volume` == 0)
     pub drift_percent: f64,
 }
 
 /// Order drift detected during reconciliation
 #[derive(Debug, Clone)]
 pub struct OrderDrift {
-    /// vt_orderid (gateway_name.orderid)
+    /// `vt_orderid` (`gateway_name`.orderid)
     pub vt_orderid: String,
-    /// Status from OmsEngine
+    /// Status from `OmsEngine`
     pub local_status: Status,
     /// Status from exchange query
     pub venue_status: Status,
-    /// Remaining volume from OmsEngine (volume - traded)
+    /// Remaining volume from `OmsEngine` (volume - traded)
     pub local_volume: f64,
     /// Remaining volume on exchange
     pub venue_volume: f64,
@@ -92,14 +92,14 @@ impl ReconciliationResult {
 
 /// Reconciliation engine for syncing local vs venue state.
 ///
-/// On gateway reconnect, triggers query_position() and query_account()
-/// on the gateway, then compares the updated OmsEngine state against
+/// On gateway reconnect, triggers `query_position`() and `query_account`()
+/// on the gateway, then compares the updated `OmsEngine` state against
 /// pre-snapshot state to detect drift.
 ///
 /// For order reconciliation, compares local active orders against
-/// venue state after query_order triggers.
+/// venue state after `query_order` triggers.
 pub struct ReconciliationEngine {
-    /// Reference to MainEngine for data access
+    /// Reference to `MainEngine` for data access
     main_engine: Arc<MainEngine>,
     /// Last reconciliation result
     last_result: RwLock<Option<ReconciliationResult>>,
@@ -107,14 +107,14 @@ pub struct ReconciliationEngine {
     auto_reconcile: AtomicBool,
     /// Drift threshold percentage for critical alerts
     drift_threshold: RwLock<f64>,
-    /// Snapshot of positions before venue query (vt_positionid -> volume)
+    /// Snapshot of positions before venue query (`vt_positionid` -> volume)
     position_snapshot: RwLock<HashMap<String, f64>>,
-    /// Snapshot of active orders before venue query (vt_orderid -> (Status, remaining_volume))
+    /// Snapshot of active orders before venue query (`vt_orderid` -> (`Status,` `remaining_volume`))
     order_snapshot: RwLock<HashMap<String, (Status, f64)>>,
 }
 
 impl ReconciliationEngine {
-    /// Create a new ReconciliationEngine
+    /// Create a new `ReconciliationEngine`
     pub fn new(main_engine: Arc<MainEngine>) -> Self {
         Self {
             main_engine,
@@ -130,10 +130,10 @@ impl ReconciliationEngine {
     ///
     /// This will:
     /// 1. Take a snapshot of current local positions and orders
-    /// 2. Trigger gateway query_position() and query_account() to refresh venue state
-    /// 3. Wait briefly for events to propagate through OmsEngine
+    /// 2. Trigger gateway `query_position`() and `query_account`() to refresh venue state
+    /// 3. Wait briefly for events to propagate through `OmsEngine`
     /// 4. Compare local state (post-query) against the pre-snapshot
-    /// 5. Return a ReconciliationResult with any detected drift
+    /// 5. Return a `ReconciliationResult` with any detected drift
     pub async fn reconcile(&self, gateway_name: &str) -> Result<ReconciliationResult, String> {
         info!("开始对账: gateway={}", gateway_name);
 
@@ -283,7 +283,7 @@ impl ReconciliationEngine {
     // Internal methods
     // ========================================================================
 
-    /// Take a snapshot of current positions from OmsEngine
+    /// Take a snapshot of current positions from `OmsEngine`
     fn take_position_snapshot(&self) {
         let positions = self.main_engine.get_all_positions();
         let mut snapshot = self.position_snapshot.write().unwrap_or_else(|e| {
@@ -297,7 +297,7 @@ impl ReconciliationEngine {
         info!("持仓快照: {} 个持仓", snapshot.len());
     }
 
-    /// Take a snapshot of active orders from OmsEngine filtered by gateway
+    /// Take a snapshot of active orders from `OmsEngine` filtered by gateway
     fn take_order_snapshot(&self, gateway_name: &str) {
         let orders = self.main_engine.get_all_active_orders();
         let mut snapshot = self.order_snapshot.write().unwrap_or_else(|e| {
@@ -314,7 +314,7 @@ impl ReconciliationEngine {
         info!("委托快照: {} 个活跃委托 (gateway={})", snapshot.len(), gateway_name);
     }
 
-    /// Detect position drift by comparing snapshot against current OmsEngine state
+    /// Detect position drift by comparing snapshot against current `OmsEngine` state
     fn detect_position_drift(&self, gateway_name: &str) -> Vec<PositionDrift> {
         let snapshot = self.position_snapshot.read().unwrap_or_else(|e| {
             warn!("ReconciliationEngine lock poisoned, recovering");
@@ -392,7 +392,7 @@ impl ReconciliationEngine {
         drifts
     }
 
-    /// Detect order drift by comparing snapshot against current OmsEngine state
+    /// Detect order drift by comparing snapshot against current `OmsEngine` state
     fn detect_order_drift(&self, gateway_name: &str) -> Vec<OrderDrift> {
         let snapshot = self.order_snapshot.read().unwrap_or_else(|e| {
             warn!("ReconciliationEngine lock poisoned, recovering");

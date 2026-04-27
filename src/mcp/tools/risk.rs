@@ -1,7 +1,7 @@
 //! MCP Risk Tools — 风险管理工具集
 //!
-//! 提供 get_risk_metrics / set_stop_loss / set_take_profit / check_margin
-//! / get_exposure 等 MCP Tool，通过 MainEngine 的风险管理模块计算风险指标。
+//! 提供 `get_risk_metrics` `/` `set_stop_loss` / `set_take_profit` / `check_margin`
+//! / `get_exposure` 等 MCP Tool，`通过` `MainEngine` 的风险管理模块计算风险指标。
 
 use rmcp::{
     ErrorData as McpError,
@@ -20,13 +20,13 @@ use super::super::server::TradingMcpServer;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct SymbolParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct SetStopLossParams {
-    /// 标的符号（vt_symbol 格式）
+    /// `标的符号`（`vt_symbol` 格式）
     pub symbol: String,
     /// 方向：Long / Short
     pub direction: String,
@@ -38,7 +38,7 @@ pub struct SetStopLossParams {
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct SetTakeProfitParams {
-    /// 标的符号（vt_symbol 格式）
+    /// `标的符号`（`vt_symbol` 格式）
     pub symbol: String,
     /// 方向：Long / Short
     pub direction: String,
@@ -50,7 +50,7 @@ pub struct SetTakeProfitParams {
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct CheckMarginParams {
-    /// 标的符号（vt_symbol 格式）
+    /// `标的符号`（`vt_symbol` 格式）
     pub symbol: String,
     /// 拟开仓方向：Long / Short
     pub direction: String,
@@ -62,7 +62,7 @@ pub struct CheckMarginParams {
 
 // ---- RiskTools (data holder, no longer has #[tool_router]) ----
 
-/// 风险管理数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
+/// 风险管理数据容器（已迁移到 `TradingMcpServer` 的 `#`[`tool_router`] impl）
 #[allow(dead_code)]
 pub struct RiskTools {
     engine: Arc<MainEngine>,
@@ -70,7 +70,7 @@ pub struct RiskTools {
 
 #[allow(dead_code)]
 impl RiskTools {
-    /// 创建 RiskTools 实例
+    /// 创建 `RiskTools` 实例
     pub fn new(engine: Arc<MainEngine>) -> Self {
         Self { engine }
     }

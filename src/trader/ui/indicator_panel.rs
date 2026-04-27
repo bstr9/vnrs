@@ -226,12 +226,12 @@ impl IndicatorConfigEntry {
     }
 }
 
-/// An indicator registered from Python (via PyArrayManager)
+/// An indicator registered from Python (via `PyArrayManager`)
 #[derive(Debug, Clone)]
 pub struct PythonIndicatorEntry {
     /// Unique identifier for this Python indicator
     pub id: String,
-    /// Display name (e.g., "my_custom_ma")
+    /// Display name (e.g., "`my_custom_ma`")
     pub name: String,
     /// Category for grouping in the UI
     pub category: IndicatorCategory,
@@ -480,6 +480,7 @@ impl IndicatorPanel {
     }
     
     /// Show configuration for a specific indicator
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss)] // value fits in target type; value fits in target type; value is non-negative
     fn show_indicator_config(&mut self, ui: &mut Ui, mut config: IndicatorConfigEntry) {
         ui.label(RichText::new(format!("配置: {}", config.display_name())).strong());
         
@@ -819,9 +820,9 @@ impl serde::Serialize for IndicatorConfigEntry {
         s.serialize_field("signal_period", &self.signal_period)?;
         s.serialize_field("fast_period", &self.fast_period)?;
         s.serialize_field("slow_period", &self.slow_period)?;
-        s.serialize_field("color", &format!("{:08x}", self.color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | b as u32)))?;
-        s.serialize_field("signal_color", &format!("{:08x}", self.signal_color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | b as u32)))?;
-        s.serialize_field("hist_color", &format!("{:08x}", self.hist_color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | b as u32)))?;
+        s.serialize_field("color", &format!("{:08x}", self.color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | u32::from(b))))?;
+        s.serialize_field("signal_color", &format!("{:08x}", self.signal_color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | u32::from(b))))?;
+        s.serialize_field("hist_color", &format!("{:08x}", self.hist_color.to_srgba_unmultiplied().iter().copied().fold(0u32, |acc, b| (acc << 8) | u32::from(b))))?;
         s.serialize_field("location", &format!("{:?}", self.location))?;
         s.serialize_field("line_width", &self.line_width)?;
         s.serialize_field("enabled", &self.enabled)?;
@@ -830,6 +831,7 @@ impl serde::Serialize for IndicatorConfigEntry {
 }
 
 impl<'de> serde::Deserialize<'de> for IndicatorConfigEntry {
+    #[allow(clippy::cast_possible_truncation)] // value fits in target type
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

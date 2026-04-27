@@ -1,7 +1,7 @@
 //! Enhanced Position Tracking
 //!
-//! Inspired by nautilus_trader's Position class
-//! Tracks average entry price, realized PnL, and handles position flips correctly
+//! Inspired by `nautilus_trader`'s Position class
+//! Tracks average entry price, realized `PnL`, and handles position flips correctly
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -20,11 +20,11 @@ pub enum PositionEvent {
     Funding(f64),
 }
 
-/// Enhanced position tracking with average price and PnL calculation
+/// Enhanced position tracking with average price and `PnL` calculation
 ///
 /// This struct properly tracks:
 /// - Average entry price (volume-weighted)
-/// - Realized PnL from closed positions
+/// - Realized `PnL` from closed positions
 /// - Position flips (long to short or vice versa)
 /// - All fill events for audit trail
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,10 +57,10 @@ pub struct Position {
     /// Average close price (volume-weighted)
     avg_px_close: f64,
 
-    /// Realized PnL from closed trades
+    /// Realized `PnL` from closed trades
     realized_pnl: f64,
 
-    /// Total realized PnL including commissions
+    /// Total realized `PnL` including commissions
     realized_return: f64,
 
     /// Number of fills
@@ -132,11 +132,11 @@ impl Position {
         self.avg_px_close
     }
 
-    /// Get realized PnL.
+    /// Get realized `PnL`.
     ///
-    /// **Gross PnL vs Net PnL (after commission):**
+    /// **Gross `PnL` vs `Net` `PnL` (after commission):**
     ///
-    /// This field contains the **gross** realized PnL, calculated as:
+    /// This field contains the **gross** realized `PnL`, calculated as:
     /// - Long: `(close_price - avg_entry_price) * quantity * size_multiplier`
     /// - Short: `(avg_entry_price - close_price) * quantity * size_multiplier`
     ///
@@ -144,10 +144,10 @@ impl Position {
     /// - Commission reduces `realized_return` (via `add_commission()` → `apply_adjustment()`)
     /// - Funding is added to `realized_pnl` (via `add_funding()`)
     ///
-    /// To get **net** PnL after all costs, use: `realized_pnl + realized_return`
+    /// To get **net** `PnL` after all costs, use: `realized_pnl + realized_return`
     /// (note: `realized_return` is typically negative after commissions).
     ///
-    /// This separation exists because gross PnL reflects the trading decision
+    /// This separation exists because gross `PnL` reflects the trading decision
     /// quality, while the net result also depends on execution costs that vary
     /// by exchange/volume tier.
     pub fn realized_pnl(&self) -> f64 {
@@ -179,7 +179,7 @@ impl Position {
         self.ts_closed.is_some() && self.is_flat()
     }
 
-    /// Calculate unrealized PnL at given price
+    /// Calculate unrealized `PnL` at given price
     pub fn unrealized_pnl(&self, mark_price: f64) -> f64 {
         if self.is_flat() || self.avg_px_open == 0.0 {
             return 0.0;
@@ -209,7 +209,7 @@ impl Position {
     /// This handles:
     /// - Opening new positions
     /// - Adding to existing positions
-    /// - Closing positions (realizing PnL)
+    /// - Closing positions (realizing `PnL`)
     /// - Position flips (close + reopen in opposite direction)
     pub fn apply_fill(&mut self, trade: &TradeData) -> Result<(), String> {
         if trade.symbol != self.symbol || trade.exchange != self.exchange {
@@ -340,7 +340,7 @@ impl Position {
         Ok(())
     }
 
-    /// Realize PnL for a specific quantity at given price
+    /// Realize `PnL` for a specific quantity at given price
     fn realize_pnl_for_qty(&mut self, close_price: f64, qty: f64) -> Result<(), String> {
         if self.avg_px_open == 0.0 || qty <= 0.0 {
             return Ok(());

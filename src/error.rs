@@ -13,7 +13,7 @@ use std::path::PathBuf;
 // Gateway errors
 // ---------------------------------------------------------------------------
 
-/// Errors from exchange gateway operations (connect, subscribe, send_order, etc.)
+/// Errors from exchange gateway operations (connect, subscribe, `send_order`, etc.)
 #[derive(Debug, thiserror::Error)]
 pub enum GatewayError {
     #[error("connection failed: {0}")]

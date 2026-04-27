@@ -161,7 +161,7 @@ impl FuturesStrategy {
         self.base.short(vt_symbol, price, volume, false)
     }
     
-    /// Cover to close short position (alias for buy_close)
+    /// Cover to close short position (alias for `buy_close`)
     pub fn cover(&mut self, vt_symbol: &str, price: f64, volume: f64) -> Vec<String> {
         self.buy_close(vt_symbol, price, volume)
     }
@@ -292,7 +292,7 @@ impl FuturesStrategy {
         vt_orderids
     }
     
-    /// Get exchange from vt_symbol
+    /// Get exchange from `vt_symbol`
     fn get_exchange_from_symbol(&self, vt_symbol: &str) -> Exchange {
         let parts: Vec<&str> = vt_symbol.split('.').collect();
         if parts.len() == 2 {

@@ -1,7 +1,7 @@
 //! Database integration for historical data loading
 //! 
 //! Loads historical bar and tick data from database backends.
-//! Supports PostgreSQL (via `database` feature) and SQLite (via `sqlite` feature).
+//! Supports `PostgreSQL` (via `database` feature) and `SQLite` (via `sqlite` feature).
 
 use chrono::{DateTime, Utc};
 #[cfg(feature = "database")]

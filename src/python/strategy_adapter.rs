@@ -1,6 +1,6 @@
 //! Python Strategy Adapter
 //!
-//! Adapts Python strategies to work with Rust StrategyTemplate trait
+//! Adapts Python strategies to work with Rust `StrategyTemplate` trait
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
@@ -16,7 +16,7 @@ use crate::trader::{
     BarData, DepthData, Direction, Exchange, Offset, OrderData, OrderRequest, OrderType, TickData, TradeData,
 };
 
-/// Python strategy adapter that implements StrategyTemplate
+/// Python strategy adapter that implements `StrategyTemplate`
 pub struct PythonStrategyAdapter {
     /// Python strategy instance
     py_strategy: Arc<Mutex<Py<PyAny>>>,
@@ -40,16 +40,16 @@ pub struct PythonStrategyAdapter {
     parameters: Arc<Mutex<HashMap<String, String>>>,
     variables: Arc<Mutex<HashMap<String, String>>>,
 
-    /// Pending orders from Python strategy (shared with Strategy.pending_orders)
+    /// Pending orders from Python strategy (shared with `Strategy`.`pending_orders`)
     pending_orders: Option<Arc<Mutex<Vec<PendingOrder>>>>,
 
-    /// Pending stop orders from Python strategy (shared with Strategy.pending_stop_orders)
+    /// Pending stop orders from Python strategy (shared with `Strategy`.`pending_stop_orders`)
     pending_stop_orders: Option<Arc<Mutex<Vec<PendingStopOrder>>>>,
 
-    /// Pending indicator registrations from Python strategy (shared with Strategy.pending_indicator_registrations)
+    /// Pending indicator registrations from Python strategy (shared with `Strategy`.`pending_indicator_registrations`)
     pending_indicator_registrations: Option<Arc<Mutex<Vec<crate::python::PendingIndicatorRegistration>>>>,
 
-    /// Pending indicator values from Python strategy (collected during on_indicator callbacks)
+    /// Pending indicator values from Python strategy (collected during `on_indicator` callbacks)
     pending_indicator_values: Arc<Mutex<Vec<crate::python::PendingIndicatorValue>>>,
 }
 

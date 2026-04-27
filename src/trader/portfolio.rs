@@ -1,10 +1,10 @@
-//! Portfolio manager for tracking positions, PnL, and portfolio-level metrics.
+//! Portfolio manager for tracking positions, `PnL`, and portfolio-level metrics.
 //!
 //! Provides:
 //! - Real-time position tracking across symbols and gateways
-//! - Realized and unrealized PnL calculation
+//! - Realized and unrealized `PnL` calculation
 //! - Portfolio summary with exposure metrics
-//! - Event-driven updates via BaseEngine trait
+//! - Event-driven updates via `BaseEngine` trait
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,9 +34,9 @@ pub struct PositionSummary {
     pub avg_price: f64,
     /// Current market price (last known)
     pub market_price: f64,
-    /// Unrealized PnL
+    /// Unrealized `PnL`
     pub unrealized_pnl: f64,
-    /// Realized PnL for this position
+    /// Realized `PnL` for this position
     pub realized_pnl: f64,
     /// Gateway name
     pub gateway_name: String,
@@ -45,7 +45,7 @@ pub struct PositionSummary {
 }
 
 impl PositionSummary {
-    /// Create a new PositionSummary from PositionData
+    /// Create a new `PositionSummary` `from` `PositionData`
     pub fn from_position(pos: &PositionData) -> Self {
         Self {
             symbol: pos.symbol.clone(),
@@ -61,12 +61,12 @@ impl PositionSummary {
         }
     }
 
-    /// Get vt_symbol (symbol.exchange)
+    /// Get `vt_symbol` (symbol.exchange)
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
 
-    /// Get position key (gateway_name.vt_symbol.direction)
+    /// Get position key (`gateway_name`.`vt_symbol`.direction)
     pub fn position_key(&self) -> String {
         format!("{}.{}.{}", self.gateway_name, self.vt_symbol(), self.direction)
     }
@@ -82,11 +82,11 @@ impl PositionSummary {
 pub struct PortfolioSummary {
     /// Total portfolio value (sum of account balances)
     pub total_value: f64,
-    /// Total unrealized PnL across all positions
+    /// Total unrealized `PnL` across all positions
     pub total_unrealized_pnl: f64,
-    /// Total realized PnL today
+    /// Total realized `PnL` today
     pub daily_realized_pnl: f64,
-    /// Total realized PnL all-time
+    /// Total realized `PnL` all-time
     pub total_realized_pnl: f64,
     /// Number of open positions
     pub positions_count: usize,
@@ -107,13 +107,13 @@ pub struct PortfolioMetrics {
     pub winning_trades: usize,
     /// Number of losing trades
     pub losing_trades: usize,
-    /// Total realized PnL from winning trades
+    /// Total realized `PnL` from winning trades
     pub total_wins: f64,
-    /// Total realized PnL from losing trades
+    /// Total realized `PnL` from losing trades
     pub total_losses: f64,
     /// Win rate (0.0 to 1.0)
     pub win_rate: f64,
-    /// Profit factor (total_wins / abs(total_losses))
+    /// Profit factor (`total_wins` `/` `abs`(`total_losses`))
     pub profit_factor: f64,
     /// Largest single trade loss
     pub largest_loss: f64,
@@ -123,6 +123,7 @@ pub struct PortfolioMetrics {
 
 impl PortfolioMetrics {
     /// Calculate win rate
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     pub fn calculate_win_rate(&mut self) {
         let total = self.winning_trades + self.losing_trades;
         self.win_rate = if total > 0 {
@@ -146,18 +147,18 @@ impl PortfolioMetrics {
 
 /// Portfolio manager engine
 ///
-/// Tracks positions, calculates PnL, and provides portfolio-level metrics.
-/// Integrates with the event system via BaseEngine trait.
+/// Tracks positions, calculates `PnL`, and provides portfolio-level metrics.
+/// Integrates with the event system via `BaseEngine` trait.
 pub struct PortfolioManager {
     /// Engine name
     name: String,
     /// Position summaries by position key
     positions: RwLock<HashMap<String, PositionSummary>>,
-    /// Account data by vt_accountid
+    /// Account data by `vt_accountid`
     accounts: RwLock<HashMap<String, AccountData>>,
-    /// Daily realized PnL
+    /// Daily realized `PnL`
     daily_realized_pnl: RwLock<f64>,
-    /// Total realized PnL (all-time)
+    /// Total realized `PnL` (all-time)
     total_realized_pnl: RwLock<f64>,
     /// Portfolio metrics
     metrics: RwLock<PortfolioMetrics>,
@@ -166,7 +167,7 @@ pub struct PortfolioManager {
 }
 
 impl PortfolioManager {
-    /// Create a new PortfolioManager
+    /// Create a new `PortfolioManager`
     pub fn new() -> Self {
         Self {
             name: "PortfolioManager".to_string(),
@@ -197,7 +198,7 @@ impl PortfolioManager {
         positions.values().filter(|p| p.volume > 0.0).cloned().collect()
     }
 
-    /// Get account data by vt_accountid
+    /// Get account data by `vt_accountid`
     pub fn get_account(&self, vt_accountid: &str) -> Option<AccountData> {
         let accounts = self.accounts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         accounts.get(vt_accountid).cloned()
@@ -209,24 +210,24 @@ impl PortfolioManager {
         accounts.values().cloned().collect()
     }
 
-    /// Get daily realized PnL
+    /// Get daily realized `PnL`
     pub fn get_daily_realized_pnl(&self) -> f64 {
         *self.daily_realized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Get total realized PnL
+    /// Get total realized `PnL`
     pub fn get_total_realized_pnl(&self) -> f64 {
         *self.total_realized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Reset daily PnL (call at start of new trading day)
+    /// Reset daily `PnL` (call at start of new trading day)
     pub fn reset_daily_pnl(&self) {
         let mut daily = self.daily_realized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         info!("[PortfolioManager] Daily PnL reset (was: {:.2})", *daily);
         *daily = 0.0;
     }
 
-    /// Calculate unrealized PnL for a specific position
+    /// Calculate unrealized `PnL` for a specific position
     pub fn calculate_unrealized_pnl(&self, position_key: &str, market_price: f64) -> f64 {
         let positions = self.positions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(pos) = positions.get(position_key) {
@@ -349,10 +350,10 @@ impl PortfolioManager {
 
     /// Process a trade event from gateway
     ///
-    /// Calculates realized PnL by matching the trade against existing positions.
-    /// - Closing trade (reduces position): realized PnL = (exit_price - avg_entry_price) * closed_volume for longs
+    /// Calculates realized `PnL` by matching the trade against existing positions.
+    /// - Closing trade (reduces position): realized `PnL` =` `(`exit_price` - `avg_entry_price`) * `closed_volume` for longs
     /// - Opening trade (increases position): updates weighted average entry price
-    /// - Flip trade (reverses position): realizes PnL on the closing portion, opens new position
+    /// - Flip trade (reverses position): realizes `PnL` on the closing portion, opens new position
     fn process_trade_event(&self, trade: &TradeData) {
         let trade_dir = trade.direction.unwrap_or(Direction::Net);
         let vt_symbol = format!("{}.{}", trade.symbol, trade.exchange.value());

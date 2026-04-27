@@ -1,6 +1,6 @@
 //! Typed Identifiers
 //!
-//! Type-safe identifier types inspired by nautilus_trader.
+//! Type-safe identifier types inspired by `nautilus_trader`.
 //! Prevents mixing up symbol strings, order IDs, and position IDs at compile time.
 //!
 //! All identifiers support `FromStr` (format: "value" or "SYMBOL.EXCHANGE")
@@ -17,7 +17,7 @@ use super::constant::Exchange;
 ///
 /// Format: `SYMBOL.EXCHANGE` (e.g., `BTCUSDT.BINANCE`, `rb2401.SHFE`)
 ///
-/// This replaces bare `String` vt_symbol parameters throughout the API,
+/// This replaces bare `String` `vt_symbol` parameters throughout the API,
 /// making it impossible to pass an order ID where an instrument ID is expected.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InstrumentId {
@@ -28,7 +28,7 @@ pub struct InstrumentId {
 }
 
 impl InstrumentId {
-    /// Create a new InstrumentId from symbol and exchange
+    /// Create a new `InstrumentId` from symbol and exchange
     pub fn new(symbol: String, exchange: Exchange) -> Self {
         Self { symbol, exchange }
     }
@@ -43,7 +43,7 @@ impl InstrumentId {
         self.exchange
     }
 
-    /// Convert to the legacy vt_symbol format for backward compatibility
+    /// Convert to the legacy `vt_symbol` format for backward compatibility
     pub fn vt_symbol(&self) -> String {
         format!("{}.{}", self.symbol, self.exchange.value())
     }
@@ -97,12 +97,12 @@ impl FromStr for InstrumentId {
 pub struct ClientOrderId(String);
 
 impl ClientOrderId {
-    /// Create a new ClientOrderId
+    /// Create a new `ClientOrderId`
     pub fn new(id: String) -> Self {
         Self(id)
     }
 
-    /// Generate a unique ClientOrderId using a counter prefix
+    /// Generate a unique `ClientOrderId` using a counter prefix
     pub fn generate(prefix: &str, counter: u64) -> Self {
         Self(format!("{prefix}_{counter}"))
     }
@@ -138,12 +138,12 @@ impl FromStr for ClientOrderId {
 pub struct PositionId(String);
 
 impl PositionId {
-    /// Create a new PositionId
+    /// Create a new `PositionId`
     pub fn new(id: String) -> Self {
         Self(id)
     }
 
-    /// Generate a PositionId from instrument and optional direction
+    /// Generate a `PositionId` from instrument and optional direction
     pub fn from_instrument(instrument_id: &InstrumentId, direction: Option<&str>) -> Self {
         match direction {
             Some(dir) => Self(format!("{instrument_id}.{dir}")),
@@ -179,7 +179,7 @@ impl FromStr for PositionId {
 pub struct StrategyId(String);
 
 impl StrategyId {
-    /// Create a new StrategyId
+    /// Create a new `StrategyId`
     pub fn new(id: String) -> Self {
         Self(id)
     }

@@ -91,12 +91,13 @@ impl DatePicker {
         }
     }
 
-    /// Create from chrono::NaiveDate
+    /// Create from `chrono::NaiveDate`
     pub fn from_date(date: chrono::NaiveDate) -> Self {
         Self::new(date.year(), date.month(), date.day())
     }
 
     /// Show the date picker widget
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // value fits in target type; value is non-negative
     pub fn show(&mut self, ui: &mut Ui, label: &str, popup_id: Id) {
         ui.horizontal(|ui| {
             ui.label(label);
@@ -906,6 +907,7 @@ impl BacktestingPanel {
     }
 
     /// Render results section
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // value fits in target type; usize-to-f64 cast acceptable for practical counts
     fn render_results(&mut self, ui: &mut Ui) {
         ui.heading("回测结果");
 
@@ -1400,7 +1402,8 @@ impl BacktestingPanel {
         });
     }
 
-    /// Check for results (call this in ui() loop)
+    /// Check for results (call this in `ui`() loop)
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     fn check_results(&mut self) {
         // Poll the engine for results if we are running
         if self.is_running {
@@ -1456,7 +1459,7 @@ impl BacktestingPanel {
         std::mem::take(&mut self.trade_overlay)
     }
 
-    /// Get the vt_symbol used for the backtest
+    /// Get the `vt_symbol` used for the backtest
     pub fn get_vt_symbol(&self) -> &str {
         &self.vt_symbol
     }

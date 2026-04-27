@@ -1,8 +1,8 @@
 //! MCP Trading Tools — 后端交易操作工具集
 //!
-//! 提供 connect / subscribe / send_order / cancel_order / query_history / list_contracts
-//! / analyze_sentiment 等 MCP Tool，通过 MainEngine 执行实际交易操作。
-//! analyze_sentiment 使用 MCP Sampling 向 Client 请求 LLM 推理。
+//! 提供 connect / subscribe / `send_order` `/` `cancel_order` / `query_history` / `list_contracts`
+//! / `analyze_sentiment` 等 MCP Tool，`通过` `MainEngine` 执行实际交易操作。
+//! `analyze_sentiment` 使用 MCP Sampling 向 Client 请求 LLM 推理。
 
 use rmcp::{
     ErrorData as McpError,
@@ -26,7 +26,7 @@ use super::super::server::TradingMcpServer;
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct ConnectParams {
-    /// 网关名称，如 "binance_spot"、"binance_usdt"
+    /// 网关名称，如 "`binance_spot`"、"`binance_usdt`"
     pub gateway_name: String,
     /// API Key
     pub api_key: String,
@@ -62,7 +62,7 @@ pub struct SendOrderParams {
     /// 价格（限价单必填）
     #[serde(default)]
     pub price: Option<f64>,
-    /// 开平标志：None / Open / Close / CloseToday / CloseYesterday
+    /// 开平标志：None / Open / Close / `CloseToday` `/` `CloseYesterday`
     #[serde(default)]
     pub offset: Option<String>,
     /// 网关名称
@@ -113,7 +113,7 @@ pub struct SuggestStrategyParamsParams {
     pub strategy_id: String,
     /// Current strategy parameters as a JSON string
     pub current_params: String,
-    /// Summary of recent strategy performance (e.g., PnL, win rate, drawdown)
+    /// Summary of recent strategy performance (e.g., `PnL`, win rate, drawdown)
     pub performance_summary: String,
 }
 
@@ -151,13 +151,13 @@ pub struct ModifyOrderParams {
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct BatchOrdersParams {
-    /// 订单列表（JSON 数组，每个元素包含 symbol, exchange, direction, order_type, volume, price, offset, gateway_name）
+    /// 订单列表（JSON 数组，每个元素包含 symbol, exchange, direction, `order_type`, volume, price, `offset,` `gateway_name`）
     pub orders: String,
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct ClosePositionParams {
-    /// 标的符号（vt_symbol 格式，如 BTCUSDT.BINANCE）
+    /// `标的符号`（`vt_symbol` 格式，如 BTCUSDT.BINANCE）
     pub symbol: String,
     /// 方向：Long / Short / Net
     pub direction: String,
@@ -179,7 +179,7 @@ pub struct SetLeverageParams {
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct GetOrderStatusParams {
-    /// 订单 ID（vt_orderid 格式，如 binance_spot.12345）
+    /// 订单 `ID`（`vt_orderid` 格式，`如` `binance_spot`.12345）
     pub order_id: String,
 }
 
@@ -216,7 +216,7 @@ fn parse_direction(s: &str) -> Result<Direction, McpError> {
     }
 }
 
-/// 将字符串解析为 OrderType 枚举
+/// 将字符串解析为 `OrderType` 枚举
 #[allow(dead_code)]
 fn parse_order_type(s: &str) -> Result<OrderType, McpError> {
     match s.to_lowercase().as_str() {
@@ -270,7 +270,7 @@ fn parse_interval(s: &str) -> Result<crate::trader::Interval, McpError> {
 
 // ---- TradingTools (data holder, no longer has #[tool_router]) ----
 
-/// 后端交易操作数据容器（已迁移到 TradingMcpServer 的 #[tool_router] impl）
+/// 后端交易操作数据容器（已迁移到 `TradingMcpServer` 的 `#`[`tool_router`] impl）
 #[allow(dead_code)]
 pub struct TradingTools {
     engine: Arc<MainEngine>,
@@ -279,7 +279,7 @@ pub struct TradingTools {
 
 #[allow(dead_code)]
 impl TradingTools {
-    /// 创建 TradingTools 实例
+    /// 创建 `TradingTools` 实例
     pub fn new(engine: Arc<MainEngine>, ui_sender: UICommandSender) -> Self {
         Self { engine, ui_sender }
     }

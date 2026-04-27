@@ -234,7 +234,7 @@ impl RpcServer {
                 let request_data = {
                     let rep_guard = socket_rep.lock().await;
                     if let Some(socket) = rep_guard.as_ref() {
-                        match socket.poll(zmq::PollEvents::POLLIN, POLL_TIMEOUT_MS as i64) {
+                        match socket.poll(zmq::PollEvents::POLLIN, i64::from(POLL_TIMEOUT_MS)) {
                             Ok(n) if n > 0 => {
                                 match socket.recv_bytes(0) {
                                     Ok(data) => Some(data),
@@ -319,6 +319,7 @@ impl RpcServer {
     }
 
     /// Spawn the heartbeat task
+    #[allow(clippy::cast_precision_loss)] // usize-to-f64 cast acceptable for practical counts
     async fn spawn_heartbeat_task(&self) {
         let active = self.active.clone();
         let socket_pub = self.socket_pub.clone();

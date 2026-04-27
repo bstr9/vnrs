@@ -1,10 +1,10 @@
-//! MessageBus — inter-strategy communication via pub/sub pattern.
+//! `MessageBus` — inter-strategy communication via pub/sub pattern.
 //!
 //! Allows Python strategies to communicate with each other by publishing
 //! messages to named topics. Strategies subscribe to topics by name;
 //! the bus routes messages to all subscribers of a given topic.
 //!
-//! This Python MessageBus is a thin wrapper around the Rust MessageBus
+//! This Python `MessageBus` is a thin wrapper around the `Rust` `MessageBus`
 //! (from `crate::trader::message_bus`), delegating all operations to the
 //! native implementation for better performance and unified state.
 //!
@@ -135,14 +135,14 @@ pub struct MessageBus {
 }
 
 impl MessageBus {
-    /// Create a new empty message bus (standalone, not connected to MainEngine).
+    /// Create a new empty message bus (standalone, not connected to `MainEngine`).
     pub fn new() -> Self {
         Self {
             inner: Arc::new(message_bus::MessageBus::new()),
         }
     }
 
-    /// Create a Python MessageBus wrapping the Rust MessageBus from MainEngine.
+    /// Create a Python `MessageBus` wrapping the `Rust` `MessageBus` `from` `MainEngine`.
     pub fn from_rust_message_bus(inner: Arc<message_bus::MessageBus>) -> Self {
         Self { inner }
     }
@@ -165,7 +165,7 @@ impl MessageBus {
     ///
     /// Args:
     ///     topic: The topic string (e.g. "SIGNAL.BTCUSDT")
-    ///     strategy_name: Name of the subscribing strategy
+    ///     `strategy_name`: Name of the subscribing strategy
     fn subscribe(&self, topic: &str, strategy_name: &str) {
         self.inner.subscribe(topic, strategy_name);
     }
@@ -174,7 +174,7 @@ impl MessageBus {
     ///
     /// Args:
     ///     topic: The topic string
-    ///     strategy_name: Name of the strategy to unsubscribe
+    ///     `strategy_name`: Name of the strategy to unsubscribe
     fn unsubscribe(&self, topic: &str, strategy_name: &str) {
         self.inner.unsubscribe(topic, strategy_name);
     }
@@ -202,7 +202,7 @@ impl MessageBus {
     /// Get all pending messages for a strategy, removing them from the queue.
     ///
     /// Args:
-    ///     strategy_name: Name of the strategy to retrieve messages for
+    ///     `strategy_name`: Name of the strategy to retrieve messages for
     ///
     /// Returns:
     ///     List of Message objects destined for this strategy.
@@ -248,7 +248,7 @@ impl MessageBus {
 // Registration helper (called from bindings.rs)
 // ---------------------------------------------------------------------------
 
-/// Register MessageBus and PyMessage with the PyO3 module.
+/// Register `MessageBus` and `PyMessage` with the `PyO3` module.
 pub fn register_message_bus_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MessageBus>()?;
     m.add_class::<PyMessage>()?;
