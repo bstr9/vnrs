@@ -28,7 +28,7 @@ impl PyBacktestingEngine {
     #[new]
     fn new() -> PyResult<Self> {
         let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e)))?;
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create tokio runtime: {e}")))?;
         Ok(Self {
             engine: Mutex::new(BacktestingEngine::new()),
             runtime: rt,
@@ -44,7 +44,7 @@ impl PyBacktestingEngine {
 
     /// Clear all backtesting data
     fn clear_data(&self) {
-        self.engine.lock().unwrap_or_else(|e| e.into_inner()).clear_data();
+        self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear_data();
     }
 
     /// Set fill model by name.
@@ -57,7 +57,7 @@ impl PyBacktestingEngine {
     fn set_fill_model(&self, model_name: String) -> PyResult<()> {
         self.engine
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .set_fill_model_by_name(&model_name)
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
@@ -89,7 +89,7 @@ impl PyBacktestingEngine {
         capital: f64,
         mode: Option<&str>,
     ) -> PyResult<()> {
-        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Parse datetime
         let interval_enum = match interval.as_str() {
@@ -103,15 +103,15 @@ impl PyBacktestingEngine {
         };
 
         // Parse datetime
-        let start_dt = DateTime::parse_from_rfc3339(&format!("{}T00:00:00+00:00", start))
+        let start_dt = DateTime::parse_from_rfc3339(&format!("{start}T00:00:00+00:00"))
             .map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("Invalid start date: {}", e))
+                pyo3::exceptions::PyValueError::new_err(format!("Invalid start date: {e}"))
             })?
             .with_timezone(&Utc);
 
-        let end_dt = DateTime::parse_from_rfc3339(&format!("{}T23:59:59+00:00", end))
+        let end_dt = DateTime::parse_from_rfc3339(&format!("{end}T23:59:59+00:00"))
             .map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!("Invalid end date: {}", e))
+                pyo3::exceptions::PyValueError::new_err(format!("Invalid end date: {e}"))
             })?
             .with_timezone(&Utc);
 
@@ -139,7 +139,7 @@ impl PyBacktestingEngine {
 
     /// Set history data from Python list of bars
     fn set_history_data(&self, bars: Vec<PyBarData>) -> PyResult<()> {
-        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let rust_bars: Vec<BarData> = bars
             .into_iter()
             .map(|b| b.to_rust())
@@ -151,7 +151,7 @@ impl PyBacktestingEngine {
     /// Load historical data from CSV or database
     fn load_data(&self, py: Python) -> PyResult<()> {
         py.detach(|| {
-            let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+            let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let rt = tokio::runtime::Handle::current();
             rt.block_on(engine.load_data())
                 .map_err(pyo3::exceptions::PyRuntimeError::new_err)
@@ -160,12 +160,12 @@ impl PyBacktestingEngine {
 
     /// Get current position (signed quantity)
     fn get_position(&self) -> f64 {
-        self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_pos()
+        self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_pos()
     }
 
     /// Calculate backtesting result
     fn calculate_result(&self, py: Python) -> PyResult<Py<PyDict>> {
-        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = engine.calculate_result();
         let dict = PyDict::new(py);
 
@@ -184,7 +184,7 @@ impl PyBacktestingEngine {
     /// Calculate statistics
     #[pyo3(signature = (output=true))]
     fn calculate_statistics(&self, output: Option<bool>) -> PyResult<PyBacktestingStatistics> {
-        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let stats = engine.calculate_statistics(output.unwrap_or(true));
         Ok(PyBacktestingStatistics { inner: stats })
     }
@@ -225,7 +225,7 @@ impl PyBacktestingEngine {
         slf.borrow()
             .engine
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .add_strategy(Box::new(adapter));
         Ok(())
     }
@@ -253,7 +253,7 @@ impl PyBacktestingEngine {
             setting.bind(py),
         )).map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(
-                format!("Failed to create strategy instance with vnpy signature (engine, strategy_name, vt_symbol, setting): {}", e)
+                format!("Failed to create strategy instance with vnpy signature (engine, strategy_name, vt_symbol, setting): {e}")
             )
         })?;
 
@@ -286,14 +286,14 @@ impl PyBacktestingEngine {
         slf.borrow()
             .engine
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .add_strategy(Box::new(adapter));
         Ok(())
     }
 
     /// Run backtesting
     fn run_backtesting(&self, _py: Python) -> PyResult<()> {
-        let mut engine_guard = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine_guard = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         self.runtime.block_on(async {
             engine_guard
                 .run_backtesting()
@@ -318,7 +318,7 @@ impl PyBacktestingEngine {
         _lock: bool,
         _net: bool,
     ) -> PyResult<Vec<String>> {
-        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Parse direction
         let direction_str = direction
@@ -411,7 +411,7 @@ impl PyBacktestingEngine {
 
     /// Buy (long open) — convenience method matching Strategy.buy() signature
     fn buy(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
         let req = OrderRequest {
             symbol: symbol.to_string(),
@@ -437,7 +437,7 @@ impl PyBacktestingEngine {
 
     /// Sell (long close) — convenience method matching Strategy.sell() signature
     fn sell(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
         let req = OrderRequest {
             symbol: symbol.to_string(),
@@ -463,7 +463,7 @@ impl PyBacktestingEngine {
 
     /// Short (short open, futures only) — convenience method matching Strategy.short() signature
     fn short(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
         let req = OrderRequest {
             symbol: symbol.to_string(),
@@ -489,7 +489,7 @@ impl PyBacktestingEngine {
 
     /// Cover (short close, futures only) — convenience method matching Strategy.cover() signature
     fn cover(&self, vt_symbol: String, price: f64, volume: f64) -> PyResult<Vec<String>> {
-        let mut engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let mut engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let symbol = vt_symbol.split('.').next().unwrap_or(&vt_symbol);
         let req = OrderRequest {
             symbol: symbol.to_string(),
@@ -515,7 +515,7 @@ impl PyBacktestingEngine {
 
     /// Get current position quantity for a symbol
     fn get_pos(&self, _vt_symbol: Option<&str>) -> PyResult<f64> {
-        Ok(self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_pos())
+        Ok(self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_pos())
     }
 
     /// Get instrument metadata for the backtesting symbol.
@@ -527,7 +527,7 @@ impl PyBacktestingEngine {
     /// Returns:
     ///     PyInstrument if the engine is configured, None otherwise
     fn get_instrument(&self, _vt_symbol: Option<&str>) -> PyResult<Option<PyInstrument>> {
-        let contract = self.engine.lock().unwrap_or_else(|e| e.into_inner()).get_contract_data();
+        let contract = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_contract_data();
         Ok(contract.map(|c| PyInstrument::from_contract_data(&c)))
     }
 
@@ -545,7 +545,7 @@ impl PyBacktestingEngine {
 
     /// Write log — matches Strategy.write_log() signature (single msg argument)
     fn write_log(&self, msg: String) {
-        println!("[Strategy Log] {}", msg);
+        println!("[Strategy Log] {msg}");
     }
 
     /// Send email — matches Strategy.send_email() signature (no-op in backtesting)
@@ -555,7 +555,7 @@ impl PyBacktestingEngine {
 
     /// Cancel order — matches Strategy.cancel_order() signature
     fn cancel_order(&self, vt_orderid: String) {
-        self.engine.lock().unwrap_or_else(|e| e.into_inner()).cancel_order(&vt_orderid);
+        self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner).cancel_order(&vt_orderid);
     }
 
     /// Load bar data from the backtesting engine's cached history.
@@ -577,13 +577,13 @@ impl PyBacktestingEngine {
             .or_else(|| interval.and_then(|i| i.getattr("value").ok()?.extract::<String>().ok()))
             .unwrap_or_else(|| "1m".to_string());
 
-        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let bars = engine.get_history_bars(&vt_symbol, days);
 
         bars.into_iter()
             .map(|bar| {
                 let py_bar = PyBarData::from_rust(&bar);
-                Py::new(py, py_bar).map(|p| p.into_any())
+                Py::new(py, py_bar).map(pyo3::Py::into_any)
             })
             .collect()
     }
@@ -601,14 +601,14 @@ impl PyBacktestingEngine {
         _callback: Option<Py<PyAny>>,
         _use_database: bool,
     ) -> PyResult<Vec<Py<PyAny>>> {
-        let engine = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let ticks = engine.get_history_ticks(&vt_symbol, days);
 
         // Convert each TickData to a PyTickData object
         ticks.into_iter()
             .map(|tick| {
                 let py_tick = crate::python::data_types::PyTickData::from_rust(&tick);
-                Py::new(py, py_tick).map(|p| p.into_any())
+                Py::new(py, py_tick).map(pyo3::Py::into_any)
             })
             .collect()
     }
@@ -741,7 +741,7 @@ impl PyBarData {
                 Ok(dt.into_any().unbind())
             }
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
-                "BarData has no key '{}'", key
+                "BarData has no key '{key}'"
             ))),
         }
     }

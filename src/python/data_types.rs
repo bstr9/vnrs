@@ -279,8 +279,7 @@ impl PyTickData {
             "ask_volume_4" => Ok(self.ask_volume_4.into_pyobject(py)?.into_any().unbind()),
             "ask_volume_5" => Ok(self.ask_volume_5.into_pyobject(py)?.into_any().unbind()),
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
-                "TickData has no key '{}'",
-                key
+                "TickData has no key '{key}'"
             ))),
         }
     }
@@ -545,8 +544,7 @@ impl PyOrderData {
                 Ok(bound.into_any().unbind())
             }
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
-                "OrderData has no key '{}'",
-                key
+                "OrderData has no key '{key}'"
             ))),
         }
     }
@@ -820,8 +818,7 @@ impl PyTradeData {
                 Ok(dt.unbind())
             }
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
-                "TradeData has no key '{}'",
-                key
+                "TradeData has no key '{key}'"
             ))),
         }
     }
@@ -1033,8 +1030,7 @@ impl PyDepthData {
             "ask_prices" => Ok(self.ask_prices.clone().into_pyobject(py)?.into_any().unbind()),
             "ask_volumes" => Ok(self.ask_volumes.clone().into_pyobject(py)?.into_any().unbind()),
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
-                "DepthData has no key '{}'",
-                key
+                "DepthData has no key '{key}'"
             ))),
         }
     }

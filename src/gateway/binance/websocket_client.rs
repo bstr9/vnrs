@@ -88,7 +88,7 @@ impl InnerProxy {
         let url = Url::parse(proxy_str).map_err(|e| {
             Error::new(
                 ErrorKind::InvalidInput,
-                format!("Failed to parse proxy url: {}", e),
+                format!("Failed to parse proxy url: {e}"),
             )
         })?;
 
@@ -100,7 +100,7 @@ impl InnerProxy {
                 if let Some(pwd) = url.password() {
                     let credentials = format!("{}:{}", url.username(), pwd);
                     let encoded = general_purpose::STANDARD.encode(credentials.as_bytes());
-                    let encoded_str = format!("Basic {}", encoded);
+                    let encoded_str = format!("Basic {encoded}");
                     basic_bytes = Some(encoded_str.into_bytes());
                 }
 
@@ -132,7 +132,7 @@ impl InnerProxy {
         let target_url = Url::parse(target).map_err(|e| {
             Error::new(
                 ErrorKind::InvalidInput,
-                format!("Failed to parse target url: {}", e),
+                format!("Failed to parse target url: {e}"),
             )
         })?;
 
@@ -148,7 +148,7 @@ impl InnerProxy {
                 let tcp_stream = TcpStream::connect(url).await.map_err(|e| {
                     Error::new(
                         ErrorKind::ConnectionRefused,
-                        format!("Failed to connect to HTTP proxy: {}", e),
+                        format!("Failed to connect to HTTP proxy: {e}"),
                     )
                 })?;
                 Ok(ProxyStream::Http(
@@ -171,7 +171,7 @@ impl InnerProxy {
 
                 stream
                     .map(ProxyStream::Socks)
-                    .map_err(|e| Error::new(ErrorKind::ConnectionRefused, format!("Failed to connect to SOCKS5 proxy: {}", e)))
+                    .map_err(|e| Error::new(ErrorKind::ConnectionRefused, format!("Failed to connect to SOCKS5 proxy: {e}")))
             }
         }
     }
@@ -186,8 +186,7 @@ impl InnerProxy {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let mut buf = format!(
-            "CONNECT {0}:{1} HTTP/1.1\r\nHost: {0}:{1}\r\n",
-            host, port
+            "CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n"
         )
         .into_bytes();
 
@@ -326,11 +325,11 @@ impl BinanceWebSocketClient {
                     // Host already has a port or full URL with scheme
                     proxy_host.to_string()
                 } else {
-                    format!("{}:{}", proxy_host, proxy_port)
+                    format!("{proxy_host}:{proxy_port}")
                 }
             } else {
                 // Default to socks5 if no scheme specified
-                format!("socks5://{}:{}", proxy_host, proxy_port)
+                format!("socks5://{proxy_host}:{proxy_port}")
             };
 
             info!(
@@ -340,12 +339,12 @@ impl BinanceWebSocketClient {
 
             // Create proxy connection
             let proxy = InnerProxy::from_proxy_str(&proxy_url)
-                .map_err(|e| format!("Failed to parse proxy: {}", e))?;
+                .map_err(|e| format!("Failed to parse proxy: {e}"))?;
 
             let proxy_stream = proxy
                 .connect_async(url)
                 .await
-                .map_err(|e| format!("Failed to connect through proxy: {}", e))?;
+                .map_err(|e| format!("Failed to connect through proxy: {e}"))?;
 
             // Connect WebSocket through proxy
             let (ws_stream, _) = client_async_tls_with_config(
@@ -355,7 +354,7 @@ impl BinanceWebSocketClient {
                 None, // Use default TLS connector
             )
             .await
-            .map_err(|e| format!("WebSocket connection through proxy failed: {}", e))?;
+            .map_err(|e| format!("WebSocket connection through proxy failed: {e}"))?;
 
             info!("{}: WebSocket connected", self.gateway_name);
 
@@ -364,7 +363,7 @@ impl BinanceWebSocketClient {
             // Direct connection without proxy
             let (ws_stream, _) = connect_async(url)
                 .await
-                .map_err(|e| format!("WebSocket connection failed: {}", e))?;
+                .map_err(|e| format!("WebSocket connection failed: {e}"))?;
 
             info!("{}: WebSocket connected", self.gateway_name);
 
@@ -622,11 +621,11 @@ impl BinanceWebSocketClient {
     /// Send a message
     pub async fn send(&self, message: Value) -> Result<(), String> {
         let text = serde_json::to_string(&message)
-            .map_err(|e| format!("Failed to serialize message: {}", e))?;
+            .map_err(|e| format!("Failed to serialize message: {e}"))?;
 
         if let Some(tx) = self.tx.read().await.as_ref() {
             tx.send(Message::Text(text.into())).await
-                .map_err(|e| format!("Failed to send message: {}", e))?;
+                .map_err(|e| format!("Failed to send message: {e}"))?;
         } else {
             return Err("WebSocket not connected".to_string());
         }

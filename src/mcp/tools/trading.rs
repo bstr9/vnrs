@@ -196,7 +196,7 @@ fn parse_exchange(s: &str) -> Result<Exchange, McpError> {
         "BYBIT" => Ok(Exchange::Bybit),
         "LOCAL" => Ok(Exchange::Local),
         _ => Err(McpError::invalid_params(
-            format!("Unknown exchange: {}", s),
+            format!("Unknown exchange: {s}"),
             None,
         )),
     }
@@ -210,7 +210,7 @@ fn parse_direction(s: &str) -> Result<Direction, McpError> {
         "short" | "sell" => Ok(Direction::Short),
         "net" => Ok(Direction::Net),
         _ => Err(McpError::invalid_params(
-            format!("Unknown direction: {}", s),
+            format!("Unknown direction: {s}"),
             None,
         )),
     }
@@ -227,7 +227,7 @@ fn parse_order_type(s: &str) -> Result<OrderType, McpError> {
         "fak" => Ok(OrderType::Fak),
         "fok" => Ok(OrderType::Fok),
         _ => Err(McpError::invalid_params(
-            format!("Unknown order_type: {}", s),
+            format!("Unknown order_type: {s}"),
             None,
         )),
     }
@@ -243,7 +243,7 @@ fn parse_offset(s: &str) -> Result<Offset, McpError> {
         "closetoday" => Ok(Offset::CloseToday),
         "closeyesterday" => Ok(Offset::CloseYesterday),
         _ => Err(McpError::invalid_params(
-            format!("Unknown offset: {}", s),
+            format!("Unknown offset: {s}"),
             None,
         )),
     }
@@ -262,7 +262,7 @@ fn parse_interval(s: &str) -> Result<crate::trader::Interval, McpError> {
         "1d" | "d" => Ok(Interval::Daily),
         "1w" | "w" => Ok(Interval::Weekly),
         _ => Err(McpError::invalid_params(
-            format!("Unknown interval: {}", s),
+            format!("Unknown interval: {s}"),
             None,
         )),
     }
@@ -330,8 +330,7 @@ impl TradingMcpServer {
                 params.symbol, params.exchange, params.gateway_name
             ))])),
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Failed to subscribe: {}",
-                e
+                "Failed to subscribe: {e}"
             ))])),
         }
     }
@@ -361,12 +360,10 @@ impl TradingMcpServer {
 
         match self.engine.send_order(req, &params.gateway_name).await {
             Ok(vt_orderid) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Order sent: {}",
-                vt_orderid
+                "Order sent: {vt_orderid}"
             ))])),
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Failed to send order: {}",
-                e
+                "Failed to send order: {e}"
             ))])),
         }
     }
@@ -385,8 +382,7 @@ impl TradingMcpServer {
                 params.order_id
             ))])),
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Failed to cancel order: {}",
-                e
+                "Failed to cancel order: {e}"
             ))])),
         }
     }
@@ -401,13 +397,13 @@ impl TradingMcpServer {
 
         let start = chrono::DateTime::parse_from_rfc3339(&params.start)
             .map(|dt| dt.to_utc())
-            .map_err(|e| McpError::invalid_params(format!("Invalid start time: {}", e), None))?;
+            .map_err(|e| McpError::invalid_params(format!("Invalid start time: {e}"), None))?;
 
         let end = match &params.end {
             Some(s) => Some(
                 chrono::DateTime::parse_from_rfc3339(s)
                     .map(|dt| dt.to_utc())
-                    .map_err(|e| McpError::invalid_params(format!("Invalid end time: {}", e), None))?,
+                    .map_err(|e| McpError::invalid_params(format!("Invalid end time: {e}"), None))?,
             ),
             None => None,
         };
@@ -424,12 +420,11 @@ impl TradingMcpServer {
             Ok(bars) => {
                 let count = bars.len();
                 let summary = serde_json::to_string_pretty(&bars)
-                    .unwrap_or_else(|_| format!("{} bars retrieved", count));
+                    .unwrap_or_else(|_| format!("{count} bars retrieved"));
                 Ok(CallToolResult::success(vec![Content::text(summary)]))
             }
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Failed to query history: {}",
-                e
+                "Failed to query history: {e}"
             ))])),
         }
     }
@@ -470,8 +465,7 @@ impl TradingMcpServer {
                  2) Confidence level (0-100%) \
                  3) Key factors influencing the sentiment \
                  4) Potential trading implications. \
-                 Context: {}",
-                ctx
+                 Context: {ctx}"
             )
         } else {
             "You are a financial sentiment analyst. Analyze the following text and provide: \
@@ -683,8 +677,7 @@ impl TradingMcpServer {
                 params.symbol, params.exchange, params.gateway_name
             ))])),
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Failed to unsubscribe: {}",
-                e
+                "Failed to unsubscribe: {e}"
             ))])),
         }
     }
@@ -754,7 +747,7 @@ impl TradingMcpServer {
         Parameters(params): Parameters<BatchOrdersParams>,
     ) -> Result<CallToolResult, McpError> {
         let orders: Vec<serde_json::Value> = serde_json::from_str(&params.orders)
-            .map_err(|e| McpError::invalid_params(format!("Invalid orders JSON: {}", e), None))?;
+            .map_err(|e| McpError::invalid_params(format!("Invalid orders JSON: {e}"), None))?;
 
         let mut results = Vec::new();
         for order_json in orders {
@@ -764,7 +757,7 @@ impl TradingMcpServer {
             let order_type_str = order_json["order_type"].as_str().unwrap_or("limit").to_string();
             let volume = order_json["volume"].as_f64().unwrap_or(0.0);
             let price = order_json["price"].as_f64().unwrap_or(0.0);
-            let offset_str = order_json["offset"].as_str().map(|s| s.to_string());
+            let offset_str = order_json["offset"].as_str().map(std::string::ToString::to_string);
             let gateway_name = order_json["gateway_name"].as_str().unwrap_or("").to_string();
 
             let exchange = match parse_exchange(&exchange_str) {
@@ -863,7 +856,7 @@ impl TradingMcpServer {
         // Find the position
         let positions = self.engine.get_all_positions();
         let position = positions.iter().find(|p| {
-            p.vt_symbol() == params.symbol && format!("{}", p.direction) == format!("{}", direction)
+            p.vt_symbol() == params.symbol && format!("{}", p.direction) == format!("{direction}")
         });
 
         let position = match position {
@@ -923,8 +916,7 @@ impl TradingMcpServer {
                 vt_orderid, params.direction, params.symbol, position.volume - position.frozen, params.gateway_name
             ))])),
             Err(e) => Ok(CallToolResult::success(vec![Content::text(format!(
-                "Failed to close position: {}",
-                e
+                "Failed to close position: {e}"
             ))])),
         }
     }

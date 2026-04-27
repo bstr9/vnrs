@@ -259,7 +259,7 @@ impl PyStrategyEngine {
     #[new]
     fn new() -> PyResult<Self> {
         let rt = Runtime::new().map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create runtime: {}", e))
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create runtime: {e}"))
         })?;
 
         let main_engine = crate::trader::MainEngine::new();
@@ -291,13 +291,13 @@ impl PyStrategyEngine {
         self.rt.block_on(async {
             self.engine.init_strategy(strategy_name).await
         }).map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Init failed: {}", e))
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Init failed: {e}"))
         })
     }
 
     fn start_strategy(&self, strategy_name: &str) -> PyResult<()> {
         self.engine.start_strategy(strategy_name).map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Start failed: {}", e))
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Start failed: {e}"))
         })
     }
 
@@ -305,7 +305,7 @@ impl PyStrategyEngine {
         self.rt.block_on(async {
             self.engine.stop_strategy(strategy_name).await
         }).map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Stop failed: {}", e))
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Stop failed: {e}"))
         })
     }
 
@@ -315,7 +315,7 @@ impl PyStrategyEngine {
 
     fn get_strategy_info(&self, strategy_name: &str) -> PyResult<HashMap<String, String>> {
         self.engine.get_strategy_info(strategy_name).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err(format!("Strategy {} not found", strategy_name))
+            pyo3::exceptions::PyValueError::new_err(format!("Strategy {strategy_name} not found"))
         })
     }
 }

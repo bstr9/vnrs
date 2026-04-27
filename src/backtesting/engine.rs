@@ -429,8 +429,7 @@ impl BacktestingEngine {
             )),
             _ => {
                 return Err(format!(
-                    "Unknown fill model '{}'. Valid options: best_price, ideal, two_tier, size_aware, probabilistic",
-                    model_name
+                    "Unknown fill model '{model_name}'. Valid options: best_price, ideal, two_tier, size_aware, probabilistic"
                 ));
             }
         };
@@ -486,9 +485,9 @@ impl BacktestingEngine {
         ));
 
         if csv_path.exists() {
-            self.write_log(&format!("从CSV文件加载: {:?}", csv_path));
+            self.write_log(&format!("从CSV文件加载: {csv_path:?}"));
             let content = std::fs::read_to_string(&csv_path)
-                .map_err(|e| format!("读取CSV失败: {}", e))?;
+                .map_err(|e| format!("读取CSV失败: {e}"))?;
 
             let mut bars = Vec::new();
             for (i, line) in content.lines().enumerate() {
@@ -605,7 +604,7 @@ impl BacktestingEngine {
 
         // 3. Create and initialize REST client
         let rest_client = crate::gateway::binance::BinanceRestClient::new()
-            .map_err(|e| format!("Failed to create REST client: {}", e))?;
+            .map_err(|e| format!("Failed to create REST client: {e}"))?;
         rest_client.init(
             &config.key,
             &config.secret,
@@ -679,7 +678,7 @@ impl BacktestingEngine {
 
         let count = bars.len();
         self.history_data = bars;
-        self.write_log(&format!("从数据库加载{}条Bar数据", count));
+        self.write_log(&format!("从数据库加载{count}条Bar数据"));
 
         Ok(count)
     }
@@ -704,7 +703,7 @@ impl BacktestingEngine {
 
         let count = ticks.len();
         self.tick_data = ticks;
-        self.write_log(&format!("从数据库加载{}条Tick数据", count));
+        self.write_log(&format!("从数据库加载{count}条Tick数据"));
 
         Ok(count)
     }
@@ -729,7 +728,7 @@ impl BacktestingEngine {
 
         let count = depths.len();
         self.depth_data = depths;
-        self.write_log(&format!("从数据库加载{}条Depth数据", count));
+        self.write_log(&format!("从数据库加载{count}条Depth数据"));
 
         Ok(count)
     }
@@ -1840,8 +1839,7 @@ impl BacktestingEngine {
         self.active_emulated_orders.insert(id, order);
 
         self.write_log(&format!(
-            "发送百分比追踪止损单: id={}, 方向={:?}, 回撤比例={}%",
-            id, direction, trail_pct
+            "发送百分比追踪止损单: id={id}, 方向={direction:?}, 回撤比例={trail_pct}%"
         ));
 
         id
@@ -1882,8 +1880,7 @@ impl BacktestingEngine {
         self.active_emulated_orders.insert(id, order);
 
         self.write_log(&format!(
-            "发送绝对值追踪止损单: id={}, 方向={:?}, 回撤距离={}",
-            id, direction, trail_abs
+            "发送绝对值追踪止损单: id={id}, 方向={direction:?}, 回撤距离={trail_abs}"
         ));
 
         id
@@ -1927,8 +1924,7 @@ impl BacktestingEngine {
         self.active_emulated_orders.insert(id, order);
 
         self.write_log(&format!(
-            "发送MIT单: id={}, 方向={:?}, 触发价={}",
-            id, direction, trigger_price
+            "发送MIT单: id={id}, 方向={direction:?}, 触发价={trigger_price}"
         ));
 
         id
@@ -1973,8 +1969,7 @@ impl BacktestingEngine {
         self.active_emulated_orders.insert(id, order);
 
         self.write_log(&format!(
-            "发送LIT单: id={}, 方向={:?}, 触发价={}, 限价={}",
-            id, direction, trigger_price, limit_price
+            "发送LIT单: id={id}, 方向={direction:?}, 触发价={trigger_price}, 限价={limit_price}"
         ));
 
         id
@@ -2055,7 +2050,7 @@ impl BacktestingEngine {
         }
 
         self.write_log(&format!(
-            "发送Bracket单: group_id={}, 入场单={}", id, entry_vt_orderid
+            "发送Bracket单: group_id={id}, 入场单={entry_vt_orderid}"
         ));
 
         id
@@ -2132,7 +2127,7 @@ impl BacktestingEngine {
         }
 
         self.write_log(&format!(
-            "发送OCO单: group_id={}, order_a={}, order_b={}", id, vt_a, vt_b
+            "发送OCO单: group_id={id}, order_a={vt_a}, order_b={vt_b}"
         ));
 
         id
@@ -2199,7 +2194,7 @@ impl BacktestingEngine {
         }
 
         self.write_log(&format!(
-            "发送OTO单: group_id={}, 主单={}", id, vt_primary
+            "发送OTO单: group_id={id}, 主单={vt_primary}"
         ));
 
         id
@@ -2411,7 +2406,7 @@ impl BacktestingEngine {
                             volume: trigger_volume,
                             price: trigger_price,
                             offset: trigger_offset,
-                            reference: format!("EMULATED_{}", id),
+                            reference: format!("EMULATED_{id}"),
                             post_only: false,
                             reduce_only: false,
                             expire_time: None,
@@ -2556,7 +2551,7 @@ impl BacktestingEngine {
                             }
                         }
 
-                        self.write_log(&format!("Bracket入场成交: group_id={}", group_id));
+                        self.write_log(&format!("Bracket入场成交: group_id={group_id}"));
                     }
                     "take_profit" => {
                         // TP filled → cancel SL → Completed
@@ -2658,8 +2653,7 @@ impl BacktestingEngine {
 
                 self.active_bracket_groups.remove(&group_id);
                 self.write_log(&format!(
-                    "OCO单成交: group_id={}, 成交方={}, 已取消{}",
-                    group_id, role, other_role
+                    "OCO单成交: group_id={group_id}, 成交方={role}, 已取消{other_role}"
                 ));
             }
             BacktestBracketType::Oto => {
@@ -2699,7 +2693,7 @@ impl BacktestingEngine {
                             }
                         }
 
-                        self.write_log(&format!("OTO主单成交: group_id={}", group_id));
+                        self.write_log(&format!("OTO主单成交: group_id={group_id}"));
                     }
                     "secondary" => {
                         // Secondary filled → Completed
@@ -2717,7 +2711,7 @@ impl BacktestingEngine {
                         }
 
                         self.active_bracket_groups.remove(&group_id);
-                        self.write_log(&format!("OTO副单成交: group_id={}", group_id));
+                        self.write_log(&format!("OTO副单成交: group_id={group_id}"));
                     }
                     _ => {}
                 }

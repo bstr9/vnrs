@@ -32,7 +32,7 @@ impl PyStrategyContext {
     fn get_tick(&self, vt_symbol: String) -> Option<PyTickData> {
         self.tick_cache
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&vt_symbol)
             .map(PyTickData::from_rust)
     }
@@ -43,7 +43,7 @@ impl PyStrategyContext {
     fn get_bar(&self, vt_symbol: String) -> Option<PyBarData> {
         self.bar_cache
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&vt_symbol)
             .map(PyBarData::from_rust)
     }
@@ -56,7 +56,7 @@ impl PyStrategyContext {
         let guard = self
             .historical_bars
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match guard.get(&vt_symbol) {
             Some(bars) => {
                 let start = bars.len().saturating_sub(count);

@@ -82,14 +82,14 @@ impl EventEngine {
         let mut counter = self
             .handler_counter
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *counter += 1;
         HandlerId(*counter)
     }
 
     /// Start the event engine
     pub fn start(&mut self) {
-        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         *active = true;
         drop(active);
 
@@ -99,7 +99,7 @@ impl EventEngine {
         let interval = self.interval;
 
         self.timer_handle = Some(thread::spawn(move || {
-            while *active_clone.lock().unwrap_or_else(|e| e.into_inner()) {
+            while *active_clone.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
                 thread::sleep(Duration::from_secs(interval));
 
                 let timer_event = Event::new(EVENT_TIMER.to_string(), None);
@@ -114,7 +114,7 @@ impl EventEngine {
         let receiver_opt = self
             .receiver
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         if let Some(event_receiver) = receiver_opt {
             self.processing_handle = Some(thread::spawn(move || {
@@ -131,7 +131,7 @@ impl EventEngine {
                         }
                         Err(sync_mpsc::RecvTimeoutError::Timeout) => {
                             // Check if the engine is still active
-                            if !*active_clone.lock().unwrap_or_else(|e| e.into_inner()) {
+                            if !*active_clone.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
                                 break; // Exit loop if engine is not active
                             }
                             // Continue to next iteration to check again
@@ -148,7 +148,7 @@ impl EventEngine {
 
     /// Stop the event engine
     pub fn stop(&mut self) {
-        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         *active = false;
         drop(active);
 
@@ -188,7 +188,7 @@ impl EventEngine {
         let mut journal_guard = self
             .journal
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *journal_guard = Some(journal);
         Ok(())
     }
@@ -198,7 +198,7 @@ impl EventEngine {
         let mut journal_guard = self
             .journal
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *journal_guard = None;
     }
 

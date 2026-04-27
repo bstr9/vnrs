@@ -221,7 +221,7 @@ impl AlgoEngine {
 
     /// Set the order executor (called by MainEngine after initialization)
     pub fn set_executor(&self, executor: Arc<dyn OrderExecutor>) {
-        let mut exec = self.executor.write().unwrap_or_else(|e| e.into_inner());
+        let mut exec = self.executor.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *exec = Some(executor);
     }
 
@@ -233,25 +233,25 @@ impl AlgoEngine {
 
     /// Get algo state by ID
     pub fn get_algo(&self, algo_id: AlgoId) -> Option<AlgoOrderState> {
-        let orders = self.algo_orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.algo_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         orders.get(&algo_id).cloned()
     }
 
     /// Get all active algo orders
     pub fn get_active_algos(&self) -> Vec<AlgoOrderState> {
-        let orders = self.algo_orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.algo_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         orders.values().filter(|a| a.is_active()).cloned().collect()
     }
 
     /// Get all algo orders
     pub fn get_all_algos(&self) -> Vec<AlgoOrderState> {
-        let orders = self.algo_orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.algo_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         orders.values().cloned().collect()
     }
 
     /// Cancel an algo order
     pub fn cancel_algo(&self, algo_id: AlgoId) -> Result<(), String> {
-        let mut orders = self.algo_orders.write().unwrap_or_else(|e| e.into_inner());
+        let mut orders = self.algo_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(algo) = orders.get_mut(&algo_id) {
             if algo.is_active() {
                 algo.status = AlgoStatus::Cancelled;
@@ -261,7 +261,7 @@ impl AlgoEngine {
             }
             Ok(())
         } else {
-            Err(format!("Algo {} not found", algo_id))
+            Err(format!("Algo {algo_id} not found"))
         }
     }
 
@@ -306,7 +306,7 @@ impl AlgoEngine {
 
         // Store state
         {
-            let mut orders = self.algo_orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.algo_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             orders.insert(algo_id, state.clone());
         }
 
@@ -362,7 +362,7 @@ impl AlgoEngine {
 
         // Store state
         {
-            let mut orders = self.algo_orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.algo_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             orders.insert(algo_id, state.clone());
         }
 
@@ -394,7 +394,7 @@ impl AlgoEngine {
             for slice_idx in 0..config.slice_count {
                 // Check if algo was cancelled
                 {
-                    let orders = self_orders.read().unwrap_or_else(|e| e.into_inner());
+                    let orders = self_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(algo) = orders.get(&algo_id) {
                         if algo.status == AlgoStatus::Cancelled {
                             info!("[AlgoEngine] TWAP algo {} cancelled, stopping execution", algo_id);
@@ -407,7 +407,7 @@ impl AlgoEngine {
 
                 // Update status to Running on first slice
                 if slice_idx == 0 {
-                    let mut orders = self_orders.write().unwrap_or_else(|e| e.into_inner());
+                    let mut orders = self_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(algo) = orders.get_mut(&algo_id) {
                         algo.status = AlgoStatus::Running;
                         algo.started_at = Some(Utc::now());
@@ -423,7 +423,7 @@ impl AlgoEngine {
                     offset: crate::trader::constant::Offset::None,
                     price: config.limit_price.unwrap_or(0.0),
                     volume: slice_volume,
-                    reference: format!("TWAP_{}_{}", algo_id, slice_idx),
+                    reference: format!("TWAP_{algo_id}_{slice_idx}"),
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -432,7 +432,7 @@ impl AlgoEngine {
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound
                 let executor = {
-                    let guard = self_executor.read().unwrap_or_else(|e| e.into_inner());
+                    let guard = self_executor.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     guard.clone()
                 };
 
@@ -440,14 +440,14 @@ impl AlgoEngine {
                     match exec.send_order(req.clone(), &state.gateway_name).await {
                         Ok(vt_orderid) => {
                             // Map vt_orderid to algo_id for trade routing
-                            let mut mapping = self_orderid_to_algo.write().unwrap_or_else(|e| e.into_inner());
+                            let mut mapping = self_orderid_to_algo.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                             mapping.insert(vt_orderid, algo_id);
                             info!("[AlgoEngine] TWAP slice {}/{} sent: {}", slice_idx + 1, config.slice_count, req.volume);
                         }
                         Err(e) => {
                             warn!("[AlgoEngine] TWAP slice {}/{} failed: {}", slice_idx + 1, config.slice_count, e);
                             // Mark algo as failed
-                            let mut orders = self_orders.write().unwrap_or_else(|e| e.into_inner());
+                            let mut orders = self_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                             if let Some(algo) = orders.get_mut(&algo_id) {
                                 algo.status = AlgoStatus::Failed;
                                 algo.completed_at = Some(Utc::now());
@@ -497,7 +497,7 @@ impl AlgoEngine {
             for (slice_idx, &slice_volume) in volumes.iter().enumerate() {
                 // Check if algo was cancelled
                 {
-                    let orders = self_orders.read().unwrap_or_else(|e| e.into_inner());
+                    let orders = self_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(algo) = orders.get(&algo_id) {
                         if algo.status == AlgoStatus::Cancelled {
                             info!("[AlgoEngine] VWAP algo {} cancelled, stopping execution", algo_id);
@@ -510,7 +510,7 @@ impl AlgoEngine {
 
                 // Update status to Running on first slice
                 if slice_idx == 0 {
-                    let mut orders = self_orders.write().unwrap_or_else(|e| e.into_inner());
+                    let mut orders = self_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(algo) = orders.get_mut(&algo_id) {
                         algo.status = AlgoStatus::Running;
                         algo.started_at = Some(Utc::now());
@@ -526,7 +526,7 @@ impl AlgoEngine {
                     offset: crate::trader::constant::Offset::None,
                     price: config.limit_price.unwrap_or(0.0),
                     volume: slice_volume,
-                    reference: format!("VWAP_{}_{}", algo_id, slice_idx),
+                    reference: format!("VWAP_{algo_id}_{slice_idx}"),
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -535,20 +535,20 @@ impl AlgoEngine {
 
                 // Clone executor Arc out of RwLock before await to satisfy Send bound
                 let executor = {
-                    let guard = self_executor.read().unwrap_or_else(|e| e.into_inner());
+                    let guard = self_executor.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     guard.clone()
                 };
 
                 if let Some(exec) = executor {
                     match exec.send_order(req.clone(), &state.gateway_name).await {
                         Ok(vt_orderid) => {
-                            let mut mapping = self_orderid_to_algo.write().unwrap_or_else(|e| e.into_inner());
+                            let mut mapping = self_orderid_to_algo.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                             mapping.insert(vt_orderid, algo_id);
                             info!("[AlgoEngine] VWAP slice {}/{} sent: vol={}", slice_idx + 1, config.slice_count, slice_volume);
                         }
                         Err(e) => {
                             warn!("[AlgoEngine] VWAP slice {}/{} failed: {}", slice_idx + 1, config.slice_count, e);
-                            let mut orders = self_orders.write().unwrap_or_else(|e| e.into_inner());
+                            let mut orders = self_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                             if let Some(algo) = orders.get_mut(&algo_id) {
                                 algo.status = AlgoStatus::Failed;
                                 algo.completed_at = Some(Utc::now());
@@ -572,11 +572,11 @@ impl AlgoEngine {
 
     /// Process a trade event to update algo fill status
     pub fn process_trade(&self, trade: &TradeData) {
-        let mapping = self.orderid_to_algo.read().unwrap_or_else(|e| e.into_inner());
+        let mapping = self.orderid_to_algo.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(&algo_id) = mapping.get(&trade.orderid) {
             drop(mapping);
             
-            let mut orders = self.algo_orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.algo_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(algo) = orders.get_mut(&algo_id) {
                 // Update fill stats
                 let new_filled = algo.filled_volume + trade.volume;
@@ -611,13 +611,13 @@ impl AlgoEngine {
 
     /// Process an order event (for status tracking)
     pub fn process_order(&self, order: &OrderData) {
-        let mapping = self.orderid_to_algo.read().unwrap_or_else(|e| e.into_inner());
+        let mapping = self.orderid_to_algo.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(&algo_id) = mapping.get(&order.orderid) {
             drop(mapping);
 
             // Check for rejected orders
             if order.status == crate::trader::constant::Status::Rejected {
-                let mut orders = self.algo_orders.write().unwrap_or_else(|e| e.into_inner());
+                let mut orders = self.algo_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(_algo) = orders.get_mut(&algo_id) {
                     warn!("[AlgoEngine] Algo {} child order rejected", algo_id);
                     // Don't fail the whole algo on single rejection, just log it

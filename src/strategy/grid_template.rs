@@ -88,19 +88,19 @@ impl GridStrategy {
     ) -> Self {
         let center_price = setting
             .get("center_price")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(50000.0);
         let grid_step = setting
             .get("grid_step")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(500.0);
         let grid_count = setting
             .get("grid_count")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(10) as usize;
         let grid_volume = setting
             .get("grid_volume")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.01);
         
         Self {
@@ -163,7 +163,7 @@ impl GridStrategy {
                     };
             self.base.pending_orders
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(req);
             
             if let Some(l) = self.grid_levels.get_mut(&idx) {
@@ -337,7 +337,7 @@ impl StrategyTemplate for GridStrategy {
         self.base
             .positions
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vt_symbol)
             .copied()
             .unwrap_or(0.0)

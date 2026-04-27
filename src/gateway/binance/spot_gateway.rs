@@ -28,7 +28,7 @@ use crate::error::GatewayError;
 
 fn format_price(value: f64) -> String {
     if value == 0.0 { return "0".to_string(); }
-    let s = format!("{:.8}", value);
+    let s = format!("{value:.8}");
     let s = s.trim_end_matches('0');
     let s = s.trim_end_matches('.');
     s.to_string()
@@ -183,7 +183,7 @@ impl BinanceSpotGateway {
         let offset = local_time - server_time;
         
         self.rest_client.set_time_offset(offset);
-        self.write_log(&format!("时间同步成功，偏移: {}ms", offset)).await;
+        self.write_log(&format!("时间同步成功，偏移: {offset}ms")).await;
         
         Ok(())
     }
@@ -330,7 +330,7 @@ impl BinanceSpotGateway {
                         }
                     }
                     Err(e) => {
-                        self.write_log(&format!("查询 {} 历史成交失败: {}", symbol, e)).await;
+                        self.write_log(&format!("查询 {symbol} 历史成交失败: {e}")).await;
                         break;
                     }
                 }
@@ -635,7 +635,7 @@ impl BinanceSpotGateway {
         // 3. Send subscription request after connecting
         let api_key = self.rest_client.get_api_key().await;
         let timestamp = self.rest_client.get_timestamp_ms();
-        let query = format!("apiKey={}&timestamp={}", api_key, timestamp);
+        let query = format!("apiKey={api_key}&timestamp={timestamp}");
         let signature = self.rest_client.sign_query(&query).await;
 
         let subscribe_msg = json!({
@@ -711,7 +711,7 @@ impl BaseGateway for BinanceSpotGateway {
         // Save the configuration
         configs.set(self.gateway_name.clone(), config.clone());
         if let Err(e) = configs.save() {
-            self.write_log(&format!("警告: 保存配置失败: {}", e)).await;
+            self.write_log(&format!("警告: 保存配置失败: {e}")).await;
         } else {
             self.write_log("配置已保存到 .rstrader/binance/gateway_configs.json").await;
         }
@@ -950,7 +950,7 @@ impl BaseGateway for BinanceSpotGateway {
                             // Re-subscribe to user data stream
                             let api_key = rest_client.get_api_key().await;
                             let timestamp = rest_client.get_timestamp_ms();
-                            let query = format!("apiKey={}&timestamp={}", api_key, timestamp);
+                            let query = format!("apiKey={api_key}&timestamp={timestamp}");
                             let signature = rest_client.sign_query(&query).await;
 
                             let subscribe_msg = serde_json::json!({
@@ -1197,7 +1197,7 @@ impl BaseGateway for BinanceSpotGateway {
         // 订阅 ticker 和 depth5 数据流
         let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
         self.market_ws.subscribe(channels).await?;
-        self.write_log(&format!("订阅行情: {}", symbol)).await;
+        self.write_log(&format!("订阅行情: {symbol}")).await;
         Ok(())
     }
 
@@ -1212,7 +1212,7 @@ impl BaseGateway for BinanceSpotGateway {
         // Unsubscribe from WebSocket streams
         let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
         self.market_ws.unsubscribe(channels).await?;
-        self.write_log(&format!("退订行情: {}", symbol)).await;
+        self.write_log(&format!("退订行情: {symbol}")).await;
         Ok(())
     }
 
@@ -1301,7 +1301,7 @@ impl BaseGateway for BinanceSpotGateway {
                 self.on_order(rejected_order).await;
                 // Remove from tracking on rejection
                 self.order_submit_times.write().await.remove(&orderid);
-                self.write_log(&format!("委托失败: {}", e)).await;
+                self.write_log(&format!("委托失败: {e}")).await;
                 Err(e.into())
             }
         }
@@ -1314,7 +1314,7 @@ impl BaseGateway for BinanceSpotGateway {
 
         match self.rest_client.delete("/api/v3/order", &params, Security::Signed).await {
             Ok(_) => { self.write_log(&format!("撤单成功: {}", req.orderid)).await; Ok(()) }
-            Err(e) => { self.write_log(&format!("撤单失败: {}", e)).await; Err(e.into()) }
+            Err(e) => { self.write_log(&format!("撤单失败: {e}")).await; Err(e.into()) }
         }
     }
 

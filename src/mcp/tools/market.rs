@@ -199,7 +199,7 @@ impl TradingMcpServer {
             Some(tick) => {
                 let funding_rate = tick.extra.as_ref()
                     .and_then(|e| e.get("funding_rate"))
-                    .map(|v| v.as_str());
+                    .map(std::string::String::as_str);
                 match funding_rate {
                     Some(rate) => Ok(CallToolResult::success(vec![Content::text(format!(
                         "Funding rate for {}: {}",
@@ -227,7 +227,7 @@ impl TradingMcpServer {
             Some(tick) => {
                 let mark_price = tick.extra.as_ref()
                     .and_then(|e| e.get("mark_price"))
-                    .map(|v| v.as_str());
+                    .map(std::string::String::as_str);
                 let result = serde_json::json!({
                     "symbol": tick.vt_symbol(),
                     "mark_price": mark_price.unwrap_or("N/A"),
@@ -254,7 +254,7 @@ impl TradingMcpServer {
             Some(tick) => {
                 let index_price = tick.extra.as_ref()
                     .and_then(|e| e.get("index_price"))
-                    .map(|v| v.as_str());
+                    .map(std::string::String::as_str);
                 match index_price {
                     Some(price) => Ok(CallToolResult::success(vec![Content::text(format!(
                         "Index price for {}: {}",
@@ -282,7 +282,7 @@ impl TradingMcpServer {
             Some(tick) => {
                 let liquidations = tick.extra.as_ref()
                     .and_then(|e| e.get("liquidations"))
-                    .map(|v| v.as_str());
+                    .map(std::string::String::as_str);
                 match liquidations {
                     Some(data) => Ok(CallToolResult::success(vec![Content::text(format!(
                         "Liquidation data for {}: {}",

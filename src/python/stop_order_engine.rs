@@ -280,8 +280,7 @@ impl PyStopOrderEngine {
         let (symbol, exchange) = extract_vt_symbol(vt_symbol)
             .ok_or_else(|| {
                 pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid vt_symbol format: {}",
-                    vt_symbol
+                    "Invalid vt_symbol format: {vt_symbol}"
                 ))
             })?;
         Ok(self.inner.cancel_orders_for_symbol(&symbol, exchange))
@@ -324,8 +323,7 @@ impl PyStopOrderEngine {
     ) -> PyResult<u64> {
         let (symbol, exchange) = extract_vt_symbol(vt_symbol).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid vt_symbol format: {}",
-                vt_symbol
+                "Invalid vt_symbol format: {vt_symbol}"
             ))
         })?;
 
@@ -375,8 +373,7 @@ fn parse_direction(s: &str) -> PyResult<Direction> {
         "SHORT" => Ok(Direction::Short),
         "NET" => Ok(Direction::Net),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid direction '{}': expected LONG, SHORT, or NET",
-            s
+            "Invalid direction '{s}': expected LONG, SHORT, or NET"
         ))),
     }
 }
@@ -389,8 +386,7 @@ fn parse_stop_order_type(s: &str) -> PyResult<StopOrderType> {
         "TrailingStopPct" => Ok(StopOrderType::TrailingStopPct),
         "TrailingStopAbs" => Ok(StopOrderType::TrailingStopAbs),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid stop_type '{}': expected StopMarket, StopLimit, TakeProfit, TrailingStopPct, or TrailingStopAbs",
-            s
+            "Invalid stop_type '{s}': expected StopMarket, StopLimit, TakeProfit, TrailingStopPct, or TrailingStopAbs"
         ))),
     }
 }
@@ -403,8 +399,7 @@ fn parse_offset(s: &str) -> PyResult<Offset> {
         "CLOSETODAY" => Ok(Offset::CloseToday),
         "CLOSEYESTERDAY" => Ok(Offset::CloseYesterday),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid offset '{}': expected NONE, OPEN, CLOSE, CLOSETODAY, or CLOSEYESTERDAY",
-            s
+            "Invalid offset '{s}': expected NONE, OPEN, CLOSE, CLOSETODAY, or CLOSEYESTERDAY"
         ))),
     }
 }

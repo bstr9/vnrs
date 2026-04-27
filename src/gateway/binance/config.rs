@@ -155,7 +155,7 @@ impl BinanceConfigs {
                 // Ensure parent directory exists
                 if let Some(parent) = config_path.parent() {
                     if let Err(e) = fs::create_dir_all(parent) {
-                        return Err(format!("Failed to create config directory: {}", e));
+                        return Err(format!("Failed to create config directory: {e}"));
                     }
                 }
 
@@ -164,10 +164,10 @@ impl BinanceConfigs {
                         info!("Saved Binance gateway configurations to {:?}", config_path);
                         Ok(())
                     }
-                    Err(e) => Err(format!("Failed to write config file: {}", e)),
+                    Err(e) => Err(format!("Failed to write config file: {e}")),
                 }
             }
-            Err(e) => Err(format!("Failed to serialize config: {}", e)),
+            Err(e) => Err(format!("Failed to serialize config: {e}")),
         }
     }
 

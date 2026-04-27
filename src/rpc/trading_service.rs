@@ -18,13 +18,13 @@ use crate::trader::gateway::GatewaySettingValue;
 fn arg_str(args: &[serde_json::Value], idx: usize, name: &str) -> Result<String, String> {
     args.get(idx)
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| format!("参数 {} (位置 {}) 缺失或类型错误", name, idx))
 }
 
 /// Helper: extract an optional string argument by position
 fn arg_str_opt(args: &[serde_json::Value], idx: usize) -> Option<String> {
-    args.get(idx).and_then(|v| v.as_str()).map(|s| s.to_string())
+    args.get(idx).and_then(|v| v.as_str()).map(std::string::ToString::to_string)
 }
 
 /// Register all trading RPC functions on the given server.
@@ -252,10 +252,10 @@ pub async fn register_trading_functions(engine: Arc<MainEngine>, server: &RpcSer
             // Try to parse OrderRequest from kwargs first, then from args[0]
             let req: crate::trader::object::OrderRequest = if !kwargs.is_empty() {
                 serde_json::from_value(serde_json::to_value(&kwargs).map_err(|e| e.to_string())?)
-                    .map_err(|e| format!("OrderRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("OrderRequest 解析失败: {e}"))?
             } else if !args.is_empty() {
                 serde_json::from_value(args[0].clone())
-                    .map_err(|e| format!("OrderRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("OrderRequest 解析失败: {e}"))?
             } else {
                 return Err("send_order 需要 OrderRequest 参数".to_string());
             };
@@ -288,10 +288,10 @@ pub async fn register_trading_functions(engine: Arc<MainEngine>, server: &RpcSer
         .register("cancel_order".to_string(), move |args, kwargs| {
             let req: crate::trader::object::CancelRequest = if !kwargs.is_empty() {
                 serde_json::from_value(serde_json::to_value(&kwargs).map_err(|e| e.to_string())?)
-                    .map_err(|e| format!("CancelRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("CancelRequest 解析失败: {e}"))?
             } else if !args.is_empty() {
                 serde_json::from_value(args[0].clone())
-                    .map_err(|e| format!("CancelRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("CancelRequest 解析失败: {e}"))?
             } else {
                 return Err("cancel_order 需要 CancelRequest 参数".to_string());
             };
@@ -324,10 +324,10 @@ pub async fn register_trading_functions(engine: Arc<MainEngine>, server: &RpcSer
         .register("subscribe".to_string(), move |args, kwargs| {
             let req: crate::trader::object::SubscribeRequest = if !kwargs.is_empty() {
                 serde_json::from_value(serde_json::to_value(&kwargs).map_err(|e| e.to_string())?)
-                    .map_err(|e| format!("SubscribeRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("SubscribeRequest 解析失败: {e}"))?
             } else if !args.is_empty() {
                 serde_json::from_value(args[0].clone())
-                    .map_err(|e| format!("SubscribeRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("SubscribeRequest 解析失败: {e}"))?
             } else {
                 return Err("subscribe 需要 SubscribeRequest 参数".to_string());
             };
@@ -409,10 +409,10 @@ pub async fn register_trading_functions(engine: Arc<MainEngine>, server: &RpcSer
         .register("query_history".to_string(), move |args, kwargs| {
             let req: crate::trader::object::HistoryRequest = if !kwargs.is_empty() {
                 serde_json::from_value(serde_json::to_value(&kwargs).map_err(|e| e.to_string())?)
-                    .map_err(|e| format!("HistoryRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("HistoryRequest 解析失败: {e}"))?
             } else if !args.is_empty() {
                 serde_json::from_value(args[0].clone())
-                    .map_err(|e| format!("HistoryRequest 解析失败: {}", e))?
+                    .map_err(|e| format!("HistoryRequest 解析失败: {e}"))?
             } else {
                 return Err("query_history 需要 HistoryRequest 参数".to_string());
             };

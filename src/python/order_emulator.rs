@@ -522,8 +522,7 @@ impl PyOrderEmulator {
             .parse()
             .map_err(|_| {
                 pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid emulated order ID: {}",
-                    emulated_orderid
+                    "Invalid emulated order ID: {emulated_orderid}"
                 ))
             })?;
         self.inner
@@ -600,8 +599,7 @@ impl PyOrderEmulator {
 fn parse_vt_symbol(vt_symbol: &str) -> PyResult<(String, Exchange)> {
     extract_vt_symbol(vt_symbol).ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid vt_symbol format: '{}'. Expected SYMBOL.EXCHANGE (e.g., BTCUSDT.BINANCE)",
-            vt_symbol
+            "Invalid vt_symbol format: '{vt_symbol}'. Expected SYMBOL.EXCHANGE (e.g., BTCUSDT.BINANCE)"
         ))
     })
 }
@@ -612,8 +610,7 @@ fn parse_direction(s: &str) -> PyResult<Direction> {
         "SHORT" | "SELL" => Ok(Direction::Short),
         "NET" => Ok(Direction::Net),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid direction '{}'. Must be LONG or SHORT",
-            s
+            "Invalid direction '{s}'. Must be LONG or SHORT"
         ))),
     }
 }

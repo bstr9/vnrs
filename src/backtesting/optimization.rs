@@ -124,7 +124,7 @@ impl OptimizationEngine {
         // Clear previous results
         self.results
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
 
         // Parallel backtesting
@@ -176,7 +176,7 @@ impl OptimizationEngine {
 
                 results
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .push(result);
             }
         });
@@ -185,7 +185,7 @@ impl OptimizationEngine {
         let mut final_results = self
             .results
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         final_results.sort_by(|a, b| {
             b.target_value
@@ -208,7 +208,7 @@ impl OptimizationEngine {
     {
         // Initialize population
         let mut population = self.generate_random_population(population_size);
-        println!("初始化种群，大小: {}", population_size);
+        println!("初始化种群，大小: {population_size}");
 
         let factory = Arc::new(strategy_factory);
 

@@ -87,8 +87,7 @@ fn init_logger_inner(force_json: bool) {
                     }
                     Err(e) => {
                         eprintln!(
-                            "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
-                            log_path, e
+                            "Warning: Failed to open log file {log_path:?}: {e}. Falling back to console only."
                         );
                         subscriber.with(fmt_layer).init();
                     }
@@ -121,8 +120,7 @@ fn init_logger_inner(force_json: bool) {
                     }
                     Err(e) => {
                         eprintln!(
-                            "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
-                            log_path, e
+                            "Warning: Failed to open log file {log_path:?}: {e}. Falling back to console only."
                         );
                         subscriber.with(fmt_layer).init();
                     }
@@ -157,8 +155,7 @@ fn init_logger_inner(force_json: bool) {
             }
             Err(e) => {
                 eprintln!(
-                    "Warning: Failed to open log file {:?}: {}. Falling back to console only.",
-                    log_path, e
+                    "Warning: Failed to open log file {log_path:?}: {e}. Falling back to console only."
                 );
                 let console_layer = fmt::layer();
                 subscriber.with(console_layer).init();
@@ -188,7 +185,7 @@ pub fn init_logger_with_json() {
 fn get_log_file_path() -> PathBuf {
     let log_folder = get_folder_path("log");
     let today = Local::now().format("%Y%m%d").to_string();
-    let filename = format!("vt_{}.log", today);
+    let filename = format!("vt_{today}.log");
     log_folder.join(filename)
 }
 

@@ -26,6 +26,18 @@
 //! ```
 
 #![deny(clippy::unwrap_used)]
+#![warn(clippy::map_unwrap_or, clippy::needless_pass_by_value, clippy::unused_self, clippy::too_many_lines)]
+// Allow non-cast pedantic lints endemic to this codebase (PyO3 bindings, event handlers, etc.).
+// Cast lints are handled per-item because they are force-enabled via -W on the command line.
+#![allow(
+    clippy::needless_pass_by_value,
+    clippy::map_unwrap_or,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::unused_self,
+    clippy::redundant_closure,
+    clippy::filter_map_identity
+)]
 
 pub mod error;
 pub mod event;

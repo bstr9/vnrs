@@ -209,7 +209,7 @@ impl TradingMcpServer {
 
         // Validate the params JSON
         let parsed: serde_json::Value = serde_json::from_str(&params.params)
-            .map_err(|e| McpError::invalid_params(format!("Invalid params JSON: {}", e), None))?;
+            .map_err(|e| McpError::invalid_params(format!("Invalid params JSON: {e}"), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Strategy {} parameters updated: {}",

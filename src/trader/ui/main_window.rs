@@ -276,7 +276,7 @@ impl MainWindow {
                     // Get or create aggregator for this symbol
                     // Use the chart's current interval instead of hardcoded Minute
                     let interval = self.charts.get(&vt_symbol)
-                        .map(|c| c.get_interval())
+                        .map(crate::ChartWidget::get_interval)
                         .unwrap_or(crate::trader::Interval::Minute);
                     let aggregator = self.tick_aggregators
                         .entry(vt_symbol.clone())
@@ -836,7 +836,7 @@ impl MainWindow {
         }
         // Escape: Close dialogs
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.connect_dialogs.iter_mut().for_each(|d| d.close());
+            self.connect_dialogs.iter_mut().for_each(super::dialogs::ConnectDialog::close);
             self.about_dialog.close();
             self.global_settings.close();
             self.contract_manager.close();
@@ -891,7 +891,7 @@ impl MainWindow {
                     // Gateway connections
                     for i in 0..self.gateway_names.len() {
                         let name = &self.gateway_names[i];
-                        if ui.button(format!("连接 {}", name)).clicked() {
+                        if ui.button(format!("连接 {name}")).clicked() {
                             if let Some(dialog) = self.connect_dialogs.get_mut(i) {
                                 dialog.open();
                             }
@@ -1837,8 +1837,8 @@ impl MainWindow {
         
         for (vt_symbol, chart) in &mut self.charts {
             let mut is_open = true;
-            egui::Window::new(format!("K线图 - {}", vt_symbol))
-                .id(egui::Id::new(format!("chart_{}", vt_symbol)))
+            egui::Window::new(format!("K线图 - {vt_symbol}"))
+                .id(egui::Id::new(format!("chart_{vt_symbol}")))
                 .default_size([800.0, 600.0])
                 .open(&mut is_open)
                 .show(ctx, |ui| {
@@ -2285,7 +2285,7 @@ fn parse_interval(s: &str) -> Result<crate::trader::Interval, String> {
         "4h" => Ok(crate::trader::Interval::Hour4),
         "1d" | "day" | "daily" => Ok(crate::trader::Interval::Daily),
         "1w" | "week" | "weekly" => Ok(crate::trader::Interval::Weekly),
-        _ => Err(format!("Unknown interval: {}", s)),
+        _ => Err(format!("Unknown interval: {s}")),
     }
 }
 

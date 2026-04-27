@@ -281,7 +281,7 @@ pub fn get_prompt(
         "risk_assessment" => {
             let params = parse_args::<RiskAssessmentParams>(arguments)?;
             let position_info = match params.position_size {
-                Some(size) => format!("当前持仓数量：{}", size),
+                Some(size) => format!("当前持仓数量：{size}"),
                 None => "未提供持仓数量，仅做通用风险评估".to_string(),
             };
             Ok(GetPromptResult::new(vec![
@@ -342,7 +342,7 @@ pub fn get_prompt(
         }
         "market_overview" => {
             let params = parse_args::<MarketOverviewParams>(arguments)?;
-            let symbols_list: Vec<&str> = params.symbols.split(',').map(|s| s.trim()).collect();
+            let symbols_list: Vec<&str> = params.symbols.split(',').map(str::trim).collect();
             let symbols_display = symbols_list.join("、");
             Ok(GetPromptResult::new(vec![
                 PromptMessage::new_text(
@@ -406,7 +406,7 @@ pub fn get_prompt(
         "backtest_analysis" => {
             let params = parse_args::<BacktestAnalysisParams>(arguments)?;
             let metrics_info = match &params.metrics {
-                Some(m) => format!("请重点关注以下指标：{}", m),
+                Some(m) => format!("请重点关注以下指标：{m}"),
                 None => "请对所有核心指标进行全面分析".to_string(),
             };
             Ok(GetPromptResult::new(vec![
@@ -445,7 +445,7 @@ pub fn get_prompt(
         "parameter_optimization" => {
             let params = parse_args::<ParameterOptimizationParams>(arguments)?;
             let params_info = match &params.current_params {
-                Some(p) => format!("当前参数：{}", p),
+                Some(p) => format!("当前参数：{p}"),
                 None => "未提供当前参数，请先获取策略参数后再进行分析".to_string(),
             };
             Ok(GetPromptResult::new(vec![
@@ -480,13 +480,13 @@ pub fn get_prompt(
         }
         "portfolio_risk" => {
             let params = parse_args::<PortfolioRiskParams>(arguments)?;
-            let symbols_list: Vec<&str> = params.symbols.split(',').map(|s| s.trim()).collect();
+            let symbols_list: Vec<&str> = params.symbols.split(',').map(str::trim).collect();
             let symbols_display = symbols_list.join("、");
             Ok(GetPromptResult::new(vec![
                 PromptMessage::new_text(
                     PromptMessageRole::User,
                     format!(
-                        "请对以下持仓组合进行整体风险评估：{}\n\n\
+                        "请对以下持仓组合进行整体风险评估：{symbols_display}\n\n\
                          1. **组合风险概览**：\n\
                             - 组合总敞口和净敞口\n\
                             - 杠杆使用情况\n\
@@ -510,8 +510,7 @@ pub fn get_prompt(
                          6. **风险缓解建议**：\n\
                             - 对冲建议\n\
                             - 仓位调整建议\n\
-                            - 止损/风控策略建议",
-                        symbols_display
+                            - 止损/风控策略建议"
                     ),
                 ),
             ]))
@@ -555,7 +554,7 @@ pub fn get_prompt(
                 PromptMessage::new_text(
                     PromptMessageRole::User,
                     format!(
-                        "{}\n\n\
+                        "{symbol_info}\n\n\
                          1. **敞口概览**：\n\
                             - 多空敞口分布\n\
                             - 净敞口和总敞口\n\
@@ -575,14 +574,13 @@ pub fn get_prompt(
                          5. **敞口优化建议**：\n\
                             - 敞口再平衡建议\n\
                             - 对冲策略建议\n\
-                            - 风险限额建议",
-                        symbol_info
+                            - 风险限额建议"
                     ),
                 ),
             ]))
         }
         _ => Err(McpError::invalid_params(
-            format!("未知的 prompt: '{}'", name),
+            format!("未知的 prompt: '{name}'"),
             Some(json!({
                 "available_prompts": list_prompts().iter().map(|p| &p.name).collect::<Vec<_>>()
             })),
@@ -598,7 +596,7 @@ fn parse_args<T: serde::de::DeserializeOwned>(
         let args_value = Value::Object(args_map);
         serde_json::from_value::<T>(args_value).map_err(|e| {
             McpError::invalid_params(
-                format!("参数解析失败: {}", e),
+                format!("参数解析失败: {e}"),
                 None,
             )
         })?
@@ -606,7 +604,7 @@ fn parse_args<T: serde::de::DeserializeOwned>(
         // 尝试从空对象反序列化（用于所有字段都有默认值的情况）
         serde_json::from_value::<T>(Value::Object(Map::new())).map_err(|e| {
             McpError::invalid_params(
-                format!("缺少必需参数: {}", e),
+                format!("缺少必需参数: {e}"),
                 None,
             )
         })?

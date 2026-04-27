@@ -165,11 +165,11 @@ impl PySyncBarGenerator {
     }
 
     fn add_symbol(&self, vt_symbol: String) {
-        let mut symbols = self.vt_symbols.lock().unwrap_or_else(|e| e.into_inner());
+        let mut symbols = self.vt_symbols.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !symbols.contains(&vt_symbol) {
             symbols.push(vt_symbol);
         }
-        *self.inner.lock().unwrap_or_else(|e| e.into_inner()) =
+        *self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
             SynchronizedBarGenerator::new(symbols.clone());
     }
 
@@ -188,7 +188,7 @@ impl PySyncBarGenerator {
         py: Python,
     ) -> PyResult<Option<PySynchronizedBars>> {
         let rust_bar = dict_to_bar(vt_symbol, bar)?;
-        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = guard.on_bar(vt_symbol, rust_bar);
         Ok(result.map(|sync| PySynchronizedBars::from_rust(sync, py)))
     }
@@ -212,13 +212,13 @@ impl PySyncBarGenerator {
     fn pending_count(&self) -> usize {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pending_count()
     }
 
     /// Clear all pending data.
     fn reset(&self) {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
     }
 
     /// List of registered vt_symbols.
@@ -226,16 +226,16 @@ impl PySyncBarGenerator {
     fn vt_symbols(&self) -> Vec<String> {
         self.vt_symbols
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
     fn __repr__(&self) -> String {
-        let symbols = self.vt_symbols.lock().unwrap_or_else(|e| e.into_inner());
+        let symbols = self.vt_symbols.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let pending = self
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pending_count();
         format!(
             "SyncBarGenerator(symbols={:?}, pending={})",
@@ -266,7 +266,7 @@ fn dict_to_bar(vt_symbol: &str, dict: &Bound<'_, PyDict>) -> PyResult<BarData> {
         .extract()?;
 
     let datetime = chrono::DateTime::parse_from_rfc3339(&datetime_str)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {}", e)))?
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {e}")))?
         .with_timezone(&chrono::Utc);
 
     Ok(BarData {

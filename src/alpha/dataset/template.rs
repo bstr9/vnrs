@@ -261,8 +261,7 @@ impl AlphaDataset {
             }
             Err(e) => {
                 logger::logger().info(&format!(
-                    "Unrecognized label expression '{}': {}. Using NaN labels.",
-                    expr, e
+                    "Unrecognized label expression '{expr}': {e}. Using NaN labels."
                 ));
             }
         }
@@ -403,14 +402,14 @@ pub fn query_by_time(df: &DataFrame, start: &str, end: &str) -> DataFrame {
     let start_dt = match to_datetime(start) {
         Ok(dt) => dt,
         Err(e) => {
-            eprintln!("Invalid start date '{}': {}", start, e);
+            eprintln!("Invalid start date '{start}': {e}");
             return df.clone();
         }
     };
     let end_dt = match to_datetime(end) {
         Ok(dt) => dt,
         Err(e) => {
-            eprintln!("Invalid end date '{}': {}", end, e);
+            eprintln!("Invalid end date '{end}': {e}");
             return df.clone();
         }
     };

@@ -137,7 +137,7 @@ impl RpcPanel {
                 for func in funcs {
                     ui.horizontal(|ui| {
                         ui.add_space(16.0);
-                        ui.label(RichText::new(format!("• {}", func)).color(COLOR_TEXT_PRIMARY).size(12.0));
+                        ui.label(RichText::new(format!("• {func}")).color(COLOR_TEXT_PRIMARY).size(12.0));
                     });
                 }
                 ui.add_space(2.0);
@@ -148,7 +148,7 @@ impl RpcPanel {
 
         // Show last error if any
         if let Some(ref err) = self.last_error {
-            ui.colored_label(Color32::RED, format!("错误: {}", err));
+            ui.colored_label(Color32::RED, format!("错误: {err}"));
         }
 
         ui.add_space(8.0);

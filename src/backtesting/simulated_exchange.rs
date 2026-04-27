@@ -514,7 +514,7 @@ impl InstrumentMatchingEngine {
             })
 
         } else {
-            Err(format!("订单不存在: {}", vt_orderid))
+            Err(format!("订单不存在: {vt_orderid}"))
         }
     }
 
@@ -971,7 +971,7 @@ impl SimulatedExchange {
         let vt_symbol = format!("{}.{}", req.symbol, exchange.value());
 
         let instrument = self.instruments.get(&vt_symbol).ok_or_else(|| {
-            format!("合约不存在: {}", vt_symbol)
+            format!("合约不存在: {vt_symbol}")
         })?;
 
         // Create a temporary OrderData for risk check
@@ -1015,7 +1015,7 @@ impl SimulatedExchange {
         }
 
         let instrument = self.instruments.get_mut(&vt_symbol).ok_or_else(|| {
-            format!("合约不存在: {}", vt_symbol)
+            format!("合约不存在: {vt_symbol}")
         })?;
 
         instrument.submit_order(req, exchange, direction, offset, clock)
@@ -1033,11 +1033,11 @@ impl SimulatedExchange {
         let vt_symbol = format!("{}.{}", req.symbol, exchange.value());
 
         if !self.instruments.contains_key(&vt_symbol) {
-            return Err(format!("合约不存在: {}", vt_symbol));
+            return Err(format!("合约不存在: {vt_symbol}"));
         }
 
         let instrument = self.instruments.get_mut(&vt_symbol).ok_or_else(|| {
-            format!("合约不存在: {}", vt_symbol)
+            format!("合约不存在: {vt_symbol}")
         })?;
 
         instrument.submit_stop_order(req, direction, offset, clock)
@@ -1053,7 +1053,7 @@ impl SimulatedExchange {
                 return Ok(order);
             }
         }
-        Err(format!("订单不存在: {}", vt_orderid))
+        Err(format!("订单不存在: {vt_orderid}"))
     }
 
     /// Process a bar for a specific instrument.

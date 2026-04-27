@@ -92,7 +92,7 @@ impl StrategyContext {
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
         self.tick_cache
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vt_symbol)
             .cloned()
     }
@@ -101,7 +101,7 @@ impl StrategyContext {
     pub fn get_bar(&self, vt_symbol: &str) -> Option<BarData> {
         self.bar_cache
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vt_symbol)
             .cloned()
     }
@@ -111,7 +111,7 @@ impl StrategyContext {
         if let Some(bars) = self
             .historical_bars
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vt_symbol)
         {
             let start = bars.len().saturating_sub(count);
@@ -160,7 +160,7 @@ impl StrategyContext {
     pub fn update_tick(&self, tick: TickData) {
         self.tick_cache
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(tick.vt_symbol(), tick);
     }
 
@@ -171,14 +171,14 @@ impl StrategyContext {
         // Update cache
         self.bar_cache
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(vt_symbol.clone(), bar.clone());
 
         // Update historical bars
         let mut historical = self
             .historical_bars
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let bars = historical.entry(vt_symbol).or_default();
         bars.push(bar);
         bars.truncate(10000);
@@ -189,7 +189,7 @@ impl StrategyContext {
         vt_symbol: &str,
         indicator: Box<dyn StrategyIndicator>,
     ) -> IndicatorRef {
-        let mut indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let mut indicators = self.indicators.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let list = indicators.entry(vt_symbol.to_string()).or_default();
         let index = list.len();
         list.push(indicator);
@@ -201,7 +201,7 @@ impl StrategyContext {
     }
 
     pub fn get_indicator_refs(&self, vt_symbol: &str) -> Vec<IndicatorRef> {
-        let indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let indicators = self.indicators.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         match indicators.get(vt_symbol) {
             Some(list) => (0..list.len())
                 .map(|index| IndicatorRef {
@@ -220,7 +220,7 @@ impl StrategyContext {
     /// a new value (i.e. `update()` returned `true`). This enables the
     /// engine to dispatch `on_indicator()` callbacks to strategies.
     pub fn update_indicators(&self, vt_symbol: &str, bar: &BarData) -> Vec<(String, f64)> {
-        let mut indicators = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let mut indicators = self.indicators.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut updated = Vec::new();
         if let Some(indicator_list) = indicators.get_mut(vt_symbol) {
             for indicator in indicator_list.iter_mut() {
@@ -250,7 +250,7 @@ pub struct IndicatorRef {
 
 impl IndicatorRef {
     pub fn is_ready(&self) -> bool {
-        let map = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let map = self.indicators.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         map.get(&self.key)
             .and_then(|v| v.get(self.index))
             .map(|i| i.current_value().is_some())
@@ -258,14 +258,14 @@ impl IndicatorRef {
     }
 
     pub fn current_value(&self) -> Option<f64> {
-        let map = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let map = self.indicators.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         map.get(&self.key)
             .and_then(|v| v.get(self.index))
             .and_then(|i| i.current_value())
     }
 
     pub fn name(&self) -> Option<String> {
-        let map = self.indicators.lock().unwrap_or_else(|e| e.into_inner());
+        let map = self.indicators.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         map.get(&self.key)
             .and_then(|v| v.get(self.index))
             .map(|i| i.name().to_string())
@@ -476,7 +476,7 @@ impl BaseStrategy {
         let vt_orderid = format!("BUY_{}_{}", vt_symbol, Utc::now().timestamp_millis());
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(req);
         vt_orderid
     }
@@ -492,7 +492,7 @@ impl BaseStrategy {
         let vt_orderid = format!("SELL_{}_{}", vt_symbol, Utc::now().timestamp_millis());
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(req);
         vt_orderid
     }
@@ -507,7 +507,7 @@ impl BaseStrategy {
         let vt_orderid = format!("SHORT_{}_{}", vt_symbol, Utc::now().timestamp_millis());
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(req);
         vt_orderid
     }
@@ -523,7 +523,7 @@ impl BaseStrategy {
         let vt_orderid = format!("COVER_{}_{}", vt_symbol, Utc::now().timestamp_millis());
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(req);
         vt_orderid
     }
@@ -563,12 +563,12 @@ impl BaseStrategy {
         let mut orderids = self
             .active_orderids
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         orderids.retain(|id| id != vt_orderid);
         // Queue cancellation request for engine processing
         self.pending_cancellations
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(CancelRequestType::Order(vt_orderid.to_string()));
     }
 
@@ -577,7 +577,7 @@ impl BaseStrategy {
         let orderids = self
             .active_orderids
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         for orderid in orderids.iter() {
             self.cancel_order(orderid);
@@ -589,7 +589,7 @@ impl BaseStrategy {
         let mut orders = self
             .pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::mem::take(&mut *orders)
     }
 
@@ -598,7 +598,7 @@ impl BaseStrategy {
         let mut orders = self
             .pending_stop_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::mem::take(&mut *orders)
     }
 
@@ -607,7 +607,7 @@ impl BaseStrategy {
         let mut cancellations = self
             .pending_cancellations
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::mem::take(&mut *cancellations)
     }
 
@@ -645,13 +645,13 @@ impl BaseStrategy {
         // Track the stop order ID locally
         self.active_stop_orderids
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(stop_orderid.clone());
 
         // Queue stop order request for engine processing
         self.pending_stop_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(req);
 
         tracing::info!("策略{}发送止损单: {} 价格={} 方向={:?}",
@@ -670,13 +670,13 @@ impl BaseStrategy {
         let mut orderids = self
             .active_stop_orderids
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         orderids.retain(|id| id != stop_orderid);
 
         // Queue cancellation request for engine processing
         self.pending_cancellations
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(CancelRequestType::StopOrder(stop_orderid.to_string()));
     }
 
@@ -694,7 +694,7 @@ impl BaseStrategy {
     pub fn sync_position(&mut self, vt_symbol: &str, position: f64) {
         self.positions
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(vt_symbol.to_string(), position);
     }
 }

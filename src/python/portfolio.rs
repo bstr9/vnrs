@@ -41,12 +41,12 @@ impl PositionSnapshot {
             Direction::Short => "SHORT",
             Direction::Net => "NET",
         };
-        format!("{}.{}", vt_symbol, dir_str)
+        format!("{vt_symbol}.{dir_str}")
     }
 
     /// Build the map key from a vt_symbol and direction string.
     fn key_from_str(vt_symbol: &str, direction: &str) -> String {
-        format!("{}.{}", vt_symbol, direction)
+        format!("{vt_symbol}.{direction}")
     }
 }
 
@@ -371,7 +371,7 @@ impl PortfolioFacade {
     pub fn update_from_account(&self, account: &AccountData) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .update_from_account(account);
     }
 
@@ -379,7 +379,7 @@ impl PortfolioFacade {
     pub fn update_from_position(&self, position: &PositionData) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .update_from_position(position);
     }
 
@@ -387,7 +387,7 @@ impl PortfolioFacade {
     pub fn update_balance(&self, capital: f64) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .update_balance(capital);
     }
 
@@ -402,7 +402,7 @@ impl PortfolioFacade {
     ) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .update_position_fill(vt_symbol, direction, quantity, avg_price, realized);
     }
 
@@ -410,7 +410,7 @@ impl PortfolioFacade {
     pub fn update_mark_price(&self, vt_symbol: &str, direction: &Direction, mark_price: f64) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .update_mark_price(vt_symbol, direction, mark_price);
     }
 
@@ -418,7 +418,7 @@ impl PortfolioFacade {
     pub fn update_daily_result(&self, date: NaiveDate, result: DailyResult) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .update_daily_result(date, result);
     }
 
@@ -426,7 +426,7 @@ impl PortfolioFacade {
     pub fn set_start_capital(&self, capital: f64) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .set_start_capital(capital);
     }
 }
@@ -436,7 +436,7 @@ impl PortfolioFacade {
     /// Total account balance.
     #[getter]
     fn balance(&self) -> f64 {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).balance
+        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).balance
     }
 
     /// Available (unfrozen) balance.
@@ -444,7 +444,7 @@ impl PortfolioFacade {
     fn available(&self) -> f64 {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .available()
     }
 
@@ -453,7 +453,7 @@ impl PortfolioFacade {
     fn equity(&self) -> f64 {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .equity()
     }
 
@@ -462,14 +462,14 @@ impl PortfolioFacade {
     fn unrealized_pnl(&self) -> f64 {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .total_unrealized_pnl()
     }
 
     /// Frozen margin/capital.
     #[getter]
     fn frozen(&self) -> f64 {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).frozen
+        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).frozen
     }
 
     /// Look up a single position by `vt_symbol` (e.g. "BTCUSDT.BINANCE").
@@ -477,14 +477,14 @@ impl PortfolioFacade {
     /// Returns the first matching position, preferring LONG > SHORT > NET.
     /// Returns `None` if no position exists for that symbol.
     fn position(&self, vt_symbol: &str) -> Option<PyPosition> {
-        let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         state.get_position(vt_symbol).map(PyPosition::from_snapshot)
     }
 
     /// All positions as a list of `Position` objects.
     #[getter]
     fn positions(&self) -> Vec<PyPosition> {
-        let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         state
             .get_all_positions()
             .into_iter()
@@ -497,7 +497,7 @@ impl PortfolioFacade {
     fn net_position(&self, vt_symbol: &str) -> f64 {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .net_position(vt_symbol)
     }
 
@@ -509,7 +509,7 @@ impl PortfolioFacade {
     /// Returns an empty `PortfolioStatistics` if no daily results have been
     /// recorded yet.
     fn statistics(&self) -> PyPortfolioStatistics {
-        let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let stats = calculate_statistics(
             &state.daily_results,
             state.start_capital,
@@ -520,7 +520,7 @@ impl PortfolioFacade {
     }
 
     fn __repr__(&self) -> String {
-        let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         format!(
             "Portfolio(balance={:.2}, available={:.2}, equity={:.2}, positions={})",
             state.balance,

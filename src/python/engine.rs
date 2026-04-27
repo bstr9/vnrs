@@ -541,7 +541,7 @@ impl BaseEngine for PythonEngineBridge {
     }
 
     fn process_event(&self, event_type: &str, event: &GatewayEvent) {
-        let engine = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let engine = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Only process if we don't have a StrategyEngine (standalone mode)
         // Otherwise, events flow through StrategyEngine → PythonStrategyAdapter

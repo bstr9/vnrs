@@ -181,7 +181,7 @@ pub fn ceil_to(value: f64, target: f64) -> f64 {
 
 /// Get number of digits after decimal point
 pub fn get_digits(value: f64) -> usize {
-    let value_str = format!("{}", value);
+    let value_str = format!("{value}");
 
     if value_str.contains("e-") {
         let parts: Vec<&str> = value_str.split("e-").collect();

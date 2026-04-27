@@ -97,7 +97,7 @@ impl TradingMcpServer {
             .send(UICommand::SwitchSymbol {
                 symbol: params.symbol.clone(),
             })
-            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {e}"), None))?;
 
         // 更新共享状态
         if let Ok(mut state) = self.ui_state.write() {
@@ -119,7 +119,7 @@ impl TradingMcpServer {
             .send(UICommand::SwitchInterval {
                 interval: params.interval.clone(),
             })
-            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {e}"), None))?;
 
         if let Ok(mut state) = self.ui_state.write() {
             state.current_interval = Some(params.interval.clone());
@@ -141,7 +141,7 @@ impl TradingMcpServer {
                 indicator_type: params.indicator_type.clone(),
                 period: params.period,
             })
-            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {e}"), None))?;
 
         if let Ok(mut state) = self.ui_state.write() {
             let label = match params.period {
@@ -164,7 +164,7 @@ impl TradingMcpServer {
     ) -> Result<CallToolResult, McpError> {
         self.ui_sender
             .send(UICommand::RemoveIndicator { index: params.index })
-            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {e}"), None))?;
 
         let removed_name = if let Ok(mut state) = self.ui_state.write() {
             if params.index < state.chart_indicators.len() {
@@ -190,7 +190,7 @@ impl TradingMcpServer {
     async fn clear_indicators(&self) -> Result<CallToolResult, McpError> {
         self.ui_sender
             .send(UICommand::ClearIndicators)
-            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {e}"), None))?;
 
         if let Ok(mut state) = self.ui_state.write() {
             state.chart_indicators.clear();
@@ -210,7 +210,7 @@ impl TradingMcpServer {
             .send(UICommand::NavigateTo {
                 tab: params.tab.clone(),
             })
-            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {e}"), None))?;
 
         if let Ok(mut state) = self.ui_state.write() {
             state.active_tab = params.tab.clone();
@@ -232,7 +232,7 @@ impl TradingMcpServer {
                 message: params.message.clone(),
                 level: params.level.clone(),
             })
-            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to send UI command: {e}"), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Notification shown: [{}] {}",

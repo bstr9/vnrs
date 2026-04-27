@@ -47,7 +47,7 @@ pub fn to_int(value: f64) -> i64 {
 
 /// Format price with appropriate precision
 pub fn format_price(price: f64, decimals: usize) -> String {
-    format!("{:.prec$}", price, prec = decimals)
+    format!("{price:.decimals$}")
 }
 
 /// Format volume with appropriate units (K, M, B)
@@ -59,7 +59,7 @@ pub fn format_volume(volume: f64) -> String {
     } else if volume >= 1_000.0 {
         format!("{:.2}K", volume / 1_000.0)
     } else {
-        format!("{:.2}", volume)
+        format!("{volume:.2}")
     }
 }
 

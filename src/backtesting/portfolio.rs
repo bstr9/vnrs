@@ -153,7 +153,7 @@ impl PortfolioBacktestingEngine {
         // Use heap-based K-way merge instead of clone + sort.
         // Swap out bar_data to avoid borrow conflicts during iteration.
         let bar_data = std::mem::take(&mut self.bar_data);
-        let sources: Vec<&[BarData]> = bar_data.values().map(|v| v.as_slice()).collect();
+        let sources: Vec<&[BarData]> = bar_data.values().map(std::vec::Vec::as_slice).collect();
         let merge_iter = BarMergeIterator::new(sources);
 
         // Initialize strategy
@@ -207,7 +207,7 @@ impl PortfolioBacktestingEngine {
         // Use heap-based K-way merge instead of clone + sort.
         // Swap out tick_data to avoid borrow conflicts during iteration.
         let tick_data = std::mem::take(&mut self.tick_data);
-        let sources: Vec<&[TickData]> = tick_data.values().map(|v| v.as_slice()).collect();
+        let sources: Vec<&[TickData]> = tick_data.values().map(std::vec::Vec::as_slice).collect();
         let merge_iter = TickMergeIterator::new(sources);
 
         // Initialize strategy

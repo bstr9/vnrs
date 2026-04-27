@@ -240,7 +240,7 @@ impl DataEngine {
 
         // Add subscriber to registry
         {
-            let mut subscriptions = self.subscriptions.write().unwrap_or_else(|e| e.into_inner());
+            let mut subscriptions = self.subscriptions.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             subscriptions
                 .entry(key.clone())
                 .or_default()
@@ -249,7 +249,7 @@ impl DataEngine {
 
         // Create BarGenerator for this symbol if it doesn't exist
         {
-            let mut generators = self.bar_generators.write().unwrap_or_else(|e| e.into_inner());
+            let mut generators = self.bar_generators.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if !generators.contains_key(vt_symbol) {
                 generators.insert(vt_symbol.to_string(), Box::new(DefaultBarAggregator::new()));
                 info!("创建K线聚合器: {}", vt_symbol);
@@ -258,7 +258,7 @@ impl DataEngine {
 
         // Create BarSynthesizer for higher timeframes if needed
         if interval != Interval::Minute && interval != Interval::Tick {
-            let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(|e| e.into_inner());
+            let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if !synthesizers.contains_key(&key) {
                 let synth = BarSynthesizer::new(Interval::Minute, interval);
                 synthesizers.insert(key.clone(), synth);
@@ -268,7 +268,7 @@ impl DataEngine {
 
         // Subscribe to gateway if this is the first subscription for this symbol
         {
-            let mut gateway_subs = self.gateway_subscriptions.write().unwrap_or_else(|e| e.into_inner());
+            let mut gateway_subs = self.gateway_subscriptions.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if !gateway_subs.contains_key(vt_symbol) {
                 // Note: MainEngine.subscribe() is async and cannot be called from sync context.
                 // The caller (StrategyEngine) should handle gateway subscription separately.
@@ -298,7 +298,7 @@ impl DataEngine {
 
         // Remove subscriber from registry
         let was_last_subscriber = {
-            let mut subscriptions = self.subscriptions.write().unwrap_or_else(|e| e.into_inner());
+            let mut subscriptions = self.subscriptions.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(subscribers) = subscriptions.get_mut(&key) {
                 subscribers.retain(|s| s != subscriber);
                 if subscribers.is_empty() {
@@ -308,43 +308,43 @@ impl DataEngine {
                     false
                 }
             } else {
-                return Err(format!("订阅不存在: {} {:?}", vt_symbol, interval));
+                return Err(format!("订阅不存在: {vt_symbol} {interval:?}"));
             }
         };
 
         if was_last_subscriber {
             // Remove bar synthesizer for this interval
             {
-                let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(|e| e.into_inner());
+                let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 synthesizers.remove(&key);
             }
 
             // Check if any subscriptions remain for this symbol
             let has_other_subscriptions = {
-                let subscriptions = self.subscriptions.read().unwrap_or_else(|e| e.into_inner());
-                subscriptions.keys().any(|k| k.starts_with(&format!("{}.", vt_symbol)))
+                let subscriptions = self.subscriptions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+                subscriptions.keys().any(|k| k.starts_with(&format!("{vt_symbol}.")))
             };
 
             if !has_other_subscriptions {
                 // Remove bar generator
                 {
-                    let mut generators = self.bar_generators.write().unwrap_or_else(|e| e.into_inner());
+                    let mut generators = self.bar_generators.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     generators.remove(vt_symbol);
                 }
 
                 // Clear caches
                 {
-                    let mut tick_cache = self.tick_cache.write().unwrap_or_else(|e| e.into_inner());
+                    let mut tick_cache = self.tick_cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     tick_cache.remove(vt_symbol);
                 }
                 {
-                    let mut bar_cache = self.bar_cache.write().unwrap_or_else(|e| e.into_inner());
-                    bar_cache.retain(|k, _| !k.starts_with(&format!("{}.", vt_symbol)));
+                    let mut bar_cache = self.bar_cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    bar_cache.retain(|k, _| !k.starts_with(&format!("{vt_symbol}.")));
                 }
 
                 // Unsubscribe from gateway
                 {
-                    let mut gateway_subs = self.gateway_subscriptions.write().unwrap_or_else(|e| e.into_inner());
+                    let mut gateway_subs = self.gateway_subscriptions.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(gateway_name) = gateway_subs.remove(vt_symbol) {
                         // Note: MainEngine doesn't have an async unsubscribe method callable from sync context.
                         // We just track the removal for de-duplication purposes and log it.
@@ -373,13 +373,13 @@ impl DataEngine {
 
         // Cache tick
         {
-            let mut cache = self.tick_cache.write().unwrap_or_else(|e| e.into_inner());
+            let mut cache = self.tick_cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.insert(vt_symbol.clone(), tick.clone());
         }
 
         // Feed to BarGenerator
         let one_min_bar = {
-            let mut generators = self.bar_generators.write().unwrap_or_else(|e| e.into_inner());
+            let mut generators = self.bar_generators.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(generator) = generators.get_mut(&vt_symbol) {
                 generator.update_tick(tick.clone())
             } else {
@@ -402,24 +402,24 @@ impl DataEngine {
         // Cache 1m bar
         let one_min_key = subscription_key(&vt_symbol, Interval::Minute);
         {
-            let mut cache = self.bar_cache.write().unwrap_or_else(|e| e.into_inner());
+            let mut cache = self.bar_cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.insert(one_min_key.clone(), bar.clone());
         }
 
         // Emit 1m bar event
-        let event_type = format!("{}{}", EVENT_BAR, vt_symbol);
+        let event_type = format!("{EVENT_BAR}{vt_symbol}");
         if let Err(e) = self.event_tx.send((event_type, GatewayEvent::Bar(bar.clone()))) {
             warn!("发送1分钟K线事件失败: {}", e);
         }
 
         // Feed to all synthesizers for this symbol
         let synthesized_bars: Vec<(String, BarData)> = {
-            let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(|e| e.into_inner());
+            let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut results = Vec::new();
 
             for (key, synthesizer) in synthesizers.iter_mut() {
                 // Check if this synthesizer is for this symbol
-                if key.starts_with(&format!("{}.", vt_symbol)) {
+                if key.starts_with(&format!("{vt_symbol}.")) {
                     if let Some(synthesized) = synthesizer.update_bar(bar) {
                         results.push((key.clone(), synthesized));
                     }
@@ -432,12 +432,12 @@ impl DataEngine {
         for (key, synthesized_bar) in synthesized_bars {
             // Cache
             {
-                let mut cache = self.bar_cache.write().unwrap_or_else(|e| e.into_inner());
+                let mut cache = self.bar_cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 cache.insert(key.clone(), synthesized_bar.clone());
             }
 
             // Emit
-            let event_type = format!("{}{}", EVENT_BAR, vt_symbol);
+            let event_type = format!("{EVENT_BAR}{vt_symbol}");
             if let Err(e) = self.event_tx.send((event_type, GatewayEvent::Bar(synthesized_bar))) {
                 warn!("发送合成K线事件失败: {}", e);
             }
@@ -454,47 +454,47 @@ impl DataEngine {
 
         // Cache the bar
         {
-            let mut cache = self.bar_cache.write().unwrap_or_else(|e| e.into_inner());
+            let mut cache = self.bar_cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             cache.insert(key, bar.clone());
         }
     }
 
     /// Get the latest tick for a symbol.
     pub fn get_tick(&self, vt_symbol: &str) -> Option<TickData> {
-        let cache = self.tick_cache.read().unwrap_or_else(|e| e.into_inner());
+        let cache = self.tick_cache.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.get(vt_symbol).cloned()
     }
 
     /// Get the latest bar for a symbol+interval.
     pub fn get_bar(&self, vt_symbol: &str, interval: Interval) -> Option<BarData> {
         let key = subscription_key(vt_symbol, interval);
-        let cache = self.bar_cache.read().unwrap_or_else(|e| e.into_inner());
+        let cache = self.bar_cache.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.get(&key).cloned()
     }
 
     /// Get all active subscriptions.
     pub fn get_subscriptions(&self) -> HashMap<String, Vec<String>> {
-        self.subscriptions.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.subscriptions.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     /// Check if a symbol+interval is subscribed.
     pub fn is_subscribed(&self, vt_symbol: &str, interval: Interval) -> bool {
         let key = subscription_key(vt_symbol, interval);
-        let subscriptions = self.subscriptions.read().unwrap_or_else(|e| e.into_inner());
+        let subscriptions = self.subscriptions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         subscriptions.contains_key(&key)
     }
 
     /// Get the number of subscribers for a symbol+interval.
     pub fn subscriber_count(&self, vt_symbol: &str, interval: Interval) -> usize {
         let key = subscription_key(vt_symbol, interval);
-        let subscriptions = self.subscriptions.read().unwrap_or_else(|e| e.into_inner());
-        subscriptions.get(&key).map(|v| v.len()).unwrap_or(0)
+        let subscriptions = self.subscriptions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        subscriptions.get(&key).map(std::vec::Vec::len).unwrap_or(0)
     }
 
     /// Force-generate all pending bars (for session close, etc.).
     pub fn generate_all(&self) -> Vec<BarData> {
         let mut results = Vec::new();
-        let mut generators = self.bar_generators.write().unwrap_or_else(|e| e.into_inner());
+        let mut generators = self.bar_generators.write().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         for (_vt_symbol, generator) in generators.iter_mut() {
             if let Some(bar) = generator.generate() {
@@ -539,7 +539,7 @@ impl BaseEngine for DataEngine {
 
 /// Generate subscription key from vt_symbol and interval.
 fn subscription_key(vt_symbol: &str, interval: Interval) -> String {
-    format!("{}.{:?}", vt_symbol, interval)
+    format!("{vt_symbol}.{interval:?}")
 }
 
 // ---------------------------------------------------------------------------

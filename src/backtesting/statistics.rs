@@ -231,7 +231,7 @@ pub fn calculate_statistics(
     };
 
     let largest_winning_trade = winning_trades_pnl.iter().cloned().fold(0.0, f64::max);
-    let largest_losing_trade = losing_trades_pnl.iter().cloned().map(|x| x.abs()).fold(0.0, f64::max);
+    let largest_losing_trade = losing_trades_pnl.iter().cloned().map(f64::abs).fold(0.0, f64::max);
 
     // Sortino ratio: uses downside deviation instead of total std
     let downside_std = if negative_returns.len() > 1 {

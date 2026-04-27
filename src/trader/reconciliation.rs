@@ -143,7 +143,7 @@ impl ReconciliationEngine {
 
         // Step 2: Trigger venue queries
         let gateway = self.main_engine.get_gateway(gateway_name)
-            .ok_or_else(|| format!("找不到底层接口：{}", gateway_name))?;
+            .ok_or_else(|| format!("找不到底层接口：{gateway_name}"))?;
 
         // Query positions and accounts to trigger venue state updates
         if let Err(e) = gateway.query_position().await {
@@ -192,7 +192,7 @@ impl ReconciliationEngine {
         self.take_position_snapshot();
 
         let gateway = self.main_engine.get_gateway(gateway_name)
-            .ok_or_else(|| format!("找不到底层接口：{}", gateway_name))?;
+            .ok_or_else(|| format!("找不到底层接口：{gateway_name}"))?;
 
         if let Err(e) = gateway.query_position().await {
             warn!("对账查询持仓失败: {}", e);
@@ -219,7 +219,7 @@ impl ReconciliationEngine {
         self.take_order_snapshot(gateway_name);
 
         let gateway = self.main_engine.get_gateway(gateway_name)
-            .ok_or_else(|| format!("找不到底层接口：{}", gateway_name))?;
+            .ok_or_else(|| format!("找不到底层接口：{gateway_name}"))?;
 
         // Query account to trigger order updates via gateway connect flow
         if let Err(e) = gateway.query_account().await {

@@ -515,7 +515,7 @@ impl AlphaPanel {
                         .selected_text(
                             self.saved_models
                                 .get(self.selected_saved_model_idx)
-                                .map(|s| s.as_str())
+                                .map(std::string::String::as_str)
                                 .unwrap_or("选择模型"),
                         )
                         .show_index(
@@ -669,13 +669,13 @@ impl AlphaPanel {
                             .cloned()
                             .unwrap_or_default()
                     } else {
-                        format!("信号 {}", i)
+                        format!("信号 {i}")
                     };
                     ui.horizontal(|ui| {
                         ui.label(&label);
                         ui.add_space(8.0);
                         let pct = *w * 100.0;
-                        ui.add(egui::ProgressBar::new(*w as f32).text(format!("{:.1}%", pct)));
+                        ui.add(egui::ProgressBar::new(*w as f32).text(format!("{pct:.1}%")));
                     });
                 }
             }
@@ -702,7 +702,7 @@ impl AlphaPanel {
 
     fn show_metric_row(ui: &mut Ui, label: &str, value: &str) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{}:", label)).color(COLOR_TEXT_SECONDARY));
+            ui.label(RichText::new(format!("{label}:")).color(COLOR_TEXT_SECONDARY));
             ui.label(value);
         });
     }
@@ -736,7 +736,7 @@ impl AlphaPanel {
 
         for (i, bar) in bars.iter().enumerate() {
             let bin_start = min + i as f64 * bin_width;
-            let label = format!("{:>8.2} │ {}", bin_start, bar);
+            let label = format!("{bin_start:>8.2} │ {bar}");
             ui.label(
                 RichText::new(label)
                     .size(10.0)
@@ -818,11 +818,11 @@ impl AlphaPanel {
                     n_samples: 0,
                     train_mse: 0.0,
                     valid_mse: 0.0,
-                    detail: format!("错误: 无法获取 AlphaLab 读锁 — {}", e),
+                    detail: format!("错误: 无法获取 AlphaLab 读锁 — {e}"),
                     trained: false,
                 };
                 self.training = false;
-                self.status_message = format!("训练失败: 无法获取 AlphaLab 读锁 — {}", e);
+                self.status_message = format!("训练失败: 无法获取 AlphaLab 读锁 — {e}");
                 return;
             }
         };
@@ -873,7 +873,7 @@ impl AlphaPanel {
 
         // Store model in AlphaLab — drop read lock, acquire write lock
         let storage_name = if self.model_name.is_empty() {
-            format!("{}_{}", model_name, dataset_name)
+            format!("{model_name}_{dataset_name}")
         } else {
             self.model_name.clone()
         };
@@ -892,13 +892,12 @@ impl AlphaPanel {
                         train_mse,
                         valid_mse,
                         detail: format!(
-                            "{}\n警告: 模型训练成功但无法保存到 AlphaLab — {}",
-                            model_detail, e
+                            "{model_detail}\n警告: 模型训练成功但无法保存到 AlphaLab — {e}"
                         ),
                         trained: true,
                     };
                     self.training = false;
-                    self.status_message = format!("{} 模型训练完成 (无法保存)", model_name);
+                    self.status_message = format!("{model_name} 模型训练完成 (无法保存)");
                     return;
                 }
             };
@@ -918,7 +917,7 @@ impl AlphaPanel {
         };
 
         self.training = false;
-        self.status_message = format!("{} 模型训练完成", model_name);
+        self.status_message = format!("{model_name} 模型训练完成");
     }
 
     /// Extract labels from a dataset segment
@@ -976,7 +975,7 @@ impl AlphaPanel {
             self.factor_state.selected_factor.clone()
         };
 
-        self.status_message = format!("正在分析因子: {}...", factor_name);
+        self.status_message = format!("正在分析因子: {factor_name}...");
 
         let alpha_lab = match self.alpha_lab {
             Some(ref lab) => lab.clone(),
@@ -1023,7 +1022,7 @@ impl AlphaPanel {
                     ic: 0.0,
                     value_count: 0,
                 });
-                self.status_message = format!("分析失败: 无法获取 AlphaLab 读锁 — {}", e);
+                self.status_message = format!("分析失败: 无法获取 AlphaLab 读锁 — {e}");
                 return;
             }
         };
@@ -1097,7 +1096,7 @@ impl AlphaPanel {
                     value_count: 0,
                 });
                 self.status_message =
-                    format!("分析失败: 因子 '{}' 在数据集中不存在", factor_name);
+                    format!("分析失败: 因子 '{factor_name}' 在数据集中不存在");
                 return;
             }
         };
@@ -1153,7 +1152,7 @@ impl AlphaPanel {
             value_count: factor_values.len(),
         });
 
-        self.status_message = format!("因子 {} 分析完成", factor_name);
+        self.status_message = format!("因子 {factor_name} 分析完成");
     }
 
     /// Compute IC (Information Coefficient) as Pearson correlation between factor and label
@@ -1279,7 +1278,7 @@ impl AlphaPanel {
             Ok(g) => g,
             Err(e) => {
                 self.portfolio_state.backtest_status =
-                    format!("无法获取 AlphaLab 读锁 — {}", e);
+                    format!("无法获取 AlphaLab 读锁 — {e}");
                 self.status_message = "回测失败: 无法获取 AlphaLab 读锁".to_string();
                 return;
             }
@@ -1408,7 +1407,7 @@ impl AlphaPanel {
             let close = close_ca.and_then(|ca| ca.get(i)).unwrap_or(0.0);
             let volume = volume_ca.and_then(|ca| ca.get(i)).unwrap_or(0.0);
 
-            let vt_symbol = format!("{}.BINANCE", symbol);
+            let vt_symbol = format!("{symbol}.BINANCE");
             let parts: Vec<&str> = vt_symbol.split('.').collect();
             let sym = parts.first().unwrap_or(&"").to_string();
 
@@ -1456,7 +1455,7 @@ impl AlphaPanel {
         let lab_guard = match alpha_lab.read() {
             Ok(g) => g,
             Err(e) => {
-                self.status_message = format!("保存失败: 无法获取 AlphaLab 读锁 — {}", e);
+                self.status_message = format!("保存失败: 无法获取 AlphaLab 读锁 — {e}");
                 return;
             }
         };
@@ -1474,7 +1473,7 @@ impl AlphaPanel {
         let mut lab_guard = match alpha_lab.write() {
             Ok(g) => g,
             Err(e) => {
-                self.status_message = format!("保存失败: 无法获取 AlphaLab 写锁 — {}", e);
+                self.status_message = format!("保存失败: 无法获取 AlphaLab 写锁 — {e}");
                 return;
             }
         };
@@ -1515,7 +1514,7 @@ impl AlphaPanel {
         let lab_guard = match alpha_lab.read() {
             Ok(g) => g,
             Err(e) => {
-                self.status_message = format!("加载失败: 无法获取 AlphaLab 读锁 — {}", e);
+                self.status_message = format!("加载失败: 无法获取 AlphaLab 读锁 — {e}");
                 return;
             }
         };
@@ -1534,7 +1533,7 @@ impl AlphaPanel {
                     trained: true,
                 };
                 self.model_name = model_name.clone();
-                self.status_message = format!("模型 '{}' 加载成功", model_name);
+                self.status_message = format!("模型 '{model_name}' 加载成功");
             }
             None => {
                 self.status_message = format!("加载失败: 模型 '{}' 不存在", model_name);
@@ -1563,7 +1562,7 @@ impl AlphaPanel {
         let mut lab_guard = match alpha_lab.write() {
             Ok(g) => g,
             Err(e) => {
-                self.status_message = format!("删除失败: 无法获取 AlphaLab 写锁 — {}", e);
+                self.status_message = format!("删除失败: 无法获取 AlphaLab 写锁 — {e}");
                 return;
             }
         };

@@ -269,7 +269,7 @@ impl TradingWidget {
 
         // Normalize symbol to lowercase for consistent matching with tick data
         let normalized_symbol = self.symbol.to_lowercase();
-        let new_vt_symbol = format!("{}.{}", normalized_symbol, exchange);
+        let new_vt_symbol = format!("{normalized_symbol}.{exchange}");
 
         if new_vt_symbol != self.vt_symbol {
             self.vt_symbol = new_vt_symbol;
@@ -307,7 +307,7 @@ impl TradingWidget {
                     let exchange_text = self
                         .exchanges
                         .get(self.exchange_index)
-                        .map(|e| e.to_string())
+                        .map(std::string::ToString::to_string)
                         .unwrap_or_default();
                     ComboBox::from_id_salt("exchange_combo")
                         .selected_text(&exchange_text)
@@ -673,7 +673,7 @@ impl TradingWidget {
                 if let Some(pct) = self.depth.price_change_pct() {
                     let color = if pct >= 0.0 { COLOR_LONG } else { COLOR_SHORT };
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{:+.2}%", pct)).color(color));
+                        ui.label(RichText::new(format!("{pct:+.2}%")).color(color));
                     });
                 }
             });

@@ -338,8 +338,7 @@ impl PyBracketOrderEngine {
     ) -> PyResult<u64> {
         let (symbol, exchange) = extract_vt_symbol(vt_symbol).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid vt_symbol format: {}",
-                vt_symbol
+                "Invalid vt_symbol format: {vt_symbol}"
             ))
         })?;
 
@@ -406,8 +405,7 @@ impl PyBracketOrderEngine {
     ) -> PyResult<u64> {
         let (symbol, exchange) = extract_vt_symbol(vt_symbol).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid vt_symbol format: {}",
-                vt_symbol
+                "Invalid vt_symbol format: {vt_symbol}"
             ))
         })?;
 
@@ -477,8 +475,7 @@ impl PyBracketOrderEngine {
     ) -> PyResult<u64> {
         let (symbol, exchange) = extract_vt_symbol(vt_symbol).ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid vt_symbol format: {}",
-                vt_symbol
+                "Invalid vt_symbol format: {vt_symbol}"
             ))
         })?;
 
@@ -571,8 +568,7 @@ fn parse_direction(s: &str) -> PyResult<Direction> {
         "SHORT" => Ok(Direction::Short),
         "NET" => Ok(Direction::Net),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid direction '{}': expected LONG, SHORT, or NET",
-            s
+            "Invalid direction '{s}': expected LONG, SHORT, or NET"
         ))),
     }
 }
@@ -586,8 +582,7 @@ fn parse_order_type(s: &str) -> PyResult<OrderType> {
         "FAK" => Ok(OrderType::Fak),
         "FOK" => Ok(OrderType::Fok),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid order_type '{}': expected LIMIT, MARKET, STOP, STOP_LIMIT, FAK, or FOK",
-            s
+            "Invalid order_type '{s}': expected LIMIT, MARKET, STOP, STOP_LIMIT, FAK, or FOK"
         ))),
     }
 }
@@ -600,8 +595,7 @@ fn parse_offset(s: &str) -> PyResult<Offset> {
         "CLOSETODAY" => Ok(Offset::CloseToday),
         "CLOSEYESTERDAY" => Ok(Offset::CloseYesterday),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid offset '{}': expected NONE, OPEN, CLOSE, CLOSETODAY, or CLOSEYESTERDAY",
-            s
+            "Invalid offset '{s}': expected NONE, OPEN, CLOSE, CLOSETODAY, or CLOSEYESTERDAY"
         ))),
     }
 }

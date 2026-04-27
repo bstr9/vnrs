@@ -60,7 +60,7 @@ impl OptimizationSetting {
 
                 let count = value_list.len();
                 self.params.insert(name.to_string(), value_list);
-                Ok(format!("范围参数添加成功，数量{}", count))
+                Ok(format!("范围参数添加成功，数量{count}"))
             }
         }
     }
@@ -115,7 +115,7 @@ impl OptimizationSetting {
 
     /// Count the total number of parameter combinations
     pub fn count_settings(&self) -> usize {
-        self.params.values().map(|v| v.len()).product()
+        self.params.values().map(std::vec::Vec::len).product()
     }
 }
 
@@ -249,7 +249,7 @@ where
     fn genes_to_key(genes: &[(String, f64)]) -> String {
         genes
             .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
+            .map(|(k, v)| format!("{k}:{v}"))
             .collect::<Vec<_>>()
             .join(",")
     }

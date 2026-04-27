@@ -87,7 +87,7 @@ impl TradingMcpServer {
         let active_orders = self.engine.get_all_active_orders();
 
         let total_balance: f64 = accounts.iter().map(|a| a.balance).sum();
-        let total_available: f64 = accounts.iter().map(|a| a.available()).sum();
+        let total_available: f64 = accounts.iter().map(crate::trader::object::AccountData::available).sum();
         let total_frozen: f64 = accounts.iter().map(|a| a.frozen).sum();
         let total_pnl: f64 = positions.iter().map(|p| p.pnl).sum();
         let margin_usage_pct = if total_balance > 0.0 {
@@ -293,7 +293,7 @@ impl TradingMcpServer {
         Parameters(params): Parameters<CheckMarginParams>,
     ) -> Result<CallToolResult, McpError> {
         let accounts = self.engine.get_all_accounts();
-        let total_available: f64 = accounts.iter().map(|a| a.available()).sum();
+        let total_available: f64 = accounts.iter().map(crate::trader::object::AccountData::available).sum();
 
         // Estimate margin requirement (simplified: notional value * typical margin rate)
         let notional_value = params.price * params.volume;

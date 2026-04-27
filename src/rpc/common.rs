@@ -158,10 +158,10 @@ impl std::fmt::Display for ConnectionError {
                 write!(f, "RPC Server disconnected (heartbeat timeout)")
             }
             ConnectionError::ConnectionFailed(msg) => {
-                write!(f, "Failed to connect to RPC server: {}", msg)
+                write!(f, "Failed to connect to RPC server: {msg}")
             }
             ConnectionError::SocketError(msg) => {
-                write!(f, "RPC socket error: {}", msg)
+                write!(f, "RPC socket error: {msg}")
             }
         }
     }

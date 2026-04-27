@@ -107,9 +107,9 @@ pub fn setup_embedded_python_path() -> Result<(), String> {
 
     Python::attach(|py| {
         let sys = py.import("sys")
-            .map_err(|e| format!("Failed to import sys: {}", e))?;
+            .map_err(|e| format!("Failed to import sys: {e}"))?;
         let path = sys.getattr("path")
-            .map_err(|e| format!("Failed to get sys.path: {}", e))?;
+            .map_err(|e| format!("Failed to get sys.path: {e}"))?;
 
         // Add project root directory (where strategies/ is located)
         // Try to detect from executable location, falling back to current dir
@@ -121,7 +121,7 @@ pub fn setup_embedded_python_path() -> Result<(), String> {
         if strategies_dir.exists() {
             let strategies_str = strategies_dir.to_string_lossy().to_string();
             path.call_method1("append", (strategies_str,))
-                .map_err(|e| format!("Failed to add strategies to sys.path: {}", e))?;
+                .map_err(|e| format!("Failed to add strategies to sys.path: {e}"))?;
         }
 
         // Add .venv/Lib/site-packages (Windows) or .venv/lib/python*/site-packages (Unix)
@@ -129,7 +129,7 @@ pub fn setup_embedded_python_path() -> Result<(), String> {
         if venv_site_packages.exists() {
             let venv_str = venv_site_packages.to_string_lossy().to_string();
             path.call_method1("append", (venv_str,))
-                .map_err(|e| format!("Failed to add .venv to sys.path: {}", e))?;
+                .map_err(|e| format!("Failed to add .venv to sys.path: {e}"))?;
         } else {
             // Try Unix-style path: .venv/lib/python3.X/site-packages
             let venv_lib_dir = project_root.join(".venv").join("lib");
@@ -141,7 +141,7 @@ pub fn setup_embedded_python_path() -> Result<(), String> {
                         if site_packages.exists() {
                             let site_str = site_packages.to_string_lossy().to_string();
                             path.call_method1("append", (site_str,))
-                                .map_err(|e| format!("Failed to add .venv site-packages to sys.path: {}", e))?;
+                                .map_err(|e| format!("Failed to add .venv site-packages to sys.path: {e}"))?;
                             break;
                         }
                     }

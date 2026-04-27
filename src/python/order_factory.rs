@@ -24,8 +24,7 @@ fn parse_side(side: &str) -> PyResult<Direction> {
         "BUY" | "LONG" => Ok(Direction::Long),
         "SELL" | "SHORT" => Ok(Direction::Short),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid side '{}': expected BUY, SELL, LONG, or SHORT",
-            side
+            "Invalid side '{side}': expected BUY, SELL, LONG, or SHORT"
         ))),
     }
 }
@@ -249,8 +248,7 @@ impl PyOrder {
             "CLOSE_YESTERDAY" => Offset::CloseYesterday,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid offset '{}': expected NONE, OPEN, CLOSE, CLOSE_TODAY, or CLOSE_YESTERDAY",
-                    offset
+                    "Invalid offset '{offset}': expected NONE, OPEN, CLOSE, CLOSE_TODAY, or CLOSE_YESTERDAY"
                 )));
             }
         };
@@ -339,7 +337,7 @@ impl PyOrder {
                 self.side(),
                 self.instrument_id,
                 self.price
-                    .map(|p| format!("{}", p))
+                    .map(|p| format!("{p}"))
                     .unwrap_or_else(|| "N/A".to_string()),
                 self.quantity
             ),
@@ -348,7 +346,7 @@ impl PyOrder {
                 self.side(),
                 self.instrument_id,
                 self.trigger_price
-                    .map(|p| format!("{}", p))
+                    .map(|p| format!("{p}"))
                     .unwrap_or_else(|| "N/A".to_string()),
                 self.quantity
             ),
@@ -357,10 +355,10 @@ impl PyOrder {
                 self.side(),
                 self.instrument_id,
                 self.trigger_price
-                    .map(|p| format!("{}", p))
+                    .map(|p| format!("{p}"))
                     .unwrap_or_else(|| "N/A".to_string()),
                 self.limit_price
-                    .map(|p| format!("{}", p))
+                    .map(|p| format!("{p}"))
                     .unwrap_or_else(|| "N/A".to_string()),
                 self.quantity
             ),
@@ -425,8 +423,7 @@ impl OrderFactory {
     ) -> PyResult<PyOrder> {
         let _ = InstrumentId::from_str(instrument_id).map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid instrument_id '{}': {}",
-                instrument_id, e
+                "Invalid instrument_id '{instrument_id}': {e}"
             ))
         })?;
         let direction = parse_side(side)?;
@@ -457,8 +454,7 @@ impl OrderFactory {
     ) -> PyResult<PyOrder> {
         let _ = InstrumentId::from_str(instrument_id).map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid instrument_id '{}': {}",
-                instrument_id, e
+                "Invalid instrument_id '{instrument_id}': {e}"
             ))
         })?;
         let direction = parse_side(side)?;
@@ -489,8 +485,7 @@ impl OrderFactory {
     ) -> PyResult<PyOrder> {
         let _ = InstrumentId::from_str(instrument_id).map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid instrument_id '{}': {}",
-                instrument_id, e
+                "Invalid instrument_id '{instrument_id}': {e}"
             ))
         })?;
         let direction = parse_side(side)?;
@@ -522,8 +517,7 @@ impl OrderFactory {
     ) -> PyResult<PyOrder> {
         let _ = InstrumentId::from_str(instrument_id).map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid instrument_id '{}': {}",
-                instrument_id, e
+                "Invalid instrument_id '{instrument_id}': {e}"
             ))
         })?;
         let direction = parse_side(side)?;

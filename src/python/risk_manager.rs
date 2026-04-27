@@ -251,7 +251,7 @@ impl PyRiskCheckResult {
 
     fn __repr__(&self) -> String {
         match &self.reason {
-            Some(r) => format!("RiskCheckResult(is_approved=False, reason='{}')", r),
+            Some(r) => format!("RiskCheckResult(is_approved=False, reason='{r}')"),
             None => "RiskCheckResult(is_approved=True)".to_string(),
         }
     }
@@ -417,7 +417,7 @@ impl PyRiskManager {
         // Build a minimal Position with the given signed quantity
         let position = build_position(&order.symbol, order.exchange, position_qty);
 
-        let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = state
             .engine
             .check_order(&order, &position, active_orders, 1.0);
@@ -431,7 +431,7 @@ impl PyRiskManager {
     fn record_trade(&self, trade_value: f64) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .record_trade(trade_value);
     }
 
@@ -439,13 +439,13 @@ impl PyRiskManager {
     fn reset_daily(&self) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .reset_daily();
     }
 
     /// Get a copy of the current risk configuration.
     fn get_config(&self) -> PyRiskConfig {
-        let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         PyRiskConfig::from_inner(state.engine.config().clone())
     }
 
@@ -453,7 +453,7 @@ impl PyRiskManager {
     fn set_config(&self, config: &PyRiskConfig) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .engine
             .set_config(config.inner.clone());
     }
@@ -463,7 +463,7 @@ impl PyRiskManager {
     fn daily_trade_count(&self) -> u64 {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .daily_trade_count
     }
 
@@ -472,12 +472,12 @@ impl PyRiskManager {
     fn daily_turnover(&self) -> f64 {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .daily_turnover
     }
 
     fn __repr__(&self) -> String {
-        let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let state = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         format!(
             "RiskManager(daily_trades={}, daily_turnover={:.2})",
             state.daily_trade_count, state.daily_turnover,
@@ -526,8 +526,7 @@ fn parse_direction(s: &str) -> PyResult<Direction> {
         "SHORT" | "SELL" => Ok(Direction::Short),
         "NET" => Ok(Direction::Net),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid direction '{}'. Expected LONG/BUY, SHORT/SELL, or NET.",
-            s
+            "Invalid direction '{s}'. Expected LONG/BUY, SHORT/SELL, or NET."
         ))),
     }
 }
@@ -540,8 +539,7 @@ fn parse_offset(s: &str) -> PyResult<Offset> {
         "CLOSE_TODAY" => Ok(Offset::CloseToday),
         "CLOSE_YESTERDAY" => Ok(Offset::CloseYesterday),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid offset '{}'. Expected NONE, OPEN, CLOSE, CLOSE_TODAY, or CLOSE_YESTERDAY.",
-            s
+            "Invalid offset '{s}'. Expected NONE, OPEN, CLOSE, CLOSE_TODAY, or CLOSE_YESTERDAY."
         ))),
     }
 }
@@ -553,8 +551,7 @@ fn parse_order_type(s: &str) -> PyResult<OrderType> {
         "STOP" => Ok(OrderType::Stop),
         "STOP_LIMIT" => Ok(OrderType::StopLimit),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid order_type '{}'. Expected MARKET, LIMIT, STOP, or STOP_LIMIT.",
-            s
+            "Invalid order_type '{s}'. Expected MARKET, LIMIT, STOP, or STOP_LIMIT."
         ))),
     }
 }

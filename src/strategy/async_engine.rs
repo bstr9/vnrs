@@ -102,7 +102,7 @@ impl AsyncStrategyEngine {
         {
             let mut strategies = self.strategies.write().await;
             if strategies.contains_key(&name) {
-                return Err(format!("Async strategy '{}' already exists", name));
+                return Err(format!("Async strategy '{name}' already exists"));
             }
             strategies.insert(name.clone(), strategy);
         }
@@ -134,7 +134,7 @@ impl AsyncStrategyEngine {
         {
             let mut strategies = self.strategies.write().await;
             if strategies.remove(strategy_name).is_none() {
-                return Err(format!("Async strategy '{}' not found", strategy_name));
+                return Err(format!("Async strategy '{strategy_name}' not found"));
             }
         }
 
@@ -178,10 +178,10 @@ impl AsyncStrategyEngine {
                 match (strategies.get_mut(&name), contexts.get(&name)) {
                     (Some(strategy), Some(context)) => strategy.on_init(context).await,
                     (Some(_), None) => Err(StrategyError::InitError(format!(
-                        "No context for strategy '{}'", name
+                        "No context for strategy '{name}'"
                     ))),
                     _ => Err(StrategyError::InitError(format!(
-                        "Strategy '{}' not found", name
+                        "Strategy '{name}' not found"
                     ))),
                 }
             };
@@ -356,7 +356,7 @@ impl AsyncStrategyEngine {
                     Some(gw_name) => {
                         self.main_engine.send_order(req.clone(), &gw_name).await
                     }
-                    None => Err(format!("No gateway found for exchange {:?}", exchange)),
+                    None => Err(format!("No gateway found for exchange {exchange:?}")),
                 };
                 strategy_results.push(result);
             }

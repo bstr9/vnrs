@@ -280,13 +280,13 @@ impl MA {
             period,
             values: Vec::new(),
             config: IndicatorLineConfig {
-                name: format!("MA{}", period),
+                name: format!("MA{period}"),
                 color,
                 style: LineStyle::Solid,
                 width: 1.5,
             },
             location,
-            base: IndicatorBase::new(&format!("MA{}", period), location),
+            base: IndicatorBase::new(&format!("MA{period}"), location),
             window: VecDeque::new(),
         }
     }
@@ -383,13 +383,13 @@ impl EMA {
             period,
             values: Vec::new(),
             config: IndicatorLineConfig {
-                name: format!("EMA{}", period),
+                name: format!("EMA{period}"),
                 color,
                 style: LineStyle::Solid,
                 width: 1.5,
             },
             location,
-            base: IndicatorBase::new(&format!("EMA{}", period), location),
+            base: IndicatorBase::new(&format!("EMA{period}"), location),
             prev_ema: 0.0,
             initial_sum: 0.0,
         }
@@ -695,13 +695,13 @@ impl WMA {
             period,
             values: Vec::new(),
             config: IndicatorLineConfig {
-                name: format!("WMA{}", period),
+                name: format!("WMA{period}"),
                 color,
                 style: LineStyle::Solid,
                 width: 1.5,
             },
             location,
-            base: IndicatorBase::new(&format!("WMA{}", period), location),
+            base: IndicatorBase::new(&format!("WMA{period}"), location),
             window: VecDeque::new(),
         }
     }
@@ -1827,7 +1827,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 }
                 let val: f64 = num_str
                     .parse()
-                    .map_err(|_| format!("Invalid number: {}", num_str))?;
+                    .map_err(|_| format!("Invalid number: {num_str}"))?;
                 tokens.push(Token::Number(val));
             }
             'a'..='z' | 'A'..='Z' | '_' => {
@@ -1844,10 +1844,10 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     "open" | "high" | "low" | "close" | "volume" => {
                         tokens.push(Token::Var(ident));
                     }
-                    other => return Err(format!("Unknown variable: {}", other)),
+                    other => return Err(format!("Unknown variable: {other}")),
                 }
             }
-            other => return Err(format!("Unexpected character: {}", other)),
+            other => return Err(format!("Unexpected character: {other}")),
         }
     }
     Ok(tokens)
@@ -2050,13 +2050,13 @@ impl RSI {
             period,
             values: Vec::new(),
             config: IndicatorLineConfig {
-                name: format!("RSI{}", period),
+                name: format!("RSI{period}"),
                 color,
                 style: LineStyle::Solid,
                 width: 1.5,
             },
             location,
-            base: IndicatorBase::new(&format!("RSI{}", period), location),
+            base: IndicatorBase::new(&format!("RSI{period}"), location),
             avg_gain: 0.0,
             avg_loss: 0.0,
             prev_close: None,
@@ -2347,13 +2347,13 @@ impl ATR {
             period,
             values: Vec::new(),
             config: IndicatorLineConfig {
-                name: format!("ATR{}", period),
+                name: format!("ATR{period}"),
                 color,
                 style: LineStyle::Solid,
                 width: 1.5,
             },
             location,
-            base: IndicatorBase::new(&format!("ATR{}", period), location),
+            base: IndicatorBase::new(&format!("ATR{period}"), location),
             prev_close: None,
             tr_window: VecDeque::new(),
             atr_value: None,
@@ -2644,13 +2644,13 @@ impl CCI {
             period,
             values: Vec::new(),
             config: IndicatorLineConfig {
-                name: format!("CCI{}", period),
+                name: format!("CCI{period}"),
                 color,
                 style: LineStyle::Solid,
                 width: 1.5,
             },
             location,
-            base: IndicatorBase::new(&format!("CCI{}", period), location),
+            base: IndicatorBase::new(&format!("CCI{period}"), location),
             tp_window: VecDeque::new(),
         }
     }
@@ -2750,13 +2750,13 @@ impl MFI {
             period,
             values: Vec::new(),
             config: IndicatorLineConfig {
-                name: format!("MFI{}", period),
+                name: format!("MFI{period}"),
                 color,
                 style: LineStyle::Solid,
                 width: 1.5,
             },
             location,
-            base: IndicatorBase::new(&format!("MFI{}", period), location),
+            base: IndicatorBase::new(&format!("MFI{period}"), location),
             positive_flow_window: VecDeque::new(),
             negative_flow_window: VecDeque::new(),
             prev_tp: None,

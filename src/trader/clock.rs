@@ -73,29 +73,29 @@ impl TestClock {
 
     /// Advance time by a duration.
     pub fn advance(&self, duration: Duration) {
-        let mut time = self.time.write().unwrap_or_else(|e| e.into_inner());
+        let mut time = self.time.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *time += duration;
     }
 
     /// Set the time directly.
     pub fn set_time(&self, time: DateTime<Utc>) {
-        let mut t = self.time.write().unwrap_or_else(|e| e.into_inner());
+        let mut t = self.time.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *t = time;
     }
 
     /// Get the current test time without advancing.
     pub fn peek(&self) -> DateTime<Utc> {
-        *self.time.read().unwrap_or_else(|e| e.into_inner())
+        *self.time.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
 impl Clock for TestClock {
     fn now(&self) -> DateTime<Utc> {
-        *self.time.read().unwrap_or_else(|e| e.into_inner())
+        *self.time.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn set_time(&self, time: DateTime<Utc>) {
-        let mut t = self.time.write().unwrap_or_else(|e| e.into_inner());
+        let mut t = self.time.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *t = time;
     }
 }

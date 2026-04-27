@@ -58,35 +58,35 @@ impl VolatilityStrategy {
     pub fn new(strategy_name: String, vt_symbol: String, setting: StrategySetting) -> Self {
         let atr_length = setting
             .get("atr_length")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(14) as usize;
         let boll_length = setting
             .get("boll_length")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(30) as usize;
         let boll_dev = setting
             .get("boll_dev")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(2.0);
         let natr_threshold = setting
             .get("natr_threshold")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.6);
         let tp_atr_mult = setting
             .get("tp_atr_mult")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(4.0);
         let sl_atr_mult = setting
             .get("sl_atr_mult")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(1.0);
         let fixed_size = setting
             .get("fixed_size")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.01);
         let am_length = setting
             .get("am_length")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(100) as usize;
 
         Self {
@@ -119,7 +119,7 @@ impl VolatilityStrategy {
         self.base
             .positions
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&self.vt_symbol)
             .copied()
             .unwrap_or(0.0)
@@ -260,8 +260,7 @@ impl StrategyTemplate for VolatilityStrategy {
         // Bollinger Band breakout entry (spot: long only)
         if close > boll_upper {
             self.base.write_log(&format!(
-                "BUY signal: close={:.2} > boll_upper={:.2}, NATR={:.2}%",
-                close, boll_upper, natr
+                "BUY signal: close={close:.2} > boll_upper={boll_upper:.2}, NATR={natr:.2}%"
             ));
             self.base.buy(&self.vt_symbol, close, self.fixed_size, false);
 
@@ -308,7 +307,7 @@ impl StrategyTemplate for VolatilityStrategy {
         self.base
             .positions
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vt_symbol)
             .copied()
             .unwrap_or(0.0)

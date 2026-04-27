@@ -246,11 +246,11 @@ impl StopOrderEngine {
         };
 
         {
-            let mut orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.stop_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             orders.insert(id, order);
         }
         {
-            let mut index = self.symbol_index.write().unwrap_or_else(|e| e.into_inner());
+            let mut index = self.symbol_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             index.entry(vt_symbol.clone()).or_default().push(id);
         }
 
@@ -259,7 +259,7 @@ impl StopOrderEngine {
     }
 
     pub fn cancel_stop_order(&self, id: StopOrderId) -> Result<(), String> {
-        let mut orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
+        let mut orders = self.stop_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(order) = orders.get_mut(&id) {
             if order.status != StopOrderStatus::Pending {
                 return Err(format!("Stop order #{} is not pending (status: {})", id, order.status));
@@ -268,18 +268,18 @@ impl StopOrderEngine {
             info!("[StopOrderEngine] Cancelled stop order #{}", id);
             Ok(())
         } else {
-            Err(format!("Stop order #{} not found", id))
+            Err(format!("Stop order #{id} not found"))
         }
     }
 
     pub fn cancel_orders_for_symbol(&self, symbol: &str, exchange: Exchange) -> usize {
         let vt_symbol = format!("{}.{}", symbol, exchange.value());
         let ids: Vec<StopOrderId> = {
-            let index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+            let index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             index.get(&vt_symbol).cloned().unwrap_or_default()
         };
         let mut cancelled = 0;
-        let mut orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
+        let mut orders = self.stop_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         for id in ids {
             if let Some(order) = orders.get_mut(&id) {
                 if order.status == StopOrderStatus::Pending {
@@ -295,22 +295,22 @@ impl StopOrderEngine {
     }
 
     pub fn get_stop_order(&self, id: StopOrderId) -> Option<StopOrder> {
-        self.stop_orders.read().unwrap_or_else(|e| e.into_inner()).get(&id).cloned()
+        self.stop_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned()
     }
 
     pub fn get_all_stop_orders(&self) -> Vec<StopOrder> {
-        self.stop_orders.read().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+        self.stop_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner).values().cloned().collect()
     }
 
     pub fn get_active_stop_orders(&self) -> Vec<StopOrder> {
-        self.stop_orders.read().unwrap_or_else(|e| e.into_inner()).values().filter(|o| o.is_active()).cloned().collect()
+        self.stop_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner).values().filter(|o| o.is_active()).cloned().collect()
     }
 
     pub fn get_stop_orders_for_symbol(&self, symbol: &str, exchange: Exchange) -> Vec<StopOrder> {
         let vt_symbol = format!("{}.{}", symbol, exchange.value());
-        let index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+        let index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         let ids = index.get(&vt_symbol).cloned().unwrap_or_default();
-        let orders = self.stop_orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.stop_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         ids.iter().filter_map(|id| orders.get(id).cloned()).collect()
     }
 
@@ -405,13 +405,13 @@ impl StopOrderEngine {
     fn process_tick_internal(&self, tick: &TickData) {
         let vt_symbol = tick.vt_symbol();
         let ids: Vec<StopOrderId> = {
-            let index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+            let index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             index.get(&vt_symbol).cloned().unwrap_or_default()
         };
 
         let mut triggered_ids: Vec<StopOrderId> = Vec::new();
         {
-            let mut orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.stop_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             for id in ids {
                 if let Some(order) = orders.get_mut(&id) {
                     if !order.is_active() { continue; }
@@ -432,7 +432,7 @@ impl StopOrderEngine {
         }
 
         if !triggered_ids.is_empty() {
-            let orders = self.stop_orders.read().unwrap_or_else(|e| e.into_inner());
+            let orders = self.stop_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             let callbacks = self.callbacks.read().unwrap_or_else(|e| e.into_inner());
             for id in triggered_ids {
                 if let Some(order) = orders.get(&id) {
@@ -446,13 +446,13 @@ impl StopOrderEngine {
     fn process_bar_internal(&self, bar: &BarData) {
         let vt_symbol = bar.vt_symbol();
         let ids: Vec<StopOrderId> = {
-            let index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+            let index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             index.get(&vt_symbol).cloned().unwrap_or_default()
         };
 
         let mut triggered_ids: Vec<StopOrderId> = Vec::new();
         {
-            let mut orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.stop_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             for id in ids {
                 if let Some(order) = orders.get_mut(&id) {
                     if !order.is_active() { continue; }
@@ -469,7 +469,7 @@ impl StopOrderEngine {
         }
 
         if !triggered_ids.is_empty() {
-            let orders = self.stop_orders.read().unwrap_or_else(|e| e.into_inner());
+            let orders = self.stop_orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             let callbacks = self.callbacks.read().unwrap_or_else(|e| e.into_inner());
             for id in triggered_ids {
                 if let Some(order) = orders.get(&id) {
@@ -481,8 +481,8 @@ impl StopOrderEngine {
     }
 
     pub fn cleanup(&self) {
-        let mut orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
-        let mut index = self.symbol_index.write().unwrap_or_else(|e| e.into_inner());
+        let mut orders = self.stop_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut index = self.symbol_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         let inactive: Vec<StopOrderId> = orders.iter()
             .filter(|(_, o)| !o.is_active()).map(|(id, _)| *id).collect();
         for id in &inactive {
@@ -508,7 +508,7 @@ impl BaseEngine for StopOrderEngine {
 
     fn close(&self) {
         self.running.store(false, Ordering::SeqCst);
-        let mut orders = self.stop_orders.write().unwrap_or_else(|e| e.into_inner());
+        let mut orders = self.stop_orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         for (_, order) in orders.iter_mut() {
             if order.status == StopOrderStatus::Pending {
                 order.status = StopOrderStatus::Cancelled;

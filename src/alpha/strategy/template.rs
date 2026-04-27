@@ -58,7 +58,7 @@ impl AlphaStrategy {
     /// Update trade data
     pub fn update_trade(&mut self, trade: &crate::trader::TradeData) {
         {
-            let mut pos_data = self.pos_data.lock().unwrap_or_else(|e| e.into_inner());
+            let mut pos_data = self.pos_data.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(direction) = trade.direction {
                 let delta = match (direction, trade.offset) {
                     (crate::trader::Direction::Long, crate::trader::Offset::Open) => trade.volume,
@@ -178,7 +178,7 @@ impl AlphaStrategy {
         let mut active_orders = self
             .active_orderids
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         active_orders.extend(order_ids.clone());
         Ok(order_ids)
     }
@@ -193,7 +193,7 @@ impl AlphaStrategy {
         let mut active_orders = self
             .active_orderids
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for order_id in active_orders.iter() {
             engine.cancel_order(order_id);
         }
@@ -203,19 +203,19 @@ impl AlphaStrategy {
 
     /// Query current position
     pub fn get_pos(&self, vt_symbol: &str) -> f64 {
-        let pos_data = self.pos_data.lock().unwrap_or_else(|e| e.into_inner());
+        let pos_data = self.pos_data.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         *pos_data.get(vt_symbol).unwrap_or(&0.0)
     }
 
     /// Query target position
     pub fn get_target(&self, vt_symbol: &str) -> f64 {
-        let target_data = self.target_data.lock().unwrap_or_else(|e| e.into_inner());
+        let target_data = self.target_data.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         *target_data.get(vt_symbol).unwrap_or(&0.0)
     }
 
     /// Set target position
     pub fn set_target(&mut self, vt_symbol: &str, target: f64) {
-        let mut target_data = self.target_data.lock().unwrap_or_else(|e| e.into_inner());
+        let mut target_data = self.target_data.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         target_data.insert(vt_symbol.to_string(), target);
     }
 

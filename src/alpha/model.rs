@@ -144,7 +144,7 @@ impl AlphaModel for LinearRegressionModel {
         let feature_cols: Vec<String> = cols
             .iter()
             .filter(|c| **c != "datetime" && **c != "vt_symbol" && **c != "label")
-            .map(|c| c.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
 
         self.n_features = feature_cols.len();
@@ -255,7 +255,7 @@ impl AlphaModel for LinearRegressionModel {
         dataset: &AlphaDataset,
         segment: Segment,
     ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
-        logger::logger().debug(&format!("Making predictions for segment: {:?}", segment));
+        logger::logger().debug(&format!("Making predictions for segment: {segment:?}"));
 
         // Get the appropriate dataframe based on segment
         let df = match segment {
@@ -271,7 +271,7 @@ impl AlphaModel for LinearRegressionModel {
                 let feature_cols: Vec<String> = cols
                     .iter()
                     .filter(|c| **c != "datetime" && **c != "vt_symbol" && **c != "label")
-                    .map(|c| c.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect();
 
                 let n_rows = dataframe.height();
@@ -568,7 +568,7 @@ fn extract_data(df: &polars::prelude::DataFrame) -> ExtractDataResult {
     let feature_cols: Vec<String> = cols
         .iter()
         .filter(|c| **c != "datetime" && **c != "vt_symbol" && **c != "label")
-        .map(|c| c.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
 
     let n_rows = df.height();
@@ -771,8 +771,7 @@ impl AlphaModel for RandomForestModel {
         segment: Segment,
     ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
         logger::logger().debug(&format!(
-            "Making Random Forest predictions for segment: {:?}",
-            segment
+            "Making Random Forest predictions for segment: {segment:?}"
         ));
 
         if self.trees.is_empty() {
@@ -949,8 +948,7 @@ impl AlphaModel for GradientBoostingModel {
         segment: Segment,
     ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
         logger::logger().debug(&format!(
-            "Making Gradient Boosting predictions for segment: {:?}",
-            segment
+            "Making Gradient Boosting predictions for segment: {segment:?}"
         ));
 
         if self.trees.is_empty() {
@@ -1044,8 +1042,7 @@ impl AlphaModel for EnsembleModel {
         segment: Segment,
     ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
         logger::logger().debug(&format!(
-            "Making Ensemble predictions for segment: {:?}",
-            segment
+            "Making Ensemble predictions for segment: {segment:?}"
         ));
 
         if self.models.is_empty() {

@@ -152,7 +152,7 @@ impl ContractManager {
         let vt_symbol = req.vt_symbol();
 
         let contract = self.get_contract(&vt_symbol).ok_or_else(|| {
-            format!("合约 {} 不存在，无法验证委托", vt_symbol)
+            format!("合约 {vt_symbol} 不存在，无法验证委托")
         })?;
 
         // Validate price rounding

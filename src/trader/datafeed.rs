@@ -14,7 +14,7 @@ pub type OutputFn = Box<dyn Fn(&str) + Send + Sync>;
 
 /// Default output function that prints to stdout
 pub fn default_output(msg: &str) {
-    println!("{}", msg);
+    println!("{msg}");
 }
 
 /// Abstract datafeed trait for connecting to different data sources

@@ -65,7 +65,7 @@ fn overflow_file_path() -> PathBuf {
 fn ensure_overflow_dir() -> Result<(), String> {
     let dir = overflow_dir();
     if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create overflow dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create overflow dir: {e}"))?;
     }
     Ok(())
 }
@@ -96,7 +96,7 @@ fn persist_with_overflow(
                     use std::io::Write;
                     match OpenOptions::new().create(true).append(true).open(&path) {
                         Ok(mut file) => {
-                            if let Err(write_err) = writeln!(file, "{}", json_line) {
+                            if let Err(write_err) = writeln!(file, "{json_line}") {
                                 warn!("Failed to write overflow record: {}", write_err);
                             } else {
                                 warn!(
@@ -780,7 +780,7 @@ impl MainEngine {
         
         // Register OMS engine, log engine, risk manager, alert engine, and new engines
         {
-            let mut engines = engine.engines.write().unwrap_or_else(|e| e.into_inner());
+            let mut engines = engine.engines.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             engines.insert("oms".to_string(), engine.oms_engine.clone());
             engines.insert("log".to_string(), engine.log_engine.clone());
             engines.insert("risk".to_string(), engine.risk_manager.clone());
@@ -940,7 +940,7 @@ impl MainEngine {
 
         // Take the receiver from the RwLock
         let rx = {
-            let mut rx_lock = self.event_rx.write().unwrap_or_else(|e| e.into_inner());
+            let mut rx_lock = self.event_rx.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             rx_lock.take()
         };
 
@@ -948,7 +948,7 @@ impl MainEngine {
         let db = self.database.clone();
         let persist_tx = self.persist_tx.clone();
         let persist_rx = {
-            let mut persist_lock = self.persist_rx.write().unwrap_or_else(|e| e.into_inner());
+            let mut persist_lock = self.persist_rx.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             persist_lock.take()
         };
         const CHANNEL_CAPACITY: usize = 4096;
@@ -1138,7 +1138,7 @@ impl MainEngine {
                     GatewayEvent::Timer(_) => String::new(),
                 };
                 // Store a summary payload since GatewayEvent doesn't implement Serialize
-                let payload = format!("{:?}", event);
+                let payload = format!("{event:?}");
                 let event_id = self.event_id_counter.fetch_add(1, Ordering::Relaxed);
                 let record = EventRecord::new(event_id, event_type.to_string(), gateway_name, payload);
                 persist_with_overflow(
@@ -1152,7 +1152,7 @@ impl MainEngine {
 
         // Update OffsetConverter with position/order/trade events (GAP 4 fix)
         {
-            let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+            let mut converter = self.offset_converter.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             match event {
                 GatewayEvent::Position(position) => converter.update_position(position),
                 GatewayEvent::Order(order) => converter.update_order(order),
@@ -1163,7 +1163,7 @@ impl MainEngine {
 
         // Dispatch event to all registered sub-engines (except oms/log which already processed above)
         {
-            let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
+            let engines = self.engines.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             for engine in engines.values() {
                 let name = engine.engine_name();
                 if name == "oms" || name == "log" {
@@ -1200,7 +1200,7 @@ impl MainEngine {
     pub fn add_gateway(&self, gateway: Arc<dyn BaseGateway>) -> Arc<dyn BaseGateway> {
         let gateway_name = gateway.gateway_name().to_string();
         
-        let mut gateways = self.gateways.write().unwrap_or_else(|e| e.into_inner());
+        let mut gateways = self.gateways.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         gateways.insert(gateway_name, gateway.clone());
         
         gateway
@@ -1210,31 +1210,31 @@ impl MainEngine {
     /// The engine will receive all gateway events via its process_event() method
     pub fn add_engine(&self, engine: Arc<dyn BaseEngine>) {
         let engine_name = engine.engine_name().to_string();
-        let mut engines = self.engines.write().unwrap_or_else(|e| e.into_inner());
+        let mut engines = self.engines.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         engines.insert(engine_name, engine);
     }
 
     /// Get a sub-engine by name
     pub fn get_engine(&self, engine_name: &str) -> Option<Arc<dyn BaseEngine>> {
-        let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
+        let engines = self.engines.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         engines.get(engine_name).cloned()
     }
 
     /// Get a gateway by name
     pub fn get_gateway(&self, gateway_name: &str) -> Option<Arc<dyn BaseGateway>> {
-        let gateways = self.gateways.read().unwrap_or_else(|e| e.into_inner());
+        let gateways = self.gateways.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         gateways.get(gateway_name).cloned()
     }
 
     /// Get all gateway names
     pub fn get_all_gateway_names(&self) -> Vec<String> {
-        let gateways = self.gateways.read().unwrap_or_else(|e| e.into_inner());
+        let gateways = self.gateways.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         gateways.keys().cloned().collect()
     }
 
     /// Find the first gateway name that supports the given exchange
     pub fn find_gateway_name_for_exchange(&self, exchange: Exchange) -> Option<String> {
-        let gateways = self.gateways.read().unwrap_or_else(|e| e.into_inner());
+        let gateways = self.gateways.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         for (name, gateway) in gateways.iter() {
             if gateway.default_exchange() == exchange {
                 return Some(name.clone());
@@ -1245,7 +1245,7 @@ impl MainEngine {
 
     /// Get all exchanges
     pub fn get_all_exchanges(&self) -> Vec<Exchange> {
-        let exchanges = self.exchanges.read().unwrap_or_else(|e| e.into_inner());
+        let exchanges = self.exchanges.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         exchanges.clone()
     }
 
@@ -1258,21 +1258,21 @@ impl MainEngine {
     /// Connect to a gateway
     pub async fn connect(&self, setting: GatewaySettings, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("连接登录 -> {}", gateway_name), "MainEngine");
+            self.write_log(format!("连接登录 -> {gateway_name}"), "MainEngine");
             gateway.connect(setting).await.map_err(|e| e.to_string())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
     /// Disconnect from a gateway
     pub async fn disconnect(&self, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("断开连接 -> {}", gateway_name), "MainEngine");
+            self.write_log(format!("断开连接 -> {gateway_name}"), "MainEngine");
             gateway.close().await;
             Ok(())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
@@ -1285,20 +1285,20 @@ impl MainEngine {
     /// Subscribe to tick data
     pub async fn subscribe(&self, req: SubscribeRequest, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("订阅行情 -> {}：{:?}", gateway_name, req), "MainEngine");
+            self.write_log(format!("订阅行情 -> {gateway_name}：{req:?}"), "MainEngine");
             gateway.subscribe(req).await.map_err(|e| e.to_string())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
     /// Unsubscribe from tick data
     pub async fn unsubscribe(&self, req: SubscribeRequest, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("退订行情 -> {}：{:?}", gateway_name, req), "MainEngine");
+            self.write_log(format!("退订行情 -> {gateway_name}：{req:?}"), "MainEngine");
             gateway.unsubscribe(req).await.map_err(|e| e.to_string())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
@@ -1310,7 +1310,7 @@ impl MainEngine {
         match self.risk_manager.check_order_with_gateway(&req, gateway_name) {
             super::risk::RiskCheckResult::Approved => {}
             super::risk::RiskCheckResult::Rejected(reason) => {
-                self.write_log(format!("风控拒绝 -> {}", reason), "RiskManager");
+                self.write_log(format!("风控拒绝 -> {reason}"), "RiskManager");
                 // Alert on risk rejection
                 self.alert_engine.alert_risk_reject(
                     &reason,
@@ -1415,7 +1415,7 @@ impl MainEngine {
 
         // Convert offset for SHFE/INE exchanges (GAP 4 fix)
         let converted_reqs = {
-            let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+            let mut converter = self.offset_converter.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             converter.convert_order_request(&req, false, false)
         };
 
@@ -1423,18 +1423,18 @@ impl MainEngine {
         if converted_reqs.len() == 1 && converted_reqs[0].offset == req.offset {
             // No conversion needed — single request with same offset
             if let Some(gateway) = self.get_gateway(gateway_name) {
-                self.write_log(format!("委托下单 -> {}：{:?}", gateway_name, req), "MainEngine");
+                self.write_log(format!("委托下单 -> {gateway_name}：{req:?}"), "MainEngine");
                 let vt_orderid = gateway.send_order(req).await.map_err(|e| e.to_string())?;
 
                 // Update offset converter with the new order request
                 {
-                    let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+                    let mut converter = self.offset_converter.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     converter.update_order_request(&converted_reqs[0], &vt_orderid);
                 }
 
                 Ok(vt_orderid)
             } else {
-                Err(format!("找不到底层接口：{}", gateway_name))
+                Err(format!("找不到底层接口：{gateway_name}"))
             }
         } else {
             // Multiple sub-requests from offset conversion
@@ -1449,13 +1449,13 @@ impl MainEngine {
 
                     // Update offset converter
                     {
-                        let mut converter = self.offset_converter.write().unwrap_or_else(|e| e.into_inner());
+                        let mut converter = self.offset_converter.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         converter.update_order_request(&sub_req, &vt_orderid);
                     }
 
                     last_orderid = vt_orderid;
                 } else {
-                    return Err(format!("找不到底层接口：{}", gateway_name));
+                    return Err(format!("找不到底层接口：{gateway_name}"));
                 }
             }
             Ok(last_orderid)
@@ -1467,40 +1467,40 @@ impl MainEngine {
         // Use req.gateway_name if the parameter is empty
         let gateway_name = if gateway_name.is_empty() { &req.gateway_name } else { gateway_name };
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("委托撤单 -> {}：{:?}", gateway_name, req), "MainEngine");
+            self.write_log(format!("委托撤单 -> {gateway_name}：{req:?}"), "MainEngine");
             gateway.cancel_order(req).await.map_err(|e| e.to_string())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
     /// Send a quote
     pub async fn send_quote(&self, req: QuoteRequest, gateway_name: &str) -> Result<String, String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("报价下单 -> {}：{:?}", gateway_name, req), "MainEngine");
+            self.write_log(format!("报价下单 -> {gateway_name}：{req:?}"), "MainEngine");
             gateway.send_quote(req).await.map_err(|e| e.to_string())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
     /// Cancel a quote
     pub async fn cancel_quote(&self, req: CancelRequest, gateway_name: &str) -> Result<(), String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("报价撤单 -> {}：{:?}", gateway_name, req), "MainEngine");
+            self.write_log(format!("报价撤单 -> {gateway_name}：{req:?}"), "MainEngine");
             gateway.cancel_quote(req).await.map_err(|e| e.to_string())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
     /// Query history data
     pub async fn query_history(&self, req: HistoryRequest, gateway_name: &str) -> Result<Vec<BarData>, String> {
         if let Some(gateway) = self.get_gateway(gateway_name) {
-            self.write_log(format!("查询K线 -> {}：{:?}", gateway_name, req), "MainEngine");
+            self.write_log(format!("查询K线 -> {gateway_name}：{req:?}"), "MainEngine");
             gateway.query_history(req).await.map_err(|e| e.to_string())
         } else {
-            Err(format!("找不到底层接口：{}", gateway_name))
+            Err(format!("找不到底层接口：{gateway_name}"))
         }
     }
 
@@ -1531,14 +1531,14 @@ impl MainEngine {
 
     /// Set self-trade prevention mode
     pub fn set_stp_mode(&self, mode: StpMode) {
-        let mut stp = self.stp_mode.write().unwrap_or_else(|e| e.into_inner());
+        let mut stp = self.stp_mode.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         info!("自成交防护模式变更: {} -> {}", stp, mode);
         *stp = mode;
     }
 
     /// Get current self-trade prevention mode
     pub fn get_stp_mode(&self) -> StpMode {
-        *self.stp_mode.read().unwrap_or_else(|e| e.into_inner())
+        *self.stp_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Get data download manager
@@ -1595,14 +1595,14 @@ impl MainEngine {
     pub fn add_reconciliation_engine(self: &Arc<Self>) -> Arc<ReconciliationEngine> {
         let recon = Arc::new(ReconciliationEngine::new(self.clone()));
         self.add_engine(recon.clone());
-        *self.reconciliation_engine.write().unwrap_or_else(|e| e.into_inner()) = Some(recon.clone());
+        *self.reconciliation_engine.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(recon.clone());
         info!("ReconciliationEngine已注册为子引擎");
         recon
     }
 
     /// Get the ReconciliationEngine if one has been added
     pub fn reconciliation_engine(&self) -> Option<Arc<ReconciliationEngine>> {
-        self.reconciliation_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.reconciliation_engine.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     /// Add a MetricsEngine and start a Prometheus metrics HTTP server.
@@ -1633,24 +1633,24 @@ impl MainEngine {
     pub fn add_data_engine(self: &Arc<Self>) -> Arc<DataEngine> {
         let data_engine = Arc::new(DataEngine::new(self.event_tx.clone()));
         self.add_engine(data_engine.clone());
-        *self.data_engine.write().unwrap_or_else(|e| e.into_inner()) = Some(data_engine.clone());
+        *self.data_engine.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(data_engine.clone());
         info!("DataEngine已注册为子引擎");
         data_engine
     }
 
     /// Get the DataEngine if one has been added
     pub fn data_engine(&self) -> Option<Arc<DataEngine>> {
-        self.data_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.data_engine.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     /// Set the StrategyEngine reference for strategy control RPC functions
     pub fn set_strategy_engine(&self, engine: Arc<StrategyEngine>) {
-        *self.strategy_engine.write().unwrap_or_else(|e| e.into_inner()) = Some(engine);
+        *self.strategy_engine.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(engine);
     }
 
     /// Get the StrategyEngine if one has been set
     pub fn strategy_engine(&self) -> Option<Arc<StrategyEngine>> {
-        self.strategy_engine.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.strategy_engine.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     /// Start a strategy by name (delegates to StrategyEngine)
@@ -1801,7 +1801,7 @@ impl MainEngine {
 
     /// Remove a sub-engine by name
     pub fn remove_engine(&self, engine_name: &str) -> Option<Arc<dyn BaseEngine>> {
-        let mut engines = self.engines.write().unwrap_or_else(|e| e.into_inner());
+        let mut engines = self.engines.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         engines.remove(engine_name)
     }
 
@@ -1896,7 +1896,7 @@ impl MainEngine {
         self.add_engine(recorder.clone());
 
         // Store reference for lifecycle management
-        *self.recorder.write().unwrap_or_else(|e| e.into_inner()) = Some(recorder.clone());
+        *self.recorder.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(recorder.clone());
 
         info!("DataRecorder added and registered as sub-engine");
         recorder
@@ -1904,7 +1904,7 @@ impl MainEngine {
 
     /// Get the DataRecorder if one has been added
     pub fn get_recorder(&self) -> Option<Arc<DataRecorder>> {
-        self.recorder.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.recorder.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     /// Start the DataRecorder event loop in a background task
@@ -1992,7 +1992,7 @@ impl MainEngine {
     pub async fn close(&self) {
         // 1. Close all gateways FIRST — stops WebSocket streams and prevents new events
         let gateways: Vec<Arc<dyn BaseGateway>> = self.gateways.read()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .cloned()
             .collect();
@@ -2008,7 +2008,7 @@ impl MainEngine {
 
         // 4. Close all sub-engines
         {
-            let engines = self.engines.read().unwrap_or_else(|e| e.into_inner());
+            let engines = self.engines.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             for engine in engines.values() {
                 engine.close();
             }

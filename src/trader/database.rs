@@ -358,7 +358,7 @@ impl BaseDatabase for MemoryDatabase {
     async fn save_order_data(&self, orders: Vec<OrderData>) -> Result<bool, DatabaseError> {
         let mut data = self.orders.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let existing_keys: std::collections::HashSet<String> = data.iter()
-            .map(|o| o.vt_orderid())
+            .map(super::object::OrderData::vt_orderid)
             .collect();
         for order in orders {
             let key = order.vt_orderid();
@@ -376,7 +376,7 @@ impl BaseDatabase for MemoryDatabase {
     async fn save_trade_data(&self, trades: Vec<TradeData>) -> Result<bool, DatabaseError> {
         let mut data = self.trades.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let existing_keys: std::collections::HashSet<String> = data.iter()
-            .map(|t| t.vt_tradeid())
+            .map(super::object::TradeData::vt_tradeid)
             .collect();
         for trade in trades {
             let key = trade.vt_tradeid();
@@ -496,19 +496,19 @@ impl FileDatabase {
     /// Get the file path for tick data
     fn tick_file_path(&self, symbol: &str, exchange: Exchange) -> std::path::PathBuf {
         self.base_dir.join("ticks")
-            .join(format!("{}_{}.json", exchange, symbol))
+            .join(format!("{exchange}_{symbol}.json"))
     }
 
     /// Get the file path for depth data
     fn depth_file_path(&self, symbol: &str, exchange: Exchange) -> std::path::PathBuf {
         self.base_dir.join("depths")
-            .join(format!("{}_{}.json", exchange, symbol))
+            .join(format!("{exchange}_{symbol}.json"))
     }
 
     /// Ensure the parent directory exists for a file path
     fn ensure_parent_dir(path: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory {:?}: {}", parent, e))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory {parent:?}: {e}"))?;
         }
         Ok(())
     }
@@ -519,18 +519,18 @@ impl FileDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to parse {path:?}: {e}"))
     }
 
     /// Save bars to a JSON file
     fn save_bars_to_file(path: &std::path::Path, bars: &[BarData]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(bars)
-            .map_err(|e| format!("Failed to serialize bars: {}", e))?;
+            .map_err(|e| format!("Failed to serialize bars: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to write {path:?}: {e}"))
     }
 
     /// Load ticks from a JSON file
@@ -539,18 +539,18 @@ impl FileDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to parse {path:?}: {e}"))
     }
 
     /// Save ticks to a JSON file
     fn save_ticks_to_file(path: &std::path::Path, ticks: &[TickData]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(ticks)
-            .map_err(|e| format!("Failed to serialize ticks: {}", e))?;
+            .map_err(|e| format!("Failed to serialize ticks: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to write {path:?}: {e}"))
     }
 
     /// Load depths from a JSON file
@@ -559,9 +559,9 @@ impl FileDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to parse {path:?}: {e}"))
     }
 
     /// Save depths to a JSON file
@@ -569,27 +569,27 @@ impl FileDatabase {
     fn save_depths_to_file(path: &std::path::Path, depths: &[DepthData]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(depths)
-            .map_err(|e| format!("Failed to serialize depths: {}", e))?;
+            .map_err(|e| format!("Failed to serialize depths: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to write {path:?}: {e}"))
     }
 
     /// Get the file path for order data
     fn order_file_path(&self, gateway_name: &str) -> std::path::PathBuf {
         self.base_dir.join("orders")
-            .join(format!("{}.json", gateway_name))
+            .join(format!("{gateway_name}.json"))
     }
 
     /// Get the file path for trade data
     fn trade_file_path(&self, gateway_name: &str) -> std::path::PathBuf {
         self.base_dir.join("trades")
-            .join(format!("{}.json", gateway_name))
+            .join(format!("{gateway_name}.json"))
     }
 
     /// Get the file path for position data
     fn position_file_path(&self, gateway_name: &str) -> std::path::PathBuf {
         self.base_dir.join("positions")
-            .join(format!("{}.json", gateway_name))
+            .join(format!("{gateway_name}.json"))
     }
 
     /// Get the file path for event records
@@ -604,18 +604,18 @@ impl FileDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to parse {path:?}: {e}"))
     }
 
     /// Save orders to a JSON file
     fn save_orders_to_file(path: &std::path::Path, orders: &[OrderData]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(orders)
-            .map_err(|e| format!("Failed to serialize orders: {}", e))?;
+            .map_err(|e| format!("Failed to serialize orders: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to write {path:?}: {e}"))
     }
 
     /// Load trades from a JSON file
@@ -624,18 +624,18 @@ impl FileDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to parse {path:?}: {e}"))
     }
 
     /// Save trades to a JSON file
     fn save_trades_to_file(path: &std::path::Path, trades: &[TradeData]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(trades)
-            .map_err(|e| format!("Failed to serialize trades: {}", e))?;
+            .map_err(|e| format!("Failed to serialize trades: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to write {path:?}: {e}"))
     }
 
     /// Load positions from a JSON file
@@ -644,18 +644,18 @@ impl FileDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to parse {path:?}: {e}"))
     }
 
     /// Save positions to a JSON file
     fn save_positions_to_file(path: &std::path::Path, positions: &[PositionData]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(positions)
-            .map_err(|e| format!("Failed to serialize positions: {}", e))?;
+            .map_err(|e| format!("Failed to serialize positions: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to write {path:?}: {e}"))
     }
 
     /// Load event records from a JSON file
@@ -664,18 +664,18 @@ impl FileDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to parse {path:?}: {e}"))
     }
 
     /// Save event records to a JSON file
     fn save_events_to_file(path: &std::path::Path, events: &[EventRecord]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string(events)
-            .map_err(|e| format!("Failed to serialize events: {}", e))?;
+            .map_err(|e| format!("Failed to serialize events: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("Failed to write {:?}: {}", path, e))
+            .map_err(|e| format!("Failed to write {path:?}: {e}"))
     }
 
     /// Load all JSON files from a directory and merge into a single vector
@@ -687,17 +687,17 @@ impl FileDatabase {
         }
         let mut result = Vec::new();
         let entries = std::fs::read_dir(dir)
-            .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
+            .map_err(|e| format!("Failed to read directory {dir:?}: {e}"))?;
         for entry in entries {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {e}"))?;
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
             let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+                .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
             let items: Vec<T> = serde_json::from_str(&content)
-                .map_err(|e| format!("Failed to parse {:?}: {}", path, e))?;
+                .map_err(|e| format!("Failed to parse {path:?}: {e}"))?;
             result.extend(items);
         }
         Ok(result)
@@ -886,7 +886,7 @@ impl BaseDatabase for FileDatabase {
         let count = existing.len() as i64;
 
         std::fs::remove_file(&path)
-            .map_err(|e| DatabaseError::Other(format!("Failed to delete {:?}: {}", path, e)))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to delete {path:?}: {e}")))?;
 
         Ok(count)
     }
@@ -901,7 +901,7 @@ impl BaseDatabase for FileDatabase {
         let count = existing.len() as i64;
 
         std::fs::remove_file(&path)
-            .map_err(|e| DatabaseError::Other(format!("Failed to delete {:?}: {}", path, e)))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to delete {path:?}: {e}")))?;
 
         Ok(count)
     }
@@ -914,10 +914,10 @@ impl BaseDatabase for FileDatabase {
 
         let mut overviews = Vec::new();
         let entries = std::fs::read_dir(&bars_dir)
-            .map_err(|e| DatabaseError::Other(format!("Failed to read bars directory: {}", e)))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to read bars directory: {e}")))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| DatabaseError::Other(format!("Failed to read directory entry: {}", e)))?;
+            let entry = entry.map_err(|e| DatabaseError::Other(format!("Failed to read directory entry: {e}")))?;
             let path = entry.path();
 
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -965,10 +965,10 @@ impl BaseDatabase for FileDatabase {
 
         let mut overviews = Vec::new();
         let entries = std::fs::read_dir(&ticks_dir)
-            .map_err(|e| DatabaseError::Other(format!("Failed to read ticks directory: {}", e)))?;
+            .map_err(|e| DatabaseError::Other(format!("Failed to read ticks directory: {e}")))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| DatabaseError::Other(format!("Failed to read directory entry: {}", e)))?;
+            let entry = entry.map_err(|e| DatabaseError::Other(format!("Failed to read directory entry: {e}")))?;
             let path = entry.path();
 
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -1015,7 +1015,7 @@ impl BaseDatabase for FileDatabase {
             let path = self.order_file_path(&gw);
             let mut existing = Self::load_orders_from_file(&path).map_err(DatabaseError::from)?;
             let existing_keys: std::collections::HashSet<String> = existing.iter()
-                .map(|o| o.vt_orderid())
+                .map(super::object::OrderData::vt_orderid)
                 .collect();
             for order in &new_orders {
                 if !existing_keys.contains(&order.vt_orderid()) {
@@ -1040,7 +1040,7 @@ impl BaseDatabase for FileDatabase {
             let path = self.trade_file_path(&gw);
             let mut existing = Self::load_trades_from_file(&path).map_err(DatabaseError::from)?;
             let existing_keys: std::collections::HashSet<String> = existing.iter()
-                .map(|t| t.vt_tradeid())
+                .map(super::object::TradeData::vt_tradeid)
                 .collect();
             for trade in &new_trades {
                 if !existing_keys.contains(&trade.vt_tradeid()) {

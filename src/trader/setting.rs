@@ -173,7 +173,7 @@ impl Settings {
     /// Get a string setting
     pub fn get_string(&self, key: &str) -> Option<String> {
         self.get(key)
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .and_then(|v| v.as_str().map(std::string::ToString::to_string))
     }
 
     /// Get an integer setting

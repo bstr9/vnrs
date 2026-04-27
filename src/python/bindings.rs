@@ -40,8 +40,7 @@ impl StrategyEngineHandle {
                     engine.reset_strategy(&strategy_name).await
                 }).map_err(|e| {
                     pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to reset strategy '{}': {}",
-                        strategy_name, e
+                        "Failed to reset strategy '{strategy_name}': {e}"
                     ))
                 })
             }
@@ -60,8 +59,7 @@ impl StrategyEngineHandle {
                     engine.restart_strategy(&strategy_name).await
                 }).map_err(|e| {
                     pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to restart strategy '{}': {}",
-                        strategy_name, e
+                        "Failed to restart strategy '{strategy_name}': {e}"
                     ))
                 })
             }
@@ -136,8 +134,7 @@ fn add_strategy_live(
                 engine.add_python_strategy(adapter, strat_setting).await
             }).map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to add strategy '{}' to live engine: {}",
-                    name, e
+                    "Failed to add strategy '{name}' to live engine: {e}"
                 ))
             })?;
         }
@@ -343,7 +340,7 @@ impl PythonEngineWrapper {
         slf.borrow()
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .add_strategy_py(py, strategy, engine_ref)
     }
 
@@ -355,7 +352,7 @@ impl PythonEngineWrapper {
     fn set_strategy_engine(&self, handle: &StrategyEngineHandle) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .set_strategy_engine(handle.inner.clone());
         Ok(())
     }
@@ -363,35 +360,35 @@ impl PythonEngineWrapper {
     fn init_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .init_strategy_py(py, &strategy_name)
     }
 
     fn start_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .start_strategy_py(py, &strategy_name)
     }
 
     fn stop_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .stop_strategy_py(py, &strategy_name)
     }
 
     fn reset_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .reset_strategy_py(py, &strategy_name)
     }
 
     fn restart_strategy(&self, py: Python, strategy_name: String) -> PyResult<()> {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .restart_strategy_py(py, &strategy_name)
     }
 
@@ -399,7 +396,7 @@ impl PythonEngineWrapper {
         let tick = crate::python::data_converter::py_to_tick(py, tick_dict)?;
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .on_tick(py, &tick)?;
         Ok(())
     }
@@ -408,7 +405,7 @@ impl PythonEngineWrapper {
         let bar = crate::python::data_converter::py_to_bar(py, bar_dict)?;
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .on_bar(py, &bar)?;
         Ok(())
     }
@@ -417,7 +414,7 @@ impl PythonEngineWrapper {
         let trade = crate::python::data_converter::py_to_trade(py, trade_dict)?;
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .on_trade(py, &trade)?;
         Ok(())
     }
@@ -426,7 +423,7 @@ impl PythonEngineWrapper {
         let order = crate::python::data_converter::py_to_order(py, order_dict)?;
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .on_order(py, &order)?;
         Ok(())
     }
@@ -436,7 +433,7 @@ impl PythonEngineWrapper {
         let result = self
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .buy(&vt_symbol, price, volume);
         Ok(result)
     }
@@ -445,7 +442,7 @@ impl PythonEngineWrapper {
         let result = self
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .sell(&vt_symbol, price, volume);
         Ok(result)
     }
@@ -454,7 +451,7 @@ impl PythonEngineWrapper {
         let result = self
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .short(&vt_symbol, price, volume);
         Ok(result)
     }
@@ -463,7 +460,7 @@ impl PythonEngineWrapper {
         let result = self
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .cover(&vt_symbol, price, volume);
         Ok(result)
     }
@@ -471,7 +468,7 @@ impl PythonEngineWrapper {
     fn cancel_order(&self, vt_orderid: String) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .cancel_order(&vt_orderid);
     }
 
@@ -479,21 +476,21 @@ impl PythonEngineWrapper {
         Ok(self
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get_pos(&vt_symbol))
     }
 
     fn write_log(&self, msg: String) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .write_log(&msg);
     }
 
     fn send_email(&self, msg: String) {
         self.inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .send_email(&msg);
     }
 
@@ -521,8 +518,7 @@ impl PythonEngineWrapper {
             "SELL" | "SHORT" => Direction::Short,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid direction '{}'",
-                    direction_str
+                    "Invalid direction '{direction_str}'"
                 )));
             }
         };
@@ -535,8 +531,7 @@ impl PythonEngineWrapper {
             "CLOSE_YESTERDAY" => Offset::CloseYesterday,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid offset '{}'",
-                    offset_str
+                    "Invalid offset '{offset_str}'"
                 )));
             }
         };
@@ -549,8 +544,7 @@ impl PythonEngineWrapper {
             "PEGGED_BEST" => OrderType::PeggedBest,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid order_type '{}'",
-                    order_type_str
+                    "Invalid order_type '{order_type_str}'"
                 )));
             }
         };
@@ -558,7 +552,7 @@ impl PythonEngineWrapper {
         let result = self
             .inner
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .send_order(vt_symbol, direction, offset, price, volume, order_type);
         Ok(result)
     }
@@ -587,7 +581,7 @@ impl PythonEngineWrapper {
     ///     strategy_name: Name of the strategy
     ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
     fn subscribe(&self, strategy_name: String, vt_symbol: String) -> PyResult<()> {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(se) = inner.get_strategy_engine() {
             let se: Arc<StrategyEngine> = (*se).clone();
             let strategy_name = strategy_name.clone();
@@ -607,7 +601,7 @@ impl PythonEngineWrapper {
     ///     strategy_name: Name of the strategy
     ///     vt_symbol: Symbol in SYMBOL.EXCHANGE format
     fn unsubscribe(&self, strategy_name: String, vt_symbol: String) -> PyResult<()> {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(se) = inner.get_strategy_engine() {
             let se: Arc<StrategyEngine> = (*se).clone();
             let strategy_name = strategy_name.clone();
@@ -630,7 +624,7 @@ impl PythonEngineWrapper {
     ///     repeat: Whether the timer repeats
     #[pyo3(signature = (strategy_name, timer_id, seconds, repeat=false))]
     fn schedule_timer(&self, strategy_name: String, timer_id: String, seconds: f64, repeat: bool) -> PyResult<()> {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(se) = inner.get_strategy_engine() {
             let se: Arc<StrategyEngine> = (*se).clone();
             se.schedule_timer(&strategy_name, &timer_id, seconds, repeat);
@@ -644,7 +638,7 @@ impl PythonEngineWrapper {
     ///     strategy_name: Name of the strategy
     ///     timer_id: Timer identifier to cancel
     fn cancel_timer(&self, strategy_name: String, timer_id: String) -> PyResult<()> {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(se) = inner.get_strategy_engine() {
             let se: Arc<StrategyEngine> = (*se).clone();
             se.cancel_timer(&strategy_name, &timer_id);
@@ -685,8 +679,7 @@ impl PythonEngineWrapper {
             "CancelBoth" => StpMode::CancelBoth,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid STP mode '{}'. Must be one of: CancelTaker, CancelMaker, CancelBoth",
-                    mode
+                    "Invalid STP mode '{mode}'. Must be one of: CancelTaker, CancelMaker, CancelBoth"
                 )));
             }
         };

@@ -71,8 +71,7 @@ impl FromStr for InstrumentId {
         let parts: Vec<&str> = s.rsplitn(2, '.').collect();
         if parts.len() != 2 {
             return Err(format!(
-                "Invalid InstrumentId format '{}': expected SYMBOL.EXCHANGE",
-                s
+                "Invalid InstrumentId format '{s}': expected SYMBOL.EXCHANGE"
             ));
         }
         // rsplitn gives us [EXCHANGE, SYMBOL] (reversed because rsplitn)
@@ -81,8 +80,7 @@ impl FromStr for InstrumentId {
 
         let exchange = parse_exchange(exchange_str).ok_or_else(|| {
             format!(
-                "Unknown exchange '{}' in InstrumentId '{}'",
-                exchange_str, s
+                "Unknown exchange '{exchange_str}' in InstrumentId '{s}'"
             )
         })?;
 
@@ -106,7 +104,7 @@ impl ClientOrderId {
 
     /// Generate a unique ClientOrderId using a counter prefix
     pub fn generate(prefix: &str, counter: u64) -> Self {
-        Self(format!("{}_{}", prefix, counter))
+        Self(format!("{prefix}_{counter}"))
     }
 
     /// Get the underlying string value
@@ -148,7 +146,7 @@ impl PositionId {
     /// Generate a PositionId from instrument and optional direction
     pub fn from_instrument(instrument_id: &InstrumentId, direction: Option<&str>) -> Self {
         match direction {
-            Some(dir) => Self(format!("{}.{}", instrument_id, dir)),
+            Some(dir) => Self(format!("{instrument_id}.{dir}")),
             None => Self(instrument_id.to_string()),
         }
     }

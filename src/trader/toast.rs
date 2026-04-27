@@ -66,37 +66,37 @@ impl ToastManager {
 
     /// Get all active (undismissed) toasts
     pub fn get_active_toasts(&self) -> Vec<Toast> {
-        let toasts = self.toasts.read().unwrap_or_else(|e| e.into_inner());
+        let toasts = self.toasts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         toasts.iter().filter(|t| !t.dismissed).cloned().collect()
     }
 
     /// Get recent toast history (last N toasts, most recent first)
     pub fn get_recent_toasts(&self, limit: usize) -> Vec<Toast> {
-        let toasts = self.toasts.read().unwrap_or_else(|e| e.into_inner());
+        let toasts = self.toasts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         toasts.iter().rev().take(limit).cloned().collect()
     }
 
     /// Get all toasts in history
     pub fn get_all_toasts(&self) -> Vec<Toast> {
-        let toasts = self.toasts.read().unwrap_or_else(|e| e.into_inner());
+        let toasts = self.toasts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         toasts.iter().cloned().collect()
     }
 
     /// Dismiss a toast by ID
     pub fn dismiss_toast(&self, id: u64) -> Result<(), String> {
-        let mut toasts = self.toasts.write().unwrap_or_else(|e| e.into_inner());
+        let mut toasts = self.toasts.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         for toast in toasts.iter_mut() {
             if toast.id == id {
                 toast.dismissed = true;
                 return Ok(());
             }
         }
-        Err(format!("Toast #{} not found", id))
+        Err(format!("Toast #{id} not found"))
     }
 
     /// Dismiss all toasts
     pub fn dismiss_all(&self) {
-        let mut toasts = self.toasts.write().unwrap_or_else(|e| e.into_inner());
+        let mut toasts = self.toasts.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         for toast in toasts.iter_mut() {
             toast.dismissed = true;
         }
@@ -104,19 +104,19 @@ impl ToastManager {
 
     /// Clear all toast history
     pub fn clear(&self) {
-        let mut toasts = self.toasts.write().unwrap_or_else(|e| e.into_inner());
+        let mut toasts = self.toasts.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         toasts.clear();
     }
 
     /// Get count of active toasts
     pub fn active_count(&self) -> usize {
-        let toasts = self.toasts.read().unwrap_or_else(|e| e.into_inner());
+        let toasts = self.toasts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         toasts.iter().filter(|t| !t.dismissed).count()
     }
 
     /// Get total count of toasts in history
     pub fn total_count(&self) -> usize {
-        let toasts = self.toasts.read().unwrap_or_else(|e| e.into_inner());
+        let toasts = self.toasts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         toasts.len()
     }
 
@@ -134,7 +134,7 @@ impl ToastManager {
             dismissed: false,
         };
 
-        let mut toasts = self.toasts.write().unwrap_or_else(|e| e.into_inner());
+        let mut toasts = self.toasts.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         toasts.push_back(toast);
 
         // Trim old entries

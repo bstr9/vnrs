@@ -198,7 +198,7 @@ impl DatePicker {
                                                 ui.style().visuals.text_color()
                                             };
                                             ui.label(
-                                                egui::RichText::new(format!("{}", day_counter))
+                                                egui::RichText::new(format!("{day_counter}"))
                                                     .color(text_color),
                                             );
                                             if ui.allocate_response(
@@ -224,21 +224,21 @@ impl DatePicker {
                                 egui::DragValue::new(&mut self.year)
                                     .speed(1.0)
                                     .range(2020..=2030)
-                                    .custom_formatter(|n, _| format!("{:.0}", n)),
+                                    .custom_formatter(|n, _| format!("{n:.0}")),
                             );
                             ui.label("-");
                             ui.add(
                                 egui::DragValue::new(&mut self.month)
                                     .speed(0.1)
                                     .range(1..=12)
-                                    .custom_formatter(|n, _| format!("{:02.0}", n)),
+                                    .custom_formatter(|n, _| format!("{n:02.0}")),
                             );
                             ui.label("-");
                             ui.add(
                                 egui::DragValue::new(&mut self.day)
                                     .speed(0.1)
                                     .range(1..=31)
-                                    .custom_formatter(|n, _| format!("{:02.0}", n)),
+                                    .custom_formatter(|n, _| format!("{n:02.0}")),
                             );
                         });
 
@@ -1063,14 +1063,14 @@ impl BacktestingPanel {
                         painter.text(
                             Pos2::new(chart_rect.left(), chart_rect.top()),
                             egui::Align2::LEFT_TOP,
-                            format!("最高: {:.2}", max_val),
+                            format!("最高: {max_val:.2}"),
                             egui::FontId::proportional(10.0),
                             Color32::from_rgb(160, 160, 160),
                         );
                         painter.text(
                             Pos2::new(chart_rect.left(), chart_rect.bottom()),
                             egui::Align2::LEFT_BOTTOM,
-                            format!("最低: {:.2}", min_val),
+                            format!("最低: {min_val:.2}"),
                             egui::FontId::proportional(10.0),
                             Color32::from_rgb(160, 160, 160),
                         );
@@ -1166,7 +1166,7 @@ impl BacktestingPanel {
                         dd_painter.text(
                             Pos2::new(chart_rect.left(), chart_rect.bottom()),
                             egui::Align2::LEFT_BOTTOM,
-                            format!("最大回撤: {:.2}%", min_dd),
+                            format!("最大回撤: {min_dd:.2}%"),
                             egui::FontId::proportional(10.0),
                             Color32::from_rgb(160, 160, 160),
                         );
@@ -1365,7 +1365,7 @@ impl BacktestingPanel {
                     // Setup sys.path so the embedded interpreter can find
                     // trade_engine module and strategy files
                     if let Err(e) = crate::python::setup_embedded_python_path() {
-                        eprintln!("Failed to setup Python path: {}", e);
+                        eprintln!("Failed to setup Python path: {e}");
                     }
 
                     match PythonStrategyAdapter::load_from_file(
@@ -1379,7 +1379,7 @@ impl BacktestingPanel {
                             engine.add_strategy(Box::new(adapter));
                         }
                         Err(e) => {
-                            eprintln!("Failed to load strategy: {}", e);
+                            eprintln!("Failed to load strategy: {e}");
                             return;
                         }
                     }
@@ -1387,7 +1387,7 @@ impl BacktestingPanel {
 
                 // Run backtesting
                 if let Err(e) = engine.run_backtesting().await {
-                    eprintln!("Backtesting failed: {}", e);
+                    eprintln!("Backtesting failed: {e}");
                     // We should signal error to UI somehow, maybe via logging to engine logs
                     return;
                 }
@@ -1395,7 +1395,7 @@ impl BacktestingPanel {
                 // Calculate statistics
                 engine.calculate_statistics(false);
 
-                *engine_arc.lock().unwrap_or_else(|e| e.into_inner()) = Some(engine);
+                *engine_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(engine);
             });
         });
     }
@@ -1404,7 +1404,7 @@ impl BacktestingPanel {
     fn check_results(&mut self) {
         // Poll the engine for results if we are running
         if self.is_running {
-            let engine_guard = self.engine.lock().unwrap_or_else(|e| e.into_inner());
+            let engine_guard = self.engine.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(engine) = engine_guard.as_ref() {
                 let logs = engine.get_logs();
                 if !logs.is_empty() && logs.last().expect("logs is non-empty").contains("回测运行结束") {
@@ -1548,7 +1548,7 @@ impl BacktestingPanel {
                     let pnl_csv = {
                         let mut lines = String::from("day_index,pnl\n");
                         for (idx, pnl) in &self.daily_pnl {
-                            lines.push_str(&format!("{},{:.6}\n", idx, pnl));
+                            lines.push_str(&format!("{idx},{pnl:.6}\n"));
                         }
                         lines
                     };
@@ -1609,7 +1609,7 @@ impl BacktestingPanel {
             {
                 if let Some(path_str) = path.to_str() {
                     self.strategy_file = path_str.to_string();
-                    self.status_message = format!("已选择: {}", path_str);
+                    self.status_message = format!("已选择: {path_str}");
 
                     // Auto-scan just this file to find class name?
                     // Or just let user click Scan?
@@ -1662,7 +1662,7 @@ impl BacktestingPanel {
                 default_dirs
                     .iter()
                     .find(|d| Path::new(d).is_dir())
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .unwrap_or_else(|| "./strategies".to_string())
             };
 
@@ -1676,7 +1676,7 @@ impl BacktestingPanel {
                     );
                 }
                 Err(e) => {
-                    self.status_message = format!("扫描失败: {}", e);
+                    self.status_message = format!("扫描失败: {e}");
                 }
             }
         }

@@ -89,7 +89,7 @@ impl EventJournal {
             .append(true)
             .read(false)
             .open(&path)
-            .map_err(|e| format!("Failed to open journal at {:?}: {}", path, e))?;
+            .map_err(|e| format!("Failed to open journal at {path:?}: {e}"))?;
 
         Ok(EventJournal {
             path,
@@ -154,30 +154,30 @@ impl EventJournal {
         let mut writer = BufWriter::new(&mut self.file);
         writer
             .write_all(&timestamp.to_le_bytes())
-            .map_err(|e| format!("Failed to write timestamp: {}", e))?;
+            .map_err(|e| format!("Failed to write timestamp: {e}"))?;
         writer
             .write_all(&sequence.to_le_bytes())
-            .map_err(|e| format!("Failed to write sequence: {}", e))?;
+            .map_err(|e| format!("Failed to write sequence: {e}"))?;
         let type_len = event_type.len() as u32;
         writer
             .write_all(&type_len.to_le_bytes())
-            .map_err(|e| format!("Failed to write event_type length: {}", e))?;
+            .map_err(|e| format!("Failed to write event_type length: {e}"))?;
         writer
             .write_all(event_type.as_bytes())
-            .map_err(|e| format!("Failed to write event_type: {}", e))?;
+            .map_err(|e| format!("Failed to write event_type: {e}"))?;
         let payload_len = payload.len() as u32;
         writer
             .write_all(&payload_len.to_le_bytes())
-            .map_err(|e| format!("Failed to write payload length: {}", e))?;
+            .map_err(|e| format!("Failed to write payload length: {e}"))?;
         writer
             .write_all(payload)
-            .map_err(|e| format!("Failed to write payload: {}", e))?;
+            .map_err(|e| format!("Failed to write payload: {e}"))?;
         writer
             .write_all(&checksum.to_le_bytes())
-            .map_err(|e| format!("Failed to write checksum: {}", e))?;
+            .map_err(|e| format!("Failed to write checksum: {e}"))?;
         writer
             .flush()
-            .map_err(|e| format!("Failed to flush journal: {}", e))?;
+            .map_err(|e| format!("Failed to flush journal: {e}"))?;
 
         Ok(())
     }
@@ -188,7 +188,7 @@ impl EventJournal {
     /// Use `read_all_sorted()` for timestamp-ordered entries.
     pub fn read_all(&self) -> Result<Vec<JournalEntry>, String> {
         let file = File::open(&self.path)
-            .map_err(|e| format!("Failed to open journal for reading: {}", e))?;
+            .map_err(|e| format!("Failed to open journal for reading: {e}"))?;
         let mut reader = BufReader::new(file);
         let mut entries = Vec::new();
 
@@ -235,54 +235,53 @@ fn read_one_entry<R: Read>(reader: &mut R) -> Result<Option<JournalEntry>, Strin
     match reader.read_exact(&mut buf8) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(format!("Failed to read timestamp: {}", e)),
+        Err(e) => return Err(format!("Failed to read timestamp: {e}")),
     }
     let timestamp = i64::from_le_bytes(buf8);
 
     // Read sequence
     reader
         .read_exact(&mut buf8)
-        .map_err(|e| format!("Failed to read sequence: {}", e))?;
+        .map_err(|e| format!("Failed to read sequence: {e}"))?;
     let sequence = u64::from_le_bytes(buf8);
 
     // Read event_type length
     reader
         .read_exact(&mut buf4)
-        .map_err(|e| format!("Failed to read event_type length: {}", e))?;
+        .map_err(|e| format!("Failed to read event_type length: {e}"))?;
     let type_len = u32::from_le_bytes(buf4) as usize;
 
     // Read event_type
     let mut event_type_buf = vec![0u8; type_len];
     reader
         .read_exact(&mut event_type_buf)
-        .map_err(|e| format!("Failed to read event_type: {}", e))?;
+        .map_err(|e| format!("Failed to read event_type: {e}"))?;
     let event_type = String::from_utf8(event_type_buf)
-        .map_err(|e| format!("Invalid UTF-8 in event_type: {}", e))?;
+        .map_err(|e| format!("Invalid UTF-8 in event_type: {e}"))?;
 
     // Read payload length
     reader
         .read_exact(&mut buf4)
-        .map_err(|e| format!("Failed to read payload length: {}", e))?;
+        .map_err(|e| format!("Failed to read payload length: {e}"))?;
     let payload_len = u32::from_le_bytes(buf4) as usize;
 
     // Read payload
     let mut payload = vec![0u8; payload_len];
     reader
         .read_exact(&mut payload)
-        .map_err(|e| format!("Failed to read payload: {}", e))?;
+        .map_err(|e| format!("Failed to read payload: {e}"))?;
 
     // Read checksum
     reader
         .read_exact(&mut buf4)
-        .map_err(|e| format!("Failed to read checksum: {}", e))?;
+        .map_err(|e| format!("Failed to read checksum: {e}"))?;
     let checksum = u32::from_le_bytes(buf4);
 
     // Verify checksum
     let computed = compute_checksum(timestamp, sequence, &event_type, &payload);
     if computed != checksum {
         return Err(format!(
-            "CRC32 checksum mismatch at timestamp={}, sequence={}: expected {}, computed {}",
-            timestamp, sequence, checksum, computed
+            "CRC32 checksum mismatch at timestamp={timestamp}, sequence={sequence}: expected {checksum}, computed {computed}"
         ));
     }
 

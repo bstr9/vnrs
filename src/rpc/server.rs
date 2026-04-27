@@ -262,8 +262,7 @@ impl RpcServer {
                         Err(e) => {
                             error!("Failed to deserialize request: {}", e);
                             let error_response = RpcResponse::failure(format!(
-                                "Invalid request format: {}",
-                                e
+                                "Invalid request format: {e}"
                             ));
                             if let Ok(resp_data) = serde_json::to_vec(&error_response) {
                                 let rep_guard = socket_rep.lock().await;

@@ -184,7 +184,7 @@ impl TradingMcpServer {
                 .map
                 .keys()
                 .filter(|name| !config.is_module_allowed(tool_module(name)))
-                .map(|k| k.to_string())
+                .map(std::string::ToString::to_string)
                 .collect();
             for name in names_to_remove {
                 router.remove_route(&name);
@@ -322,7 +322,7 @@ impl TradingMcpServer {
                     "MCP Sampling request failed"
                 );
                 Err(McpError::internal_error(
-                    format!("Sampling request failed: {}", e),
+                    format!("Sampling request failed: {e}"),
                     None,
                 ))
             }
@@ -334,8 +334,8 @@ impl TradingMcpServer {
         let service = self
             .serve(rmcp::transport::stdio())
             .await
-            .map_err(|e| format!("MCP server serve error: {:?}", e))?;
-        service.waiting().await.map_err(|e| format!("MCP server waiting error: {:?}", e))?;
+            .map_err(|e| format!("MCP server serve error: {e:?}"))?;
+        service.waiting().await.map_err(|e| format!("MCP server waiting error: {e:?}"))?;
         Ok(())
     }
 
@@ -398,7 +398,7 @@ impl TradingMcpServer {
                         .map
                         .keys()
                         .filter(|name| !config.is_module_allowed(tool_module(name)))
-                        .map(|k| k.to_string())
+                        .map(std::string::ToString::to_string)
                         .collect();
                     for name in names_to_remove {
                         router.remove_route(&name);
@@ -428,11 +428,11 @@ impl TradingMcpServer {
 
         let listener = tokio::net::TcpListener::bind(addr)
             .await
-            .map_err(|e| format!("Failed to bind MCP HTTP server to {}: {}", addr, e))?;
+            .map_err(|e| format!("Failed to bind MCP HTTP server to {addr}: {e}"))?;
 
         axum::serve(listener, app)
             .await
-            .map_err(|e| format!("MCP HTTP server error: {}", e))?;
+            .map_err(|e| format!("MCP HTTP server error: {e}"))?;
 
         Ok(())
     }
@@ -443,9 +443,9 @@ impl TradingMcpServer {
             McpTransport::Stdio => self.serve_stdio().await,
             McpTransport::Http { port, host } => {
                 let host_str = host.as_deref().unwrap_or("127.0.0.1");
-                let addr: std::net::SocketAddr = format!("{}:{}", host_str, port)
+                let addr: std::net::SocketAddr = format!("{host_str}:{port}")
                     .parse()
-                    .map_err(|e| format!("Invalid MCP HTTP address: {}", e))?;
+                    .map_err(|e| format!("Invalid MCP HTTP address: {e}"))?;
                 self.serve_http(addr).await
             }
         }

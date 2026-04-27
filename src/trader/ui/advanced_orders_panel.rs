@@ -579,7 +579,7 @@ impl AdvancedOrdersPanel {
                                         .or(order.limit_price)
                                         .unwrap_or(0.0);
                                     if price > 0.0 {
-                                        ui.label(format!("{:.2}", price));
+                                        ui.label(format!("{price:.2}"));
                                     } else {
                                         ui.label(RichText::new("市价").italics());
                                     }

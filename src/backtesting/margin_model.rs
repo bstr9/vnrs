@@ -216,8 +216,7 @@ impl MarginModel for LinearMarginModel {
                 mm,
                 available_balance,
                 &format!(
-                    "保证金不足: 需要初始保证金 {:.2}, 可用余额 {:.2}",
-                    im, available_balance
+                    "保证金不足: 需要初始保证金 {im:.2}, 可用余额 {available_balance:.2}"
                 ),
             )
         }
@@ -376,8 +375,7 @@ impl MarginModel for TieredMarginModel {
                 mm,
                 available_balance,
                 &format!(
-                    "保证金不足: 需要初始保证金 {:.2}, 可用余额 {:.2}",
-                    im, available_balance
+                    "保证金不足: 需要初始保证金 {im:.2}, 可用余额 {available_balance:.2}"
                 ),
             )
         }
@@ -482,8 +480,7 @@ impl MarginModel for CannedMarginModel {
                 mm,
                 available_balance,
                 &format!(
-                    "保证金不足: 需要初始保证金 {:.2}, 可用余额 {:.2}",
-                    im, available_balance
+                    "保证金不足: 需要初始保证金 {im:.2}, 可用余额 {available_balance:.2}"
                 ),
             )
         }

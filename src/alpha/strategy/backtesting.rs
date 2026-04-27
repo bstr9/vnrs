@@ -355,7 +355,7 @@ impl BacktestingEngine {
             return df;
         }
 
-        let mut dates: Vec<String> = daily_pnl.keys().map(|d| d.to_string()).collect();
+        let mut dates: Vec<String> = daily_pnl.keys().map(std::string::ToString::to_string).collect();
         dates.sort();
 
         let returns: Vec<f64> = dates
@@ -526,7 +526,7 @@ impl BacktestingEngine {
     }
 
     pub fn write_log(&self, msg: &str, _strategy: &AlphaStrategy) {
-        println!("[BACKTEST] {}", msg);
+        println!("[BACKTEST] {msg}");
     }
 
     pub fn get_cash_available(&self) -> f64 {

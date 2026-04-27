@@ -333,19 +333,19 @@ impl AlertEngine {
 
     /// Add an alert channel
     pub fn add_channel(&self, channel: Arc<dyn AlertChannel>) {
-        let mut channels = self.channels.write().unwrap_or_else(|e| e.into_inner());
+        let mut channels = self.channels.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         channels.push(channel);
     }
 
     /// Remove all channels
     pub fn clear_channels(&self) {
-        let mut channels = self.channels.write().unwrap_or_else(|e| e.into_inner());
+        let mut channels = self.channels.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         channels.clear();
     }
 
     /// Get number of registered channels
     pub fn channel_count(&self) -> usize {
-        self.channels.read().unwrap_or_else(|e| e.into_inner()).len()
+        self.channels.read().unwrap_or_else(std::sync::PoisonError::into_inner).len()
     }
 
     /// Enable alerts
@@ -367,19 +367,19 @@ impl AlertEngine {
 
     /// Update configuration
     pub fn update_config(&self, config: AlertConfig) {
-        let mut current = self.config.write().unwrap_or_else(|e| e.into_inner());
+        let mut current = self.config.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *current = config;
         info!("[AlertEngine] Configuration updated");
     }
 
     /// Get current configuration
     pub fn get_config(&self) -> AlertConfig {
-        self.config.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     /// Set the event_tx channel for publishing EVENT_ALERT events
     pub fn set_event_tx(&self, tx: mpsc::UnboundedSender<(String, GatewayEvent)>) {
-        let mut slot = self.event_tx.write().unwrap_or_else(|e| e.into_inner());
+        let mut slot = self.event_tx.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *slot = Some(tx);
     }
 
@@ -389,13 +389,13 @@ impl AlertEngine {
             return;
         }
 
-        let channels = self.channels.read().unwrap_or_else(|e| e.into_inner());
+        let channels = self.channels.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         for channel in channels.iter() {
             channel.send(&alert);
         }
 
         // Publish EVENT_ALERT to event pipeline
-        let tx = self.event_tx.read().unwrap_or_else(|e| e.into_inner());
+        let tx = self.event_tx.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(ref tx) = *tx {
             let _ = tx.send((EVENT_ALERT.to_string(), GatewayEvent::Alert(alert)));
         }
@@ -403,7 +403,7 @@ impl AlertEngine {
 
     /// Create alert for trade execution
     pub fn alert_trade(&self, trade: &TradeData) {
-        let config = self.config.read().unwrap_or_else(|e| e.into_inner());
+        let config = self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !config.alert_on_trade {
             return;
         }
@@ -426,7 +426,7 @@ impl AlertEngine {
 
     /// Create alert for order status change
     pub fn alert_order(&self, order: &OrderData) {
-        let config = self.config.read().unwrap_or_else(|e| e.into_inner());
+        let config = self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let (level, title, body) = match order.status {
             Status::AllTraded if config.alert_on_order_filled => {
@@ -481,7 +481,7 @@ impl AlertEngine {
 
     /// Create alert for risk rejection
     pub fn alert_risk_reject(&self, reason: &str, symbol: Option<&str>, gateway_name: &str) {
-        let config = self.config.read().unwrap_or_else(|e| e.into_inner());
+        let config = self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !config.alert_on_risk_reject {
             return;
         }
@@ -518,7 +518,7 @@ impl AlertEngine {
 
     /// Create alert for connection state change
     pub fn alert_connection(&self, gateway_name: &str, connected: bool, reason: Option<&str>) {
-        let config = self.config.read().unwrap_or_else(|e| e.into_inner());
+        let config = self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !config.alert_on_connection {
             return;
         }
@@ -527,7 +527,7 @@ impl AlertEngine {
             (
                 AlertLevel::Info,
                 "Connection Restored",
-                format!("Gateway {} connected", gateway_name),
+                format!("Gateway {gateway_name} connected"),
             )
         } else {
             (
@@ -536,7 +536,7 @@ impl AlertEngine {
                 format!(
                     "Gateway {} disconnected{}",
                     gateway_name,
-                    reason.map(|r| format!(": {}", r)).unwrap_or_default()
+                    reason.map(|r| format!(": {r}")).unwrap_or_default()
                 ),
             )
         };

@@ -181,54 +181,54 @@ impl PortfolioManager {
 
     /// Get a specific position summary by position key
     pub fn get_position(&self, position_key: &str) -> Option<PositionSummary> {
-        let positions = self.positions.read().unwrap_or_else(|e| e.into_inner());
+        let positions = self.positions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         positions.get(position_key).cloned()
     }
 
     /// Get all position summaries
     pub fn get_all_positions(&self) -> Vec<PositionSummary> {
-        let positions = self.positions.read().unwrap_or_else(|e| e.into_inner());
+        let positions = self.positions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         positions.values().cloned().collect()
     }
 
     /// Get only non-empty positions (volume > 0)
     pub fn get_active_positions(&self) -> Vec<PositionSummary> {
-        let positions = self.positions.read().unwrap_or_else(|e| e.into_inner());
+        let positions = self.positions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         positions.values().filter(|p| p.volume > 0.0).cloned().collect()
     }
 
     /// Get account data by vt_accountid
     pub fn get_account(&self, vt_accountid: &str) -> Option<AccountData> {
-        let accounts = self.accounts.read().unwrap_or_else(|e| e.into_inner());
+        let accounts = self.accounts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         accounts.get(vt_accountid).cloned()
     }
 
     /// Get all accounts
     pub fn get_all_accounts(&self) -> Vec<AccountData> {
-        let accounts = self.accounts.read().unwrap_or_else(|e| e.into_inner());
+        let accounts = self.accounts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         accounts.values().cloned().collect()
     }
 
     /// Get daily realized PnL
     pub fn get_daily_realized_pnl(&self) -> f64 {
-        *self.daily_realized_pnl.read().unwrap_or_else(|e| e.into_inner())
+        *self.daily_realized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Get total realized PnL
     pub fn get_total_realized_pnl(&self) -> f64 {
-        *self.total_realized_pnl.read().unwrap_or_else(|e| e.into_inner())
+        *self.total_realized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Reset daily PnL (call at start of new trading day)
     pub fn reset_daily_pnl(&self) {
-        let mut daily = self.daily_realized_pnl.write().unwrap_or_else(|e| e.into_inner());
+        let mut daily = self.daily_realized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         info!("[PortfolioManager] Daily PnL reset (was: {:.2})", *daily);
         *daily = 0.0;
     }
 
     /// Calculate unrealized PnL for a specific position
     pub fn calculate_unrealized_pnl(&self, position_key: &str, market_price: f64) -> f64 {
-        let positions = self.positions.read().unwrap_or_else(|e| e.into_inner());
+        let positions = self.positions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(pos) = positions.get(position_key) {
             match pos.direction {
                 Direction::Long | Direction::Net => {
@@ -245,7 +245,7 @@ impl PortfolioManager {
 
     /// Update market price for a position (called on tick/bar events)
     pub fn update_position_price(&self, symbol: &str, exchange: Exchange, market_price: f64) {
-        let mut positions = self.positions.write().unwrap_or_else(|e| e.into_inner());
+        let mut positions = self.positions.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         for pos in positions.values_mut() {
             if pos.symbol == symbol && pos.exchange == exchange && pos.volume > 0.0 {
                 pos.market_price = market_price;
@@ -264,10 +264,10 @@ impl PortfolioManager {
 
     /// Get portfolio summary
     pub fn get_portfolio_summary(&self) -> PortfolioSummary {
-        let positions = self.positions.read().unwrap_or_else(|e| e.into_inner());
-        let accounts = self.accounts.read().unwrap_or_else(|e| e.into_inner());
-        let daily_pnl = *self.daily_realized_pnl.read().unwrap_or_else(|e| e.into_inner());
-        let total_pnl = *self.total_realized_pnl.read().unwrap_or_else(|e| e.into_inner());
+        let positions = self.positions.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let accounts = self.accounts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let daily_pnl = *self.daily_realized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let total_pnl = *self.total_realized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let total_unrealized_pnl: f64 = positions.values()
             .map(|p| p.unrealized_pnl)
@@ -306,14 +306,14 @@ impl PortfolioManager {
 
     /// Get portfolio metrics
     pub fn get_metrics(&self) -> PortfolioMetrics {
-        let metrics = self.metrics.read().unwrap_or_else(|e| e.into_inner());
+        let metrics = self.metrics.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         metrics.clone()
     }
 
     /// Process a position event from gateway
     fn process_position_event(&self, position: &PositionData) {
         let key = position.vt_positionid();
-        let mut positions = self.positions.write().unwrap_or_else(|e| e.into_inner());
+        let mut positions = self.positions.write().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if position.volume > 0.0 {
             // Update or create position
@@ -379,7 +379,7 @@ impl PortfolioManager {
             trade.gateway_name, vt_symbol, same_dir
         );
 
-        let mut positions = self.positions.write().unwrap_or_else(|e| e.into_inner());
+        let mut positions = self.positions.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut pnl: f64 = 0.0;
 
         // Step 1: Try to close the opposite-direction position
@@ -459,13 +459,13 @@ impl PortfolioManager {
 
         // Update daily/total PnL tracking
         if pnl.abs() > 1e-10 {
-            let mut daily = self.daily_realized_pnl.write().unwrap_or_else(|e| e.into_inner());
+            let mut daily = self.daily_realized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             *daily += pnl;
-            let mut total = self.total_realized_pnl.write().unwrap_or_else(|e| e.into_inner());
+            let mut total = self.total_realized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             *total += pnl;
 
             // Update metrics
-            let mut metrics = self.metrics.write().unwrap_or_else(|e| e.into_inner());
+            let mut metrics = self.metrics.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if pnl > 0.0 {
                 metrics.winning_trades += 1;
                 metrics.total_wins += pnl;
@@ -487,7 +487,7 @@ impl PortfolioManager {
     /// Process an account event from gateway
     fn process_account_event(&self, account: &AccountData) {
         let vt_accountid = account.vt_accountid();
-        let mut accounts = self.accounts.write().unwrap_or_else(|e| e.into_inner());
+        let mut accounts = self.accounts.write().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let prev_balance = accounts.get(&vt_accountid)
             .map(|a| a.balance)
@@ -497,9 +497,9 @@ impl PortfolioManager {
         if accounts.contains_key(&vt_accountid) {
             let balance_change = account.balance - prev_balance;
             if balance_change.abs() > 0.001 {
-                let mut daily = self.daily_realized_pnl.write().unwrap_or_else(|e| e.into_inner());
+                let mut daily = self.daily_realized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 *daily += balance_change;
-                let mut total = self.total_realized_pnl.write().unwrap_or_else(|e| e.into_inner());
+                let mut total = self.total_realized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 *total += balance_change;
             }
         }

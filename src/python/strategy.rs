@@ -324,11 +324,11 @@ impl Strategy {
         }
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "buy".to_string(),
-                offset: offset.map(|s| s.to_string()),
+                offset: offset.map(std::string::ToString::to_string),
                 price,
                 volume,
             });
@@ -349,11 +349,11 @@ impl Strategy {
         }
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "sell".to_string(),
-                offset: offset.map(|s| s.to_string()),
+                offset: offset.map(std::string::ToString::to_string),
                 price,
                 volume,
             });
@@ -381,11 +381,11 @@ impl Strategy {
         }
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "short".to_string(),
-                offset: offset.map(|s| s.to_string()),
+                offset: offset.map(std::string::ToString::to_string),
                 price,
                 volume,
             });
@@ -413,11 +413,11 @@ impl Strategy {
         }
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(PendingOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: "cover".to_string(),
-                offset: offset.map(|s| s.to_string()),
+                offset: offset.map(std::string::ToString::to_string),
                 price,
                 volume,
             });
@@ -456,11 +456,11 @@ impl Strategy {
         );
         self.pending_stop_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(PendingStopOrder {
                 vt_symbol: vt_symbol.to_string(),
                 direction: direction.to_string(),
-                offset: offset.map(|s| s.to_string()),
+                offset: offset.map(std::string::ToString::to_string),
                 price,
                 volume,
                 order_type: order_type.to_string(),
@@ -491,7 +491,7 @@ impl Strategy {
         };
         self.pending_indicator_registrations
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(registration);
         Ok(())
     }
@@ -583,7 +583,7 @@ impl Strategy {
         // Clear pending orders queue
         self.pending_orders
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
 
         // Request engine to cancel all orders for this strategy
@@ -746,7 +746,7 @@ impl Strategy {
     ///     default: Default value if key not found (None by default)
     #[pyo3(signature = (key, default=None))]
     fn get_parameter(&self, key: &str, default: Option<&str>) -> PyResult<Option<String>> {
-        Ok(self.parameters.get(key).cloned().or(default.map(|s| s.to_string())))
+        Ok(self.parameters.get(key).cloned().or(default.map(std::string::ToString::to_string)))
     }
 
     /// Get the declared type hint for a parameter.
@@ -783,7 +783,7 @@ impl Strategy {
     ///     default: Default value if key not found (None by default)
     #[pyo3(signature = (key, default=None))]
     fn get_variable(&self, key: &str, default: Option<&str>) -> PyResult<Option<String>> {
-        Ok(self.variables.get(key).cloned().or(default.map(|s| s.to_string())))
+        Ok(self.variables.get(key).cloned().or(default.map(std::string::ToString::to_string)))
     }
 
     /// Set a strategy variable.
@@ -893,16 +893,14 @@ impl Strategy {
             "int" => {
                 if value.parse::<i64>().is_err() {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "Parameter '{}' expects int, got '{}'",
-                        key, value
+                        "Parameter '{key}' expects int, got '{value}'"
                     )));
                 }
             }
             "float" => {
                 if value.parse::<f64>().is_err() {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "Parameter '{}' expects float, got '{}'",
-                        key, value
+                        "Parameter '{key}' expects float, got '{value}'"
                     )));
                 }
             }
@@ -910,8 +908,7 @@ impl Strategy {
                 let lower = value.to_lowercase();
                 if lower != "true" && lower != "false" {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "Parameter '{}' expects bool, got '{}'",
-                        key, value
+                        "Parameter '{key}' expects bool, got '{value}'"
                     )));
                 }
             }

@@ -474,7 +474,7 @@ impl ChartWidget {
                                     interval_changed: true,
                                     new_interval: interval,
                                     need_more_history: false,
-                                    symbol: symbol.map(|s| s.to_string()),
+                                    symbol: symbol.map(std::string::ToString::to_string),
                                 });
                             }
                         }
@@ -985,7 +985,7 @@ impl ChartWidget {
                                     self.custom_indicator_error = Some("请输入表达式".to_string());
                                 } else if let Err(e) = validate_expression(&expr) {
                                     self.custom_indicator_error =
-                                        Some(format!("表达式错误: {}", e));
+                                        Some(format!("表达式错误: {e}"));
                                 } else {
                                     // Pick a color based on indicator count for variety
                                     let colors = [
@@ -1953,7 +1953,7 @@ impl ChartCursor {
         let full_info = if volume_info.is_empty() {
             info_text
         } else {
-            format!("{}\n\n{}", info_text, volume_info)
+            format!("{info_text}\n\n{volume_info}")
         };
 
         if !full_info.is_empty() {

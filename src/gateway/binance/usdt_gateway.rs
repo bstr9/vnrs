@@ -26,7 +26,7 @@ use crate::error::GatewayError;
 
 fn format_price(value: f64) -> String {
     if value == 0.0 { return "0".to_string(); }
-    let s = format!("{:.8}", value);
+    let s = format!("{value:.8}");
     let s = s.trim_end_matches('0');
     let s = s.trim_end_matches('.');
     s.to_string()
@@ -156,7 +156,7 @@ impl BinanceUsdtGateway {
         let local_time = Utc::now().timestamp_millis();
         let offset = local_time - server_time;
         self.rest_client.set_time_offset(offset);
-        self.write_log(&format!("时间同步成功，偏移: {}ms", offset)).await;
+        self.write_log(&format!("时间同步成功，偏移: {offset}ms")).await;
         Ok(())
     }
 
@@ -334,7 +334,7 @@ impl BinanceUsdtGateway {
                         }
                     }
                     Err(e) => {
-                        self.write_log(&format!("查询 {} 历史成交失败: {}", symbol, e)).await;
+                        self.write_log(&format!("查询 {symbol} 历史成交失败: {e}")).await;
                         break;
                     }
                 }
@@ -452,9 +452,9 @@ impl BinanceUsdtGateway {
 
         let server = self.server.read().await.clone();
         let url = if server == "REAL" {
-            format!("{}{}", USDT_WS_TRADE_HOST, listen_key)
+            format!("{USDT_WS_TRADE_HOST}{listen_key}")
         } else {
-            format!("{}{}", USDT_TESTNET_WS_TRADE_HOST, listen_key)
+            format!("{USDT_TESTNET_WS_TRADE_HOST}{listen_key}")
         };
 
         let event_sender = self.event_sender.clone();
@@ -644,9 +644,9 @@ impl BinanceUsdtGateway {
 
         let server = self.server.read().await.clone();
         let url = if server == "REAL" {
-            format!("{}{}", USDT_WS_TRADE_HOST, listen_key)
+            format!("{USDT_WS_TRADE_HOST}{listen_key}")
         } else {
-            format!("{}{}", USDT_TESTNET_WS_TRADE_HOST, listen_key)
+            format!("{USDT_TESTNET_WS_TRADE_HOST}{listen_key}")
         };
 
         let proxy_host = self.rest_client.get_proxy_host().await;
@@ -691,7 +691,7 @@ impl BaseGateway for BinanceUsdtGateway {
         // Save the configuration
         configs.set(self.gateway_name.clone(), config.clone());
         if let Err(e) = configs.save() {
-            self.write_log(&format!("警告: 保存配置失败: {}", e)).await;
+            self.write_log(&format!("警告: 保存配置失败: {e}")).await;
         } else {
             self.write_log("配置已保存到 .rstrader/binance/gateway_configs.json").await;
         }
@@ -1134,7 +1134,7 @@ impl BaseGateway for BinanceUsdtGateway {
     async fn subscribe(&self, req: SubscribeRequest) -> Result<(), GatewayError> {
         let symbol = req.symbol.to_lowercase();
         if !self.contracts.read().await.contains_key(&symbol) {
-            return Err(format!("找不到该合约代码: {}", symbol).into());
+            return Err(format!("找不到该合约代码: {symbol}").into());
         }
         if self.ticks.read().await.contains_key(&symbol) { return Ok(()); }
 
@@ -1143,7 +1143,7 @@ impl BaseGateway for BinanceUsdtGateway {
 
         let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
         self.market_ws.subscribe(channels).await?;
-        self.write_log(&format!("订阅行情: {}", symbol)).await;
+        self.write_log(&format!("订阅行情: {symbol}")).await;
         Ok(())
     }
 
@@ -1158,7 +1158,7 @@ impl BaseGateway for BinanceUsdtGateway {
         // Unsubscribe from WebSocket streams
         let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
         self.market_ws.unsubscribe(channels).await?;
-        self.write_log(&format!("退订行情: {}", symbol)).await;
+        self.write_log(&format!("退订行情: {symbol}")).await;
         Ok(())
     }
 
@@ -1217,7 +1217,7 @@ impl BaseGateway for BinanceUsdtGateway {
                 self.on_order(rejected_order).await;
                 // Remove from tracking on rejection
                 self.order_submit_times.write().await.remove(&orderid);
-                self.write_log(&format!("委托失败: {}", e)).await;
+                self.write_log(&format!("委托失败: {e}")).await;
                 Err(e.into())
             }
         }
@@ -1230,7 +1230,7 @@ impl BaseGateway for BinanceUsdtGateway {
 
         match self.rest_client.delete("/fapi/v1/order", &params, Security::Signed).await {
             Ok(_) => { self.write_log(&format!("撤单成功: {}", req.orderid)).await; Ok(()) }
-            Err(e) => { self.write_log(&format!("撤单失败: {}", e)).await; Err(e.into()) }
+            Err(e) => { self.write_log(&format!("撤单失败: {e}")).await; Err(e.into()) }
         }
     }
 

@@ -530,19 +530,19 @@ impl OrderEmulator {
         // For iceberg orders, immediately submit the first visible slice
         if req.order_type == EmulatedOrderType::Iceberg {
             if let Err(e) = self.submit_iceberg_slice(&order) {
-                return Err(format!("冰山单首笔提交失败: {}", e));
+                return Err(format!("冰山单首笔提交失败: {e}"));
             }
         }
 
         // Insert into orders map
         {
-            let mut orders = self.orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             orders.insert(id, order);
         }
 
         // Insert into symbol index
         {
-            let mut symbol_index = self.symbol_index.write().unwrap_or_else(|e| e.into_inner());
+            let mut symbol_index = self.symbol_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             symbol_index.entry(vt_symbol).or_default().push(id);
         }
 
@@ -556,12 +556,12 @@ impl OrderEmulator {
 
     /// Cancel an emulated order by ID
     pub fn cancel_order(&self, id: EmulatedOrderId) -> Result<(), String> {
-        let mut orders = self.orders.write().unwrap_or_else(|e| e.into_inner());
+        let mut orders = self.orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
 
-        let order = orders.get_mut(&id).ok_or_else(|| format!("找不到模拟委托: {}", id))?;
+        let order = orders.get_mut(&id).ok_or_else(|| format!("找不到模拟委托: {id}"))?;
 
         if !order.is_active() {
-            return Err(format!("模拟委托{}不是活跃状态，无法撤销", id));
+            return Err(format!("模拟委托{id}不是活跃状态，无法撤销"));
         }
 
         // If there's a real order on the exchange, cancel it
@@ -580,7 +580,7 @@ impl OrderEmulator {
             }
 
             // Remove from real_order_index
-            let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+            let mut real_index = self.real_order_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             real_index.remove(real_id);
         }
 
@@ -592,7 +592,7 @@ impl OrderEmulator {
     /// Cancel all emulated orders for a specific symbol
     pub fn cancel_orders_for_symbol(&self, vt_symbol: &str) {
         let ids_to_cancel: Vec<EmulatedOrderId> = {
-            let symbol_index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+            let symbol_index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             symbol_index.get(vt_symbol).cloned().unwrap_or_default()
         };
 
@@ -605,37 +605,37 @@ impl OrderEmulator {
 
     /// Get an emulated order by ID
     pub fn get_order(&self, id: EmulatedOrderId) -> Option<EmulatedOrder> {
-        let orders = self.orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         orders.get(&id).cloned()
     }
 
     /// Get all emulated orders
     pub fn get_all_orders(&self) -> Vec<EmulatedOrder> {
-        let orders = self.orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         orders.values().cloned().collect()
     }
 
     /// Get all active emulated orders
     pub fn get_active_orders(&self) -> Vec<EmulatedOrder> {
-        let orders = self.orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         orders.values().filter(|o| o.is_active()).cloned().collect()
     }
 
     /// Get emulated orders for a specific symbol
     pub fn get_orders_for_symbol(&self, vt_symbol: &str) -> Vec<EmulatedOrder> {
         let ids: Vec<EmulatedOrderId> = {
-            let symbol_index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+            let symbol_index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             symbol_index.get(vt_symbol).cloned().unwrap_or_default()
         };
 
-        let orders = self.orders.read().unwrap_or_else(|e| e.into_inner());
+        let orders = self.orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         ids.iter().filter_map(|id| orders.get(id).cloned()).collect()
     }
 
     /// Remove completed/cancelled/expired orders from tracking
     pub fn cleanup(&self) {
-        let mut orders = self.orders.write().unwrap_or_else(|e| e.into_inner());
-        let mut symbol_index = self.symbol_index.write().unwrap_or_else(|e| e.into_inner());
+        let mut orders = self.orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut symbol_index = self.symbol_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let inactive_ids: Vec<EmulatedOrderId> = orders.iter()
             .filter(|(_, o)| !o.is_active())
@@ -668,12 +668,12 @@ impl OrderEmulator {
         let vt_symbol = tick.vt_symbol();
 
         let ids: Vec<EmulatedOrderId> = {
-            let symbol_index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+            let symbol_index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             symbol_index.get(&vt_symbol).cloned().unwrap_or_default()
         };
 
         for id in ids {
-            let mut orders = self.orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(order) = orders.get_mut(&id) {
                 if !order.is_active() {
                     continue;
@@ -708,12 +708,12 @@ impl OrderEmulator {
         let vt_symbol = bar.vt_symbol();
 
         let ids: Vec<EmulatedOrderId> = {
-            let symbol_index = self.symbol_index.read().unwrap_or_else(|e| e.into_inner());
+            let symbol_index = self.symbol_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             symbol_index.get(&vt_symbol).cloned().unwrap_or_default()
         };
 
         for id in ids {
-            let mut orders = self.orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(order) = orders.get_mut(&id) {
                 if !order.is_active() {
                     continue;
@@ -798,12 +798,12 @@ impl OrderEmulator {
 
         // Check if this is a real order we're tracking
         let emulated_id = {
-            let real_index = self.real_order_index.read().unwrap_or_else(|e| e.into_inner());
+            let real_index = self.real_order_index.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             real_index.get(&vt_orderid).cloned()
         };
 
         if let Some(emulated_id) = emulated_id {
-            let mut orders = self.orders.write().unwrap_or_else(|e| e.into_inner());
+            let mut orders = self.orders.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(emulated_order) = orders.get_mut(&emulated_id) {
                 match order_data.status {
                     Status::AllTraded => {
@@ -826,7 +826,7 @@ impl OrderEmulator {
                         }
 
                         // Clean up real order index
-                        let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+                        let mut real_index = self.real_order_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         real_index.remove(&vt_orderid);
                         emulated_order.real_order_id = None;
                     }
@@ -840,7 +840,7 @@ impl OrderEmulator {
                             info!("模拟委托已完成(已撤销): id={}", emulated_id);
                         }
 
-                        let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+                        let mut real_index = self.real_order_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         real_index.remove(&vt_orderid);
                         emulated_order.real_order_id = None;
                     }
@@ -848,7 +848,7 @@ impl OrderEmulator {
                         emulated_order.status = EmulatedOrderStatus::Rejected;
                         warn!("模拟委托被拒绝: id={}, 真实委托={}", emulated_id, vt_orderid);
 
-                        let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+                        let mut real_index = self.real_order_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         real_index.remove(&vt_orderid);
                         emulated_order.real_order_id = None;
                     }
@@ -978,7 +978,7 @@ impl OrderEmulator {
                     );
 
                     // Update real order index
-                    let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+                    let mut real_index = self.real_order_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     real_index.insert(real_orderid, order.id);
                 }
                 Err(e) => {
@@ -1027,7 +1027,7 @@ impl OrderEmulator {
                     );
                     Ok(())
                 }
-                Err(e) => Err(format!("冰山单下单失败: {}", e)),
+                Err(e) => Err(format!("冰山单下单失败: {e}")),
             }
         } else {
             Err("未设置下单回调".to_string())
@@ -1078,7 +1078,7 @@ impl OrderEmulator {
             }
 
             // Remove old real order from index
-            let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+            let mut real_index = self.real_order_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             real_index.remove(real_orderid);
         }
 
@@ -1102,7 +1102,7 @@ impl OrderEmulator {
             match send_fn(&order_req) {
                 Ok(real_orderid) => {
                     // Update real order index
-                    let mut real_index = self.real_order_index.write().unwrap_or_else(|e| e.into_inner());
+                    let mut real_index = self.real_order_index.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     real_index.insert(real_orderid.clone(), order.id);
                     order.real_order_id = Some(real_orderid.clone());
                     order.status = EmulatedOrderStatus::Triggered;
@@ -1163,7 +1163,7 @@ impl BaseEngine for OrderEmulator {
 
         // Cancel all active emulated orders
         let active_ids: Vec<EmulatedOrderId> = {
-            let orders = self.orders.read().unwrap_or_else(|e| e.into_inner());
+            let orders = self.orders.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             orders.values()
                 .filter(|o| o.is_active())
                 .map(|o| o.id)

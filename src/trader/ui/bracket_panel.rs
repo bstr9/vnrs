@@ -150,7 +150,7 @@ impl BracketOrderPanel {
     pub fn show(&mut self, ui: &mut Ui, engine: Option<&Arc<BracketOrderEngine>>, toast_manager: &mut ToastManager) {
         // Show any error from last submission
         if let Some(ref err) = self.last_error {
-            ui.colored_label(Color32::RED, format!("错误: {}", err));
+            ui.colored_label(Color32::RED, format!("错误: {err}"));
             ui.add_space(4.0);
         }
 
@@ -196,7 +196,7 @@ impl BracketOrderPanel {
                 let exchange_text = self
                     .exchanges
                     .get(self.exchange_index)
-                    .map(|e| e.value())
+                    .map(super::super::constant::Exchange::value)
                     .unwrap_or("BINANCE");
                 ComboBox::from_id_salt("bracket_exchange")
                     .selected_text(exchange_text)
@@ -336,7 +336,7 @@ impl BracketOrderPanel {
                 let exchange_text = self
                     .exchanges
                     .get(self.exchange_index)
-                    .map(|e| e.value())
+                    .map(super::super::constant::Exchange::value)
                     .unwrap_or("BINANCE");
                 ComboBox::from_id_salt("oco_exchange")
                     .selected_text(exchange_text)
@@ -480,7 +480,7 @@ impl BracketOrderPanel {
                 let exchange_text = self
                     .exchanges
                     .get(self.exchange_index)
-                    .map(|e| e.value())
+                    .map(super::super::constant::Exchange::value)
                     .unwrap_or("BINANCE");
                 ComboBox::from_id_salt("oto_exchange")
                     .selected_text(exchange_text)

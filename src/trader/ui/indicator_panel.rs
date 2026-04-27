@@ -466,7 +466,7 @@ impl IndicatorPanel {
                         let values_str: Vec<String> = entry
                             .last_values
                             .iter()
-                            .map(|(k, v)| format!("{}={:.4}", k, v))
+                            .map(|(k, v)| format!("{k}={v:.4}"))
                             .collect();
                         ui.label(
                             RichText::new(format!("  {}", values_str.join(", ")))
@@ -681,8 +681,8 @@ impl IndicatorPanel {
             ui.label(RichText::new("最新计算值").strong());
             for (label, value) in &entry.last_values {
                 ui.horizontal(|ui| {
-                    ui.label(format!("{}:", label));
-                    ui.label(format!("{:.6}", value));
+                    ui.label(format!("{label}:"));
+                    ui.label(format!("{value:.6}"));
                 });
             }
         } else {
@@ -697,7 +697,7 @@ impl IndicatorPanel {
             let builtin_count = self.available_indicators.values().filter(|c| c.enabled).count();
             let python_count = self.python_indicators.iter().filter(|e| e.enabled).count();
             let total_count = builtin_count + python_count;
-            if ui.button(format!("应用到图表 ({})", total_count)).clicked() && total_count > 0 {
+            if ui.button(format!("应用到图表 ({total_count})")).clicked() && total_count > 0 {
                 let enabled: Vec<IndicatorConfigEntry> = self.available_indicators
                     .values()
                     .filter(|c| c.enabled)
@@ -857,25 +857,25 @@ impl<'de> serde::Deserialize<'de> for IndicatorConfigEntry {
                 _ => IndicatorType::MA,
             };
         }
-        if let Some(v) = map.get("period").and_then(|v| v.as_u64()) {
+        if let Some(v) = map.get("period").and_then(serde_json::Value::as_u64) {
             result.period = v as usize;
         }
-        if let Some(v) = map.get("multiplier").and_then(|v| v.as_f64()) {
+        if let Some(v) = map.get("multiplier").and_then(serde_json::Value::as_f64) {
             result.multiplier = v;
         }
-        if let Some(v) = map.get("signal_period").and_then(|v| v.as_u64()) {
+        if let Some(v) = map.get("signal_period").and_then(serde_json::Value::as_u64) {
             result.signal_period = v as usize;
         }
-        if let Some(v) = map.get("fast_period").and_then(|v| v.as_u64()) {
+        if let Some(v) = map.get("fast_period").and_then(serde_json::Value::as_u64) {
             result.fast_period = v as usize;
         }
-        if let Some(v) = map.get("slow_period").and_then(|v| v.as_u64()) {
+        if let Some(v) = map.get("slow_period").and_then(serde_json::Value::as_u64) {
             result.slow_period = v as usize;
         }
-        if let Some(v) = map.get("line_width").and_then(|v| v.as_f64()) {
+        if let Some(v) = map.get("line_width").and_then(serde_json::Value::as_f64) {
             result.line_width = v as f32;
         }
-        if let Some(v) = map.get("enabled").and_then(|v| v.as_bool()) {
+        if let Some(v) = map.get("enabled").and_then(serde_json::Value::as_bool) {
             result.enabled = v;
         }
         

@@ -117,7 +117,7 @@ impl FuturesStrategy {
             };
             self.base.pending_orders
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(req);
             let vt_orderid = format!("BUYCLOSE_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis());
             vec![vt_orderid]
@@ -149,7 +149,7 @@ impl FuturesStrategy {
             };
             self.base.pending_orders
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(req);
             let vt_orderid = format!("SELLCLOSE_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis());
             vec![vt_orderid]
@@ -194,7 +194,7 @@ impl FuturesStrategy {
                         };
             self.base.pending_orders
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(req);
             vt_orderids.push(format!("CLOSETD_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis()));
             self.long_td_frozen += close_vol;
@@ -220,7 +220,7 @@ impl FuturesStrategy {
                         };
             self.base.pending_orders
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(req);
             vt_orderids.push(format!("CLOSEYD_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis()));
             self.long_yd_frozen += close_vol;
@@ -257,7 +257,7 @@ impl FuturesStrategy {
                         };
             self.base.pending_orders
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(req);
             vt_orderids.push(format!("CLOSETD_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis()));
             self.short_td_frozen += close_vol;
@@ -283,7 +283,7 @@ impl FuturesStrategy {
                         };
             self.base.pending_orders
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(req);
             vt_orderids.push(format!("CLOSEYD_{}_{}", vt_symbol, chrono::Utc::now().timestamp_millis()));
             self.short_yd_frozen += close_vol;
@@ -463,7 +463,7 @@ impl StrategyTemplate for FuturesStrategy {
         self.base
             .positions
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vt_symbol)
             .copied()
             .unwrap_or(0.0)

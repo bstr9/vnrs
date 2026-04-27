@@ -170,26 +170,26 @@ impl DataDownloadManager {
 
     /// Update download configuration
     pub fn update_config(&self, config: DownloadConfig) {
-        let mut current = self.config.write().unwrap_or_else(|e| e.into_inner());
+        let mut current = self.config.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         *current = config;
         info!("[DataDownloadManager] Configuration updated");
     }
 
     /// Get current configuration
     pub fn get_config(&self) -> DownloadConfig {
-        self.config.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     /// Get progress for a specific download
     pub fn get_progress(&self, symbol: &str, exchange: Exchange, interval: Interval) -> Option<DownloadProgress> {
         let key = format!("{}.{}.{}", symbol, exchange.value(), interval.value());
-        let progress = self.progress.read().unwrap_or_else(|e| e.into_inner());
+        let progress = self.progress.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         progress.get(&key).cloned()
     }
 
     /// Get all active download progress
     pub fn get_all_progress(&self) -> Vec<DownloadProgress> {
-        let progress = self.progress.read().unwrap_or_else(|e| e.into_inner());
+        let progress = self.progress.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         progress.values().cloned().collect()
     }
 
@@ -237,11 +237,11 @@ impl DataDownloadManager {
         end: DateTime<Utc>,
     ) -> Result<Vec<BarData>, String> {
         let key = format!("{}.{}.{}", symbol, exchange.value(), interval.value());
-        let config = self.config.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let config = self.config.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
 
         // Initialize progress tracking
         {
-            let mut progress = self.progress.write().unwrap_or_else(|e| e.into_inner());
+            let mut progress = self.progress.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             progress.insert(key.clone(), DownloadProgress {
                 symbol: symbol.to_string(),
                 exchange,
@@ -281,12 +281,12 @@ impl DataDownloadManager {
             if !self.running.load(Ordering::SeqCst) {
                 info!("[DataDownloadManager] Download cancelled for {}", symbol);
                 // Mark progress as complete with cancellation note
-                let mut progress = self.progress.write().unwrap_or_else(|e| e.into_inner());
+                let mut progress = self.progress.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(p) = progress.get_mut(&key) {
                     p.complete = true;
                     p.error = Some("Download cancelled".to_string());
                 }
-                return Err(format!("Download cancelled for {}", symbol));
+                return Err(format!("Download cancelled for {symbol}"));
             }
 
             let mut params = HashMap::new();
@@ -361,7 +361,7 @@ impl DataDownloadManager {
 
                     // Update progress
                     {
-                        let mut progress = self.progress.write().unwrap_or_else(|e| e.into_inner());
+                        let mut progress = self.progress.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         if let Some(p) = progress.get_mut(&key) {
                             p.bars_downloaded += page_count;
                         }
@@ -398,7 +398,7 @@ impl DataDownloadManager {
                         error!("[DataDownloadManager] {}", err_msg);
 
                         // Update progress with error
-                        let mut progress = self.progress.write().unwrap_or_else(|e| e.into_inner());
+                        let mut progress = self.progress.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         if let Some(p) = progress.get_mut(&key) {
                             p.error = Some(err_msg.clone());
                             p.complete = true;
@@ -418,7 +418,7 @@ impl DataDownloadManager {
 
         // Mark progress as complete
         {
-            let mut progress = self.progress.write().unwrap_or_else(|e| e.into_inner());
+            let mut progress = self.progress.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(p) = progress.get_mut(&key) {
                 p.complete = true;
                 p.bars_downloaded = all_bars.len();

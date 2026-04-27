@@ -228,7 +228,7 @@ impl TradingMcpServer {
         Parameters(params): Parameters<CompareStrategiesParams>,
     ) -> Result<CallToolResult, McpError> {
         let ids: Vec<String> = serde_json::from_str(&params.backtest_ids)
-            .map_err(|e| McpError::invalid_params(format!("Invalid backtest_ids JSON: {}", e), None))?;
+            .map_err(|e| McpError::invalid_params(format!("Invalid backtest_ids JSON: {e}"), None))?;
 
         let results = self.backtest_cache.read().await;
         let matched: Vec<&BacktestEntry> = results

@@ -107,7 +107,7 @@ impl std::fmt::Display for OrderRole {
 }
 
 fn role_key(role: OrderRole) -> String {
-    format!("{:?}", role)
+    format!("{role:?}")
 }
 
 // ---------------------------------------------------------------------------
@@ -316,7 +316,7 @@ impl BracketOrderEngine {
                     volume: req.entry_volume,
                     price: req.entry_price,
                     offset: req.offset,
-                    reference: if req.reference.is_empty() { format!("BRACKET_{}_ENTRY", id) } else { req.reference.clone() },
+                    reference: if req.reference.is_empty() { format!("BRACKET_{id}_ENTRY") } else { req.reference.clone() },
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -335,7 +335,7 @@ impl BracketOrderEngine {
                     volume: req.entry_volume,
                     price: req.tp_price,
                     offset: req.offset,
-                    reference: format!("BRACKET_{}_TP", id),
+                    reference: format!("BRACKET_{id}_TP"),
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -354,7 +354,7 @@ impl BracketOrderEngine {
                     volume: req.entry_volume,
                     price: if req.sl_type == OrderType::Stop || req.sl_type == OrderType::StopLimit { req.sl_price } else { 0.0 },
                     offset: req.offset,
-                    reference: format!("BRACKET_{}_SL", id),
+                    reference: format!("BRACKET_{id}_SL"),
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -377,7 +377,7 @@ impl BracketOrderEngine {
             tag: req.tag.clone(),
         };
 
-        { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner()); g.insert(id, group); }
+        { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner); g.insert(id, group); }
         self.submit_entry_order(id, &entry_request);
         info!("[BracketOrderEngine] 新增Bracket委托组 #{} {} entry={}", id, vt_symbol, req.entry_price);
         Ok(id)
@@ -397,7 +397,7 @@ impl BracketOrderEngine {
                     volume: req.volume,
                     price: req.order_a_price,
                     offset: req.offset,
-                    reference: if req.reference.is_empty() { format!("OCO_{}_A", id) } else { req.reference.clone() },
+                    reference: if req.reference.is_empty() { format!("OCO_{id}_A") } else { req.reference.clone() },
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -411,7 +411,7 @@ impl BracketOrderEngine {
                     volume: req.volume,
                     price: req.order_b_price,
                     offset: req.offset,
-                    reference: format!("OCO_{}_B", id),
+                    reference: format!("OCO_{id}_B"),
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -438,11 +438,11 @@ impl BracketOrderEngine {
             tag: req.tag.clone(),
         };
 
-        { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner()); g.insert(id, group); }
+        { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner); g.insert(id, group); }
         self.submit_child_order(id, &a_req, OrderRole::OrderA);
         self.submit_child_order(id, &b_req, OrderRole::OrderB);
 
-        { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+        { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
           if let Some(gr) = g.get_mut(&id) { gr.state = OrderGroupState::SecondaryActive; } }
         self.fire_state_change(id);
         info!("[BracketOrderEngine] 新增OCO委托组 #{} {} A={}/B={}", id, vt_symbol, req.order_a_price, req.order_b_price);
@@ -464,7 +464,7 @@ impl BracketOrderEngine {
                     volume: req.primary_volume,
                     price: req.primary_price,
                     offset: req.offset,
-                    reference: if req.reference.is_empty() { format!("OTO_{}_PRIMARY", id) } else { req.reference.clone() },
+                    reference: if req.reference.is_empty() { format!("OTO_{id}_PRIMARY") } else { req.reference.clone() },
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -478,7 +478,7 @@ impl BracketOrderEngine {
                     volume: req.secondary_volume,
                     price: req.secondary_price,
                     offset: req.offset,
-                    reference: format!("OTO_{}_SECONDARY", id),
+                    reference: format!("OTO_{id}_SECONDARY"),
                     post_only: false,
                     reduce_only: false,
                     expire_time: None,
@@ -505,7 +505,7 @@ impl BracketOrderEngine {
             tag: req.tag.clone(),
         };
 
-        { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner()); g.insert(id, group); }
+        { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner); g.insert(id, group); }
         self.submit_entry_order(id, &p_req);
         info!("[BracketOrderEngine] 新增OTO委托组 #{} {} primary={}", id, vt_symbol, req.primary_price);
         Ok(id)
@@ -513,7 +513,7 @@ impl BracketOrderEngine {
 
     pub fn cancel_group(&self, group_id: GroupId) -> Result<(), String> {
         let vt_orderids: Vec<String> = {
-            let mut groups = self.groups.write().unwrap_or_else(|e| e.into_inner());
+            let mut groups = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             let group = groups.get_mut(&group_id)
                 .ok_or_else(|| format!("委托组 #{} 不存在", group_id))?;
             if !group.is_active() {
@@ -530,20 +530,20 @@ impl BracketOrderEngine {
     }
 
     pub fn get_group(&self, id: GroupId) -> Option<OrderGroup> {
-        self.groups.read().unwrap_or_else(|e| e.into_inner()).get(&id).cloned()
+        self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned()
     }
 
     pub fn get_all_groups(&self) -> Vec<OrderGroup> {
-        self.groups.read().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+        self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner).values().cloned().collect()
     }
 
     pub fn get_active_groups(&self) -> Vec<OrderGroup> {
-        self.groups.read().unwrap_or_else(|e| e.into_inner()).values().filter(|g| g.is_active()).cloned().collect()
+        self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner).values().filter(|g| g.is_active()).cloned().collect()
     }
 
     pub fn cleanup(&self) {
-        let mut groups = self.groups.write().unwrap_or_else(|e| e.into_inner());
-        let mut oid_map = self.orderid_to_group.write().unwrap_or_else(|e| e.into_inner());
+        let mut groups = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut oid_map = self.orderid_to_group.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         let inactive: Vec<GroupId> = groups.iter().filter(|(_, g)| !g.is_active()).map(|(id, _)| *id).collect();
         for id in &inactive {
             if let Some(group) = groups.remove(id) {
@@ -563,8 +563,8 @@ impl BracketOrderEngine {
             match send(req) {
                 Ok(vt_orderid) => {
                     info!("[BracketOrderEngine] 委托下单 组#{} -> {}", group_id, vt_orderid);
-                    let mut groups = self.groups.write().unwrap_or_else(|e| e.into_inner());
-                    let mut oid_map = self.orderid_to_group.write().unwrap_or_else(|e| e.into_inner());
+                    let mut groups = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut oid_map = self.orderid_to_group.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(group) = groups.get_mut(&group_id) {
                         if let Some(child) = group.orders.get_mut(&role_key(OrderRole::Entry)) {
                             child.vt_orderid = Some(vt_orderid.clone());
@@ -585,7 +585,7 @@ impl BracketOrderEngine {
                 }
                 Err(e) => {
                     warn!("[BracketOrderEngine] 委托下单失败 组#{}: {}", group_id, e);
-                    let mut groups = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                    let mut groups = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(group) = groups.get_mut(&group_id) {
                         group.state = OrderGroupState::Rejected;
                         group.completed_at = Some(Utc::now());
@@ -603,8 +603,8 @@ impl BracketOrderEngine {
             match send(req) {
                 Ok(vt_orderid) => {
                     info!("[BracketOrderEngine] 委托下单 组#{} {} -> {}", group_id, role, vt_orderid);
-                    let mut groups = self.groups.write().unwrap_or_else(|e| e.into_inner());
-                    let mut oid_map = self.orderid_to_group.write().unwrap_or_else(|e| e.into_inner());
+                    let mut groups = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut oid_map = self.orderid_to_group.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(group) = groups.get_mut(&group_id) {
                         if let Some(child) = group.orders.get_mut(&role_key(role)) {
                             child.vt_orderid = Some(vt_orderid.clone());
@@ -623,8 +623,8 @@ impl BracketOrderEngine {
         if let Some(ref cancel) = *cb {
             let orderid = vt_orderid.rsplit_once('.').map(|(_, id)| id).unwrap_or(vt_orderid);
             let (symbol, exchange, gateway_name) = {
-                let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
-                let oid_map = self.orderid_to_group.read().unwrap_or_else(|e| e.into_inner());
+                let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let oid_map = self.orderid_to_group.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(gid) = oid_map.get(vt_orderid) {
                     if let Some(group) = groups.get(gid) {
                         if let Some(child) = group.orders.values().find(|c| c.vt_orderid.as_deref() == Some(vt_orderid)) {
@@ -644,11 +644,11 @@ impl BracketOrderEngine {
     fn process_order_update(&self, order: &OrderData) {
         let vt_orderid = order.vt_orderid();
         let group_id = {
-            let m = self.orderid_to_group.read().unwrap_or_else(|e| e.into_inner());
+            let m = self.orderid_to_group.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             match m.get(&vt_orderid).copied() { Some(id) => id, None => return }
         };
         {
-            let mut groups = self.groups.write().unwrap_or_else(|e| e.into_inner());
+            let mut groups = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(group) = groups.get_mut(&group_id) {
                 if let Some(child) = group.orders.values_mut().find(|c| c.vt_orderid.as_deref() == Some(&vt_orderid)) {
                     child.status = order.status;
@@ -667,11 +667,11 @@ impl BracketOrderEngine {
     fn process_trade(&self, trade: &TradeData) {
         let vt_orderid = trade.vt_orderid();
         let group_id = {
-            let m = self.orderid_to_group.read().unwrap_or_else(|e| e.into_inner());
+            let m = self.orderid_to_group.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             match m.get(&vt_orderid).copied() { Some(id) => id, None => return }
         };
         {
-            let mut groups = self.groups.write().unwrap_or_else(|e| e.into_inner());
+            let mut groups = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(group) = groups.get_mut(&group_id) {
                 if let Some(child) = group.orders.values_mut().find(|c| c.vt_orderid.as_deref() == Some(&vt_orderid)) {
                     let prev = child.filled_volume;
@@ -685,7 +685,7 @@ impl BracketOrderEngine {
     }
 
     fn handle_fill(&self, vt_orderid: &str, group_id: GroupId, filled: f64, _fill_price: f64) {
-        let ct = { self.groups.read().unwrap_or_else(|e| e.into_inner()).get(&group_id).map(|g| g.contingency_type) };
+        let ct = { self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(&group_id).map(|g| g.contingency_type) };
         match ct {
             Some(ContingencyType::Bracket) => self.handle_bracket_fill(vt_orderid, group_id, filled),
             Some(ContingencyType::Oco) => self.handle_oco_fill(vt_orderid, group_id),
@@ -695,7 +695,7 @@ impl BracketOrderEngine {
     }
 
     fn find_role(&self, group_id: GroupId, vt_orderid: &str) -> Option<OrderRole> {
-        self.groups.read().unwrap_or_else(|e| e.into_inner()).get(&group_id).and_then(|g| {
+        self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(&group_id).and_then(|g| {
             g.orders.values().find(|c| c.vt_orderid.as_deref() == Some(vt_orderid)).map(|c| c.role)
         })
     }
@@ -705,7 +705,7 @@ impl BracketOrderEngine {
         match role {
             Some(OrderRole::Entry) => {
                 let (tp_req, sl_req) = {
-                    let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+                    let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(group) = groups.get(&group_id) {
                         let mut tp = group.orders.get(&role_key(OrderRole::TakeProfit)).map(|c| c.request.clone());
                         let mut sl = group.orders.get(&role_key(OrderRole::StopLoss)).map(|c| c.request.clone());
@@ -716,18 +716,18 @@ impl BracketOrderEngine {
                 };
                 if let Some(ref r) = tp_req { self.submit_child_order(group_id, r, OrderRole::TakeProfit); }
                 if let Some(ref r) = sl_req { self.submit_child_order(group_id, r, OrderRole::StopLoss); }
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::SecondaryActive; } }
                 self.fire_state_change(group_id);
             }
             Some(OrderRole::TakeProfit) | Some(OrderRole::StopLoss) => {
                 let sibling_role = if role == Some(OrderRole::TakeProfit) { OrderRole::StopLoss } else { OrderRole::TakeProfit };
                 let sibling_id = {
-                    let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+                    let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     groups.get(&group_id).and_then(|g| g.orders.get(&role_key(sibling_role)).and_then(|c| c.vt_orderid.clone()))
                 };
                 if let Some(ref sid) = sibling_id { self.cancel_child_order(sid); }
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Completed; gr.completed_at = Some(Utc::now()); } }
                 self.fire_state_change(group_id);
             }
@@ -743,11 +743,11 @@ impl BracketOrderEngine {
             _ => return,
         };
         let sibling_id = {
-            let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+            let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             groups.get(&group_id).and_then(|g| g.orders.get(&role_key(sibling_role)).and_then(|c| c.vt_orderid.clone()))
         };
         if let Some(ref sid) = sibling_id { self.cancel_child_order(sid); }
-        { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+        { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
           if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Completed; gr.completed_at = Some(Utc::now()); } }
         self.fire_state_change(group_id);
     }
@@ -757,16 +757,16 @@ impl BracketOrderEngine {
         match role {
             Some(OrderRole::Primary) => {
                 let sec_req = {
-                    let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+                    let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     groups.get(&group_id).and_then(|g| g.orders.get(&role_key(OrderRole::Secondary)).map(|c| c.request.clone()))
                 };
                 if let Some(ref r) = sec_req { self.submit_child_order(group_id, r, OrderRole::Secondary); }
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::SecondaryActive; } }
                 self.fire_state_change(group_id);
             }
             Some(OrderRole::Secondary) => {
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Completed; gr.completed_at = Some(Utc::now()); } }
                 self.fire_state_change(group_id);
             }
@@ -778,7 +778,7 @@ impl BracketOrderEngine {
         let role = self.find_role(group_id, vt_orderid);
         match role {
             Some(OrderRole::Entry) | Some(OrderRole::Primary) => {
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Rejected; gr.completed_at = Some(Utc::now()); } }
                 self.fire_state_change(group_id);
             }
@@ -791,7 +791,7 @@ impl BracketOrderEngine {
         match role {
             Some(OrderRole::Entry) | Some(OrderRole::Primary) => {
                 // Entry/Primary cancelled → mark group Cancelled
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Cancelled; gr.completed_at = Some(Utc::now()); } }
                 self.fire_state_change(group_id);
                 info!("[BracketOrderEngine] 入场委托被撤销，组#{}已取消", group_id);
@@ -800,11 +800,11 @@ impl BracketOrderEngine {
                 // One exit leg cancelled externally — cancel sibling and mark group Cancelled
                 let sibling_role = if role == Some(OrderRole::TakeProfit) { OrderRole::StopLoss } else { OrderRole::TakeProfit };
                 let sibling_id = {
-                    let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+                    let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     groups.get(&group_id).and_then(|g| g.orders.get(&role_key(sibling_role)).and_then(|c| c.vt_orderid.clone()))
                 };
                 if let Some(ref sid) = sibling_id { self.cancel_child_order(sid); }
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Cancelled; gr.completed_at = Some(Utc::now()); } }
                 self.fire_state_change(group_id);
                 warn!("[BracketOrderEngine] 出场委托被撤销，组#{}已取消", group_id);
@@ -813,11 +813,11 @@ impl BracketOrderEngine {
                 // OCO: one leg cancelled — cancel sibling and mark group Cancelled
                 let sibling_role = if role == Some(OrderRole::OrderA) { OrderRole::OrderB } else { OrderRole::OrderA };
                 let sibling_id = {
-                    let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+                    let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     groups.get(&group_id).and_then(|g| g.orders.get(&role_key(sibling_role)).and_then(|c| c.vt_orderid.clone()))
                 };
                 if let Some(ref sid) = sibling_id { self.cancel_child_order(sid); }
-                { let mut g = self.groups.write().unwrap_or_else(|e| e.into_inner());
+                { let mut g = self.groups.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                   if let Some(gr) = g.get_mut(&group_id) { gr.state = OrderGroupState::Cancelled; gr.completed_at = Some(Utc::now()); } }
                 self.fire_state_change(group_id);
                 warn!("[BracketOrderEngine] OCO委托被撤销，组#{}已取消", group_id);
@@ -833,7 +833,7 @@ impl BracketOrderEngine {
     fn fire_state_change(&self, group_id: GroupId) {
         let cb = self.state_change_callback.read().unwrap_or_else(|e| e.into_inner());
         if let Some(ref cb) = *cb {
-            let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+            let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(group) = groups.get(&group_id) { cb(group); }
         }
     }
@@ -849,7 +849,7 @@ impl BaseEngine for BracketOrderEngine {
     fn close(&self) {
         self.running.store(false, Ordering::SeqCst);
         let active_ids: Vec<GroupId> = {
-            let groups = self.groups.read().unwrap_or_else(|e| e.into_inner());
+            let groups = self.groups.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             groups.iter().filter(|(_, g)| g.is_active()).map(|(id, _)| *id).collect()
         };
         for id in active_ids { let _ = self.cancel_group(id); }

@@ -248,7 +248,7 @@ impl TradingMcpServer {
         let active_orders = self.engine.get_all_active_orders();
 
         let total_balance: f64 = accounts.iter().map(|a| a.balance).sum();
-        let total_available: f64 = accounts.iter().map(|a| a.available()).sum();
+        let total_available: f64 = accounts.iter().map(crate::trader::object::AccountData::available).sum();
         let total_frozen: f64 = accounts.iter().map(|a| a.frozen).sum();
         let total_pnl: f64 = positions.iter().map(|p| p.pnl).sum();
         let open_positions = positions.iter().filter(|p| p.volume > 0.0).count();

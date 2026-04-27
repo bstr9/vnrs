@@ -179,7 +179,7 @@ impl PyOffsetConverter {
             Box::new(move |vt_symbol: &str| {
                 contracts_clone
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .get(vt_symbol)
                     .cloned()
             });
@@ -236,7 +236,7 @@ impl PyOffsetConverter {
 
         self.contracts
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(vt_symbol, contract);
 
         Ok(())
@@ -286,7 +286,7 @@ impl PyOffsetConverter {
         let exchange = self
             .contracts
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&vt_symbol)
             .map(|c| c.exchange)
             .unwrap_or(Exchange::Binance);
@@ -332,7 +332,7 @@ impl PyOffsetConverter {
         let exchange = self
             .contracts
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&vt_symbol)
             .map(|c| c.exchange)
             .unwrap_or(Exchange::Binance);
@@ -407,8 +407,7 @@ fn parse_direction(s: &str) -> PyResult<Direction> {
         "SHORT" | "SELL" | "空" => Ok(Direction::Short),
         "NET" | "净" => Ok(Direction::Net),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Invalid direction '{}'",
-            s
+            "Invalid direction '{s}'"
         ))),
     }
 }

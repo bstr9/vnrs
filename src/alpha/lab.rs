@@ -113,10 +113,10 @@ impl AlphaLab {
             &self.minute_path
         };
 
-        let file_path = format!("{}/{}.parquet", folder_path, vt_symbol);
+        let file_path = format!("{folder_path}/{vt_symbol}.parquet");
         if !Path::new(&file_path).exists() {
             self.logger
-                .error(&format!("File {} does not exist", file_path));
+                .error(&format!("File {file_path} does not exist"));
             return Ok(Vec::new());
         }
 

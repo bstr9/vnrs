@@ -64,7 +64,7 @@ pub fn bar_to_py<'py>(py: Python<'py>, bar: &BarData) -> PyResult<Bound<'py, PyD
     dict.set_item("gateway_name", &bar.gateway_name)?;
 
     if let Some(interval) = bar.interval {
-        dict.set_item("interval", format!("{:?}", interval))?;
+        dict.set_item("interval", format!("{interval:?}"))?;
     }
 
     Ok(dict)
@@ -77,7 +77,7 @@ pub fn py_to_bar(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<BarData> 
 
     // Parse datetime
     let datetime = chrono::DateTime::parse_from_rfc3339(&datetime_str)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {}", e)))?
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {e}")))?
         .into();
 
     // Parse exchange
@@ -143,7 +143,7 @@ pub fn bars_to_arrow(bars: &[BarData]) -> Result<DataFrame, Box<dyn std::error::
         gateway_names.push(bar.gateway_name.clone());
         intervals.push(
             bar.interval
-                .map(|i| format!("{:?}", i))
+                .map(|i| format!("{i:?}"))
                 .unwrap_or("".to_string()),
         );
     }
@@ -277,7 +277,7 @@ pub fn py_to_tick(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<TickData
     let datetime_str: String = get_required!(py_dict, "datetime", String);
 
     let datetime = chrono::DateTime::parse_from_rfc3339(&datetime_str)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {}", e)))?
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid datetime: {e}")))?
         .into();
 
     let exchange = get_optional::<String>(py_dict, "exchange")
@@ -352,7 +352,7 @@ pub fn py_to_order(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::
 
     let datetime = get_optional::<String>(py_dict, "datetime")
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.into());
+        .map(std::convert::Into::into);
 
     Ok(crate::trader::OrderData {
         symbol,
@@ -396,7 +396,7 @@ pub fn py_to_trade(_py: Python, py_dict: &Bound<'_, PyDict>) -> PyResult<crate::
 
     let datetime = get_optional::<String>(py_dict, "datetime")
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.into());
+        .map(std::convert::Into::into);
 
     Ok(crate::trader::TradeData {
         symbol,

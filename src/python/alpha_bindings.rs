@@ -241,7 +241,7 @@ fn build_dataset_from_arrays(x: &[Vec<f64>], y: &[f64]) -> Result<AlphaDataset, 
 
     // Feature columns: f0, f1, ..., fN
     for j in 0..n_features {
-        let col_name = format!("f{}", j);
+        let col_name = format!("f{j}");
         let values: Vec<f64> = x.iter().map(|row| row.get(j).copied().unwrap_or(0.0)).collect();
         columns.push(Column::new(col_name.into(), values));
     }
@@ -249,7 +249,7 @@ fn build_dataset_from_arrays(x: &[Vec<f64>], y: &[f64]) -> Result<AlphaDataset, 
     // Label column
     columns.push(Column::new("label".into(), y.to_vec()));
 
-    let df = DataFrame::new(columns).map_err(|e| format!("Failed to create DataFrame: {}", e))?;
+    let df = DataFrame::new(columns).map_err(|e| format!("Failed to create DataFrame: {e}"))?;
 
     // Split into 80/10/10
     let train_end = (n_rows as f64 * 0.8) as i64;
@@ -257,11 +257,11 @@ fn build_dataset_from_arrays(x: &[Vec<f64>], y: &[f64]) -> Result<AlphaDataset, 
 
     let train_period = (
         format!("{:08}", 0),
-        format!("{:08}", train_end),
+        format!("{train_end:08}"),
     );
     let valid_period = (
         format!("{:08}", train_end + 1),
-        format!("{:08}", valid_end),
+        format!("{valid_end:08}"),
     );
     let test_period = (
         format!("{:08}", valid_end + 1),
@@ -272,7 +272,7 @@ fn build_dataset_from_arrays(x: &[Vec<f64>], y: &[f64]) -> Result<AlphaDataset, 
 
     // Add feature expressions for each feature column
     for j in 0..n_features {
-        let col_name = format!("f{}", j);
+        let col_name = format!("f{j}");
         dataset.add_feature(col_name.clone(), col_name);
     }
     dataset.set_label("label".to_string());
@@ -280,7 +280,7 @@ fn build_dataset_from_arrays(x: &[Vec<f64>], y: &[f64]) -> Result<AlphaDataset, 
     // Prepare the data (computes raw_df, infer_df, learn_df)
     dataset
         .prepare_data(None)
-        .map_err(|e| format!("Failed to prepare dataset: {}", e))?;
+        .map_err(|e| format!("Failed to prepare dataset: {e}"))?;
 
     Ok(dataset)
 }
@@ -405,8 +405,7 @@ impl PyAlphaModel {
             "GradientBoosting" => PyAlphaModelType::GradientBoosting,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Unknown model_type '{}'. Must be one of: LinearRegression, Ridge, Lasso, RandomForest, GradientBoosting",
-                    model_type
+                    "Unknown model_type '{model_type}'. Must be one of: LinearRegression, Ridge, Lasso, RandomForest, GradientBoosting"
                 )));
             }
         };
@@ -414,7 +413,7 @@ impl PyAlphaModel {
         let mut params = HashMap::new();
         params.insert("model_type".to_string(), model_type.to_string());
         params.insert("n_estimators".to_string(), n_estimators.to_string());
-        params.insert("max_depth".to_string(), format!("{:?}", max_depth));
+        params.insert("max_depth".to_string(), format!("{max_depth:?}"));
         params.insert("learning_rate".to_string(), learning_rate.to_string());
 
         Ok(PyAlphaModel {
@@ -515,7 +514,7 @@ impl PyAlphaModel {
 
         model
             .predict(&dataset, segment)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Prediction failed: {}", e)))
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Prediction failed: {e}")))
     }
 
     /// Get model detail string.
@@ -590,7 +589,7 @@ impl PyAlphaModule {
 
         let model_name = py_model.name();
         let detail = py_model.detail();
-        let n_features = x.first().map(|r| r.len()).unwrap_or(0);
+        let n_features = x.first().map(std::vec::Vec::len).unwrap_or(0);
         let n_samples = x.len();
 
         // Compute train MSE and valid MSE
@@ -639,8 +638,7 @@ impl PyAlphaModule {
             .models
             .get(name)
             .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(format!(
-                "Model '{}' not found. Train it first with train().",
-                name
+                "Model '{name}' not found. Train it first with train()."
             )))?;
 
         let predictions = py_model.predict(x)?;

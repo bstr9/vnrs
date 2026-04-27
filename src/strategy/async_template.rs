@@ -72,10 +72,10 @@ pub enum StrategyError {
 impl std::fmt::Display for StrategyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StrategyError::InitError(msg) => write!(f, "InitError: {}", msg),
-            StrategyError::InferenceError(msg) => write!(f, "InferenceError: {}", msg),
-            StrategyError::OrderError(msg) => write!(f, "OrderError: {}", msg),
-            StrategyError::TimeoutError(msg) => write!(f, "TimeoutError: {}", msg),
+            StrategyError::InitError(msg) => write!(f, "InitError: {msg}"),
+            StrategyError::InferenceError(msg) => write!(f, "InferenceError: {msg}"),
+            StrategyError::OrderError(msg) => write!(f, "OrderError: {msg}"),
+            StrategyError::TimeoutError(msg) => write!(f, "TimeoutError: {msg}"),
         }
     }
 }

@@ -44,7 +44,7 @@ impl BinanceRestClient {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
         Ok(Self {
             client: Arc::new(RwLock::new(client)),
@@ -84,9 +84,9 @@ impl BinanceRestClient {
                 || proxy_host.starts_with("socks5://")
                 || proxy_host.starts_with("socks5h://")
             {
-                format!("{}:{}", proxy_host, proxy_port)
+                format!("{proxy_host}:{proxy_port}")
             } else {
-                format!("socks5://{}:{}", proxy_host, proxy_port)
+                format!("socks5://{proxy_host}:{proxy_port}")
             };
 
             match reqwest::Proxy::all(&proxy_url) {
@@ -199,7 +199,7 @@ impl BinanceRestClient {
         security: Security,
     ) -> String {
         let host = self.host.read().await;
-        let mut url = format!("{}{}", host, path);
+        let mut url = format!("{host}{path}");
 
         let mut query_params = params.clone();
 
@@ -217,24 +217,24 @@ impl BinanceRestClient {
                 .map(|(k, v)| {
                     let encoded_k: String = url::form_urlencoded::byte_serialize(k.as_bytes()).collect();
                     let encoded_v: String = url::form_urlencoded::byte_serialize(v.as_bytes()).collect();
-                    format!("{}={}", encoded_k, encoded_v)
+                    format!("{encoded_k}={encoded_v}")
                 })
                 .collect::<Vec<_>>()
                 .join("&");
 
             let signature = self.sign(&query_string).await;
-            url = format!("{}?{}&signature={}", url, query_string, signature);
+            url = format!("{url}?{query_string}&signature={signature}");
         } else if !query_params.is_empty() {
             let query_string: String = query_params
                 .iter()
                 .map(|(k, v)| {
                     let encoded_k: String = url::form_urlencoded::byte_serialize(k.as_bytes()).collect();
                     let encoded_v: String = url::form_urlencoded::byte_serialize(v.as_bytes()).collect();
-                    format!("{}={}", encoded_k, encoded_v)
+                    format!("{encoded_k}={encoded_v}")
                 })
                 .collect::<Vec<_>>()
                 .join("&");
-            url = format!("{}?{}", url, query_string);
+            url = format!("{url}?{query_string}");
         }
 
         url
@@ -285,21 +285,21 @@ impl BinanceRestClient {
                 Method::POST => client.post(&url),
                 Method::PUT => client.put(&url),
                 Method::DELETE => client.delete(&url),
-                _ => return Err(format!("Unsupported method: {}", method)),
+                _ => return Err(format!("Unsupported method: {method}")),
             };
 
             let response = request
                 .headers(headers)
                 .send()
                 .await
-                .map_err(|e| format!("Request failed: {}", e))?;
+                .map_err(|e| format!("Request failed: {e}"))?;
 
             let status = response.status();
             let resp_headers = response.headers().clone();
             let text = response
                 .text()
                 .await
-                .map_err(|e| format!("Failed to read response: {}", e))?;
+                .map_err(|e| format!("Failed to read response: {e}"))?;
 
             if !status.is_success() {
                 if status.as_u16() == 429 {
@@ -318,11 +318,11 @@ impl BinanceRestClient {
                     continue;
                 }
                 error!("Binance API error {}: {}", status, text);
-                return Err(format!("API error {}: {}", status, text));
+                return Err(format!("API error {status}: {text}"));
             }
 
             return serde_json::from_str(&text)
-                .map_err(|e| format!("Failed to parse JSON: {} - {}", e, text));
+                .map_err(|e| format!("Failed to parse JSON: {e} - {text}"));
         }
     }
 

@@ -65,24 +65,24 @@ impl PythonStrategyAdapter {
         Python::attach(|py| {
             // Read Python file
             let code = std::fs::read_to_string(file_path)
-                .map_err(|e| format!("Failed to read strategy file: {}", e))?;
+                .map_err(|e| format!("Failed to read strategy file: {e}"))?;
 
             // Compile and execute module
             use std::ffi::CString;
             let code_c = CString::new(code.as_str())
-                .map_err(|e| format!("Invalid code string (contains NUL): {}", e))?;
+                .map_err(|e| format!("Invalid code string (contains NUL): {e}"))?;
             let file_c = CString::new(file_path)
-                .map_err(|e| format!("Invalid file path (contains NUL): {}", e))?;
+                .map_err(|e| format!("Invalid file path (contains NUL): {e}"))?;
             let name_c = CString::new("strategy_module")
-                .map_err(|e| format!("Invalid module name (contains NUL): {}", e))?;
+                .map_err(|e| format!("Invalid module name (contains NUL): {e}"))?;
             let module =
                 PyModule::from_code(py, code_c.as_c_str(), file_c.as_c_str(), name_c.as_c_str())
-                    .map_err(|e| format!("Failed to load Python module: {}", e))?;
+                    .map_err(|e| format!("Failed to load Python module: {e}"))?;
 
             // Get strategy class
             let strategy_class = module
                 .getattr(class_name)
-                .map_err(|e| format!("Strategy class '{}' not found: {}", class_name, e))?;
+                .map_err(|e| format!("Strategy class '{class_name}' not found: {e}"))?;
 
             // Try to instantiate the strategy.
             // Support two constructor signatures:
@@ -108,17 +108,16 @@ impl PythonStrategyAdapter {
                             .call1((strategy_name.clone(), vt_symbols.clone()))
                             .map_err(|e| {
                                 format!(
-                                    "Failed to create strategy instance with both vnpy and local signatures: {}",
-                                    e
+                                    "Failed to create strategy instance with both vnpy and local signatures: {e}"
                                 )
                             })?;
                         let params_dict = params.bind(py);
                         for (key, value) in params_dict.iter() {
                             let key_str = key
                                 .extract::<String>()
-                                .map_err(|e| format!("Failed to extract parameter key: {}", e))?;
+                                .map_err(|e| format!("Failed to extract parameter key: {e}"))?;
                             inst.setattr(key_str.as_str(), value).map_err(|e| {
-                                format!("Failed to set parameter '{}': {}", key_str, e)
+                                format!("Failed to set parameter '{key_str}': {e}")
                             })?;
                         }
                         inst
@@ -138,7 +137,7 @@ impl PythonStrategyAdapter {
                         // Fallback: local CtaTemplate (strategy_name, vt_symbols)
                         strategy_class
                             .call1((strategy_name.clone(), vt_symbols.clone()))
-                            .map_err(|e| format!("Failed to create strategy instance: {}", e))?
+                            .map_err(|e| format!("Failed to create strategy instance: {e}"))?
                     }
                 }
             };
@@ -204,10 +203,10 @@ impl PythonStrategyAdapter {
         py: Python,
         arg_dict: &Bound<PyDict>,
     ) -> Result<Py<PyAny>, String> {
-        let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+        let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         strategy
             .call_method1(py, method_name, (arg_dict,))
-            .map_err(|e| format!("Failed to call '{}': {}", method_name, e))
+            .map_err(|e| format!("Failed to call '{method_name}': {e}"))
     }
 
     /// Call Python method with string argument
@@ -217,19 +216,19 @@ impl PythonStrategyAdapter {
         py: Python,
         arg: &str,
     ) -> Result<Py<PyAny>, String> {
-        let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+        let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         strategy
             .call_method1(py, method_name, (arg,))
-            .map_err(|e| format!("Failed to call '{}': {}", method_name, e))
+            .map_err(|e| format!("Failed to call '{method_name}': {e}"))
     }
 
     /// Call Python method without arguments
     fn call_py_method_no_args(&self, method_name: &str) -> Result<(), String> {
         Python::attach(|py| {
-            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+            let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             strategy
                 .call_method0(py, method_name)
-                .map_err(|e| format!("Failed to call '{}': {}", method_name, e))?;
+                .map_err(|e| format!("Failed to call '{method_name}': {e}"))?;
             Ok(())
         })
     }
@@ -241,10 +240,10 @@ impl PythonStrategyAdapter {
         py: Python,
         arg: Py<PyAny>,
     ) -> Result<Py<PyAny>, String> {
-        let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+        let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         strategy
             .call_method1(py, method_name, (arg,))
-            .map_err(|e| format!("Failed to call '{}': {}", method_name, e))
+            .map_err(|e| format!("Failed to call '{method_name}': {e}"))
     }
 }
 
@@ -268,14 +267,14 @@ impl StrategyTemplate for PythonStrategyAdapter {
     fn parameters(&self) -> HashMap<String, String> {
         self.parameters
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
     fn variables(&self) -> HashMap<String, String> {
         self.variables
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -312,21 +311,21 @@ impl StrategyTemplate for PythonStrategyAdapter {
             warn!("策略 {} on_reset 错误: {}", self.strategy_name, e);
         }
         // Clear internal tracking state
-        self.positions.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        self.variables.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.positions.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        self.variables.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         // Clear pending orders/stop orders
         if let Some(ref queue) = self.pending_orders {
-            queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         }
         if let Some(ref queue) = self.pending_stop_orders {
-            queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         }
         if let Some(ref queue) = self.pending_indicator_registrations {
-            queue.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         }
         // Reset Python strategy's pos_data and state
         Python::attach(|py| {
-            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+            let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             // Clear positions in the Python Strategy object
             let _ = strategy.call_method1(py, "set_pos", ("", 0.0));
             // Reset internal state flags to Inited
@@ -432,7 +431,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
         // Collect the value for GUI propagation (MainWindow polls this)
         self.pending_indicator_values
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(crate::python::PendingIndicatorValue {
                 name: name.to_string(),
                 value,
@@ -440,7 +439,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
 
         // Forward to Python strategy's on_indicator method
         Python::attach(|py| {
-            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+            let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let _ = strategy.call_method1(py, "on_indicator", (name, value));
         });
     }
@@ -458,7 +457,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
         let pending: Vec<PendingOrder> = if let Some(ref queue) = self.pending_orders {
             queue
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .drain(..)
                 .collect()
         } else {
@@ -518,7 +517,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
         let pending: Vec<PendingStopOrder> = if let Some(ref queue) = self.pending_stop_orders {
             queue
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .drain(..)
                 .collect()
         } else {
@@ -571,7 +570,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
         if let Some(ref queue) = self.pending_indicator_registrations {
             queue
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .drain(..)
                 .collect()
         } else {
@@ -582,7 +581,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
     fn drain_pending_indicator_values(&mut self) -> Vec<crate::python::PendingIndicatorValue> {
         self.pending_indicator_values
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .drain(..)
             .collect()
     }
@@ -591,14 +590,14 @@ impl StrategyTemplate for PythonStrategyAdapter {
         // Update our internal tracking
         self.positions
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(vt_symbol.to_string(), position);
 
         // Propagate to the Python Strategy's pos_data so that
         // get_pos() / self.pos (CtaStrategy) return the correct value
         // without needing to call engine.get_pos() (which would deadlock).
         Python::attach(|py| {
-            let strategy = self.py_strategy.lock().unwrap_or_else(|e| e.into_inner());
+            let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let _ = strategy.call_method1(py, "set_pos", (vt_symbol, position));
         });
     }
@@ -606,7 +605,7 @@ impl StrategyTemplate for PythonStrategyAdapter {
     fn get_position(&self, vt_symbol: &str) -> f64 {
         self.positions
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vt_symbol)
             .copied()
             .unwrap_or(0.0)

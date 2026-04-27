@@ -165,15 +165,15 @@ impl ParquetDatabase {
     }
 
     fn order_file_path(&self, gateway_name: &str) -> PathBuf {
-        self.base_dir.join("orders").join(format!("{}.json", gateway_name))
+        self.base_dir.join("orders").join(format!("{gateway_name}.json"))
     }
 
     fn trade_file_path(&self, gateway_name: &str) -> PathBuf {
-        self.base_dir.join("trades").join(format!("{}.json", gateway_name))
+        self.base_dir.join("trades").join(format!("{gateway_name}.json"))
     }
 
     fn position_file_path(&self, gateway_name: &str) -> PathBuf {
-        self.base_dir.join("positions").join(format!("{}.json", gateway_name))
+        self.base_dir.join("positions").join(format!("{gateway_name}.json"))
     }
 
     fn event_file_path(&self) -> PathBuf {
@@ -183,7 +183,7 @@ impl ParquetDatabase {
     fn ensure_parent_dir(path: &Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建目录失败 {:?}: {}", parent, e))?;
+                .map_err(|e| format!("创建目录失败 {parent:?}: {e}"))?;
         }
         Ok(())
     }
@@ -234,7 +234,7 @@ impl ParquetDatabase {
             Column::new("open_interest".into(), open_interests),
             Column::new("gateway_name".into(), gateway_names),
         ])
-        .map_err(|e| format!("创建Bar DataFrame失败: {}", e))
+        .map_err(|e| format!("创建Bar DataFrame失败: {e}"))
     }
 
     #[cfg(feature = "alpha")]
@@ -242,18 +242,18 @@ impl ParquetDatabase {
         let height = df.height();
         if height == 0 { return Ok(Vec::new()); }
 
-        let datetimes = df.column("datetime").map_err(|e| format!("{}", e))?.i64().map_err(|e| format!("{}", e))?;
-        let symbols = df.column("symbol").map_err(|e| format!("{}", e))?.str().map_err(|e| format!("{}", e))?;
-        let exchanges = df.column("exchange").map_err(|e| format!("{}", e))?.str().map_err(|e| format!("{}", e))?;
-        let intervals = df.column("interval").map_err(|e| format!("{}", e))?.str().map_err(|e| format!("{}", e))?;
-        let open_prices = df.column("open_price").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let high_prices = df.column("high_price").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let low_prices = df.column("low_price").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let close_prices = df.column("close_price").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let volumes = df.column("volume").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let turnovers = df.column("turnover").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let open_interests = df.column("open_interest").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let gateway_names = df.column("gateway_name").map_err(|e| format!("{}", e))?.str().map_err(|e| format!("{}", e))?;
+        let datetimes = df.column("datetime").map_err(|e| format!("{e}"))?.i64().map_err(|e| format!("{e}"))?;
+        let symbols = df.column("symbol").map_err(|e| format!("{e}"))?.str().map_err(|e| format!("{e}"))?;
+        let exchanges = df.column("exchange").map_err(|e| format!("{e}"))?.str().map_err(|e| format!("{e}"))?;
+        let intervals = df.column("interval").map_err(|e| format!("{e}"))?.str().map_err(|e| format!("{e}"))?;
+        let open_prices = df.column("open_price").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let high_prices = df.column("high_price").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let low_prices = df.column("low_price").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let close_prices = df.column("close_price").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let volumes = df.column("volume").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let turnovers = df.column("turnover").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let open_interests = df.column("open_interest").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let gateway_names = df.column("gateway_name").map_err(|e| format!("{e}"))?.str().map_err(|e| format!("{e}"))?;
 
         let mut bars = Vec::with_capacity(height);
         for i in 0..height {
@@ -328,7 +328,7 @@ impl ParquetDatabase {
             Column::new("ask_volume_1".into(), ask_volume_1),
             Column::new("gateway_name".into(), gateway_names),
         ])
-        .map_err(|e| format!("创建Tick DataFrame失败: {}", e))
+        .map_err(|e| format!("创建Tick DataFrame失败: {e}"))
     }
 
     #[cfg(feature = "alpha")]
@@ -336,19 +336,19 @@ impl ParquetDatabase {
         let height = df.height();
         if height == 0 { return Ok(Vec::new()); }
 
-        let datetimes = df.column("datetime").map_err(|e| format!("{}", e))?.i64().map_err(|e| format!("{}", e))?;
-        let symbols = df.column("symbol").map_err(|e| format!("{}", e))?.str().map_err(|e| format!("{}", e))?;
-        let exchanges = df.column("exchange").map_err(|e| format!("{}", e))?.str().map_err(|e| format!("{}", e))?;
-        let last_prices = df.column("last_price").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let last_volumes = df.column("last_volume").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let volumes = df.column("volume").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let turnovers = df.column("turnover").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let open_interests = df.column("open_interest").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let bid_prices_1 = df.column("bid_price_1").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let ask_prices_1 = df.column("ask_price_1").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let bid_volumes_1 = df.column("bid_volume_1").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let ask_volumes_1 = df.column("ask_volume_1").map_err(|e| format!("{}", e))?.f64().map_err(|e| format!("{}", e))?;
-        let gateway_names = df.column("gateway_name").map_err(|e| format!("{}", e))?.str().map_err(|e| format!("{}", e))?;
+        let datetimes = df.column("datetime").map_err(|e| format!("{e}"))?.i64().map_err(|e| format!("{e}"))?;
+        let symbols = df.column("symbol").map_err(|e| format!("{e}"))?.str().map_err(|e| format!("{e}"))?;
+        let exchanges = df.column("exchange").map_err(|e| format!("{e}"))?.str().map_err(|e| format!("{e}"))?;
+        let last_prices = df.column("last_price").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let last_volumes = df.column("last_volume").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let volumes = df.column("volume").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let turnovers = df.column("turnover").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let open_interests = df.column("open_interest").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let bid_prices_1 = df.column("bid_price_1").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let ask_prices_1 = df.column("ask_price_1").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let bid_volumes_1 = df.column("bid_volume_1").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let ask_volumes_1 = df.column("ask_volume_1").map_err(|e| format!("{e}"))?.f64().map_err(|e| format!("{e}"))?;
+        let gateway_names = df.column("gateway_name").map_err(|e| format!("{e}"))?.str().map_err(|e| format!("{e}"))?;
 
         let mut ticks = Vec::with_capacity(height);
         for i in 0..height {
@@ -382,17 +382,17 @@ impl ParquetDatabase {
             return Ok(Vec::new());
         }
         let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("读取文件失败 {:?}: {}", path, e))?;
+            .map_err(|e| format!("读取文件失败 {path:?}: {e}"))?;
         serde_json::from_str(&content)
-            .map_err(|e| format!("解析JSON失败 {:?}: {}", path, e))
+            .map_err(|e| format!("解析JSON失败 {path:?}: {e}"))
     }
 
     fn save_json<T: serde::Serialize>(path: &Path, data: &[T]) -> Result<(), String> {
         Self::ensure_parent_dir(path)?;
         let content = serde_json::to_string_pretty(data)
-            .map_err(|e| format!("序列化JSON失败: {}", e))?;
+            .map_err(|e| format!("序列化JSON失败: {e}"))?;
         std::fs::write(path, content)
-            .map_err(|e| format!("写入文件失败 {:?}: {}", path, e))
+            .map_err(|e| format!("写入文件失败 {path:?}: {e}"))
     }
 
     /// Load all JSON files from a directory and merge into a single vector.
@@ -404,17 +404,17 @@ impl ParquetDatabase {
         }
         let mut result = Vec::new();
         let entries = std::fs::read_dir(dir)
-            .map_err(|e| format!("读取目录失败 {:?}: {}", dir, e))?;
+            .map_err(|e| format!("读取目录失败 {dir:?}: {e}"))?;
         for entry in entries {
-            let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
+            let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
             let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("读取文件失败 {:?}: {}", path, e))?;
+                .map_err(|e| format!("读取文件失败 {path:?}: {e}"))?;
             let items: Vec<T> = serde_json::from_str(&content)
-                .map_err(|e| format!("解析JSON失败 {:?}: {}", path, e))?;
+                .map_err(|e| format!("解析JSON失败 {path:?}: {e}"))?;
             result.extend(items);
         }
         Ok(result)
@@ -458,10 +458,10 @@ impl BaseDatabase for ParquetDatabase {
                 // Load existing data and merge (dedup by timestamp)
                 let mut existing_bars = if path.exists() {
                     let file = std::fs::File::open(&path)
-                        .map_err(|e| format!("打开Parquet文件失败: {}", e))?;
+                        .map_err(|e| format!("打开Parquet文件失败: {e}"))?;
                     let df = JsonReader::new(file)
                         .finish()
-                        .map_err(|e| format!("读取Parquet失败: {}", e))?;
+                        .map_err(|e| format!("读取Parquet失败: {e}"))?;
                     Self::dataframe_to_bars(&df)?
                 } else {
                     Vec::new()
@@ -488,10 +488,10 @@ impl BaseDatabase for ParquetDatabase {
                 // Write back
                 let df = Self::bars_to_dataframe(&existing_bars)?;
                 let mut file = std::fs::File::create(&path)
-                    .map_err(|e| format!("创建Parquet文件失败: {}", e))?;
+                    .map_err(|e| format!("创建Parquet文件失败: {e}"))?;
                 JsonWriter::new(&mut file)
                     .finish(&mut df.clone())
-                    .map_err(|e| format!("写入Parquet失败: {}", e))?;
+                    .map_err(|e| format!("写入Parquet失败: {e}"))?;
 
                 tracing::debug!("保存 {} 条Bar数据到 {:?}", new_bars.len(), path);
             }
@@ -520,10 +520,10 @@ impl BaseDatabase for ParquetDatabase {
             }
 
             let file = std::fs::File::open(&path)
-                .map_err(|e| format!("打开Parquet文件失败: {}", e))?;
+                .map_err(|e| format!("打开Parquet文件失败: {e}"))?;
             let df = JsonReader::new(file)
                 .finish()
-                .map_err(|e| format!("读取Parquet失败: {}", e))?;
+                .map_err(|e| format!("读取Parquet失败: {e}"))?;
 
             let mut bars = Self::dataframe_to_bars(&df)?;
 
@@ -558,10 +558,10 @@ impl BaseDatabase for ParquetDatabase {
             #[cfg(feature = "alpha")]
             {
                 let file = std::fs::File::open(&path)
-                    .map_err(|e| format!("打开Parquet文件失败: {}", e))?;
+                    .map_err(|e| format!("打开Parquet文件失败: {e}"))?;
                 let df = JsonReader::new(file)
                     .finish()
-                    .map_err(|e| format!("读取Parquet失败: {}", e))?;
+                    .map_err(|e| format!("读取Parquet失败: {e}"))?;
                 let bars = Self::dataframe_to_bars(&df)?;
                 bars.iter().filter(|b| {
                     b.symbol == symbol
@@ -576,7 +576,7 @@ impl BaseDatabase for ParquetDatabase {
         };
 
         std::fs::remove_file(&path)
-            .map_err(|e| format!("删除文件失败 {:?}: {}", path, e))?;
+            .map_err(|e| format!("删除文件失败 {path:?}: {e}"))?;
 
         Ok(count)
     }
@@ -588,10 +588,10 @@ impl BaseDatabase for ParquetDatabase {
 
         let mut overviews = Vec::new();
         let entries = std::fs::read_dir(&bars_dir)
-            .map_err(|e| format!("读取bars目录失败: {}", e))?;
+            .map_err(|e| format!("读取bars目录失败: {e}"))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
+            let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
             let path = entry.path();
 
             if path.extension().and_then(|e| e.to_str()) != Some("parquet") {
@@ -676,10 +676,10 @@ impl BaseDatabase for ParquetDatabase {
                 // Load existing data and merge (dedup by timestamp)
                 let mut existing_ticks = if path.exists() {
                     let file = std::fs::File::open(&path)
-                        .map_err(|e| format!("打开Parquet文件失败: {}", e))?;
+                        .map_err(|e| format!("打开Parquet文件失败: {e}"))?;
                     let df = JsonReader::new(file)
                         .finish()
-                        .map_err(|e| format!("读取Parquet失败: {}", e))?;
+                        .map_err(|e| format!("读取Parquet失败: {e}"))?;
                     Self::dataframe_to_ticks(&df)?
                 } else {
                     Vec::new()
@@ -704,10 +704,10 @@ impl BaseDatabase for ParquetDatabase {
 
                 let df = Self::ticks_to_dataframe(&existing_ticks)?;
                 let mut file = std::fs::File::create(&path)
-                    .map_err(|e| format!("创建Parquet文件失败: {}", e))?;
+                    .map_err(|e| format!("创建Parquet文件失败: {e}"))?;
                 JsonWriter::new(&mut file)
                     .finish(&mut df.clone())
-                    .map_err(|e| format!("写入Parquet失败: {}", e))?;
+                    .map_err(|e| format!("写入Parquet失败: {e}"))?;
 
                 tracing::debug!("保存 {} 条Tick数据到 {:?}", new_ticks.len(), path);
             }
@@ -735,10 +735,10 @@ impl BaseDatabase for ParquetDatabase {
             }
 
             let file = std::fs::File::open(&path)
-                .map_err(|e| format!("打开Parquet文件失败: {}", e))?;
+                .map_err(|e| format!("打开Parquet文件失败: {e}"))?;
             let df = JsonReader::new(file)
                 .finish()
-                .map_err(|e| format!("读取Parquet失败: {}", e))?;
+                .map_err(|e| format!("读取Parquet失败: {e}"))?;
 
             let mut ticks = Self::dataframe_to_ticks(&df)?;
 
@@ -784,10 +784,10 @@ impl BaseDatabase for ParquetDatabase {
             #[cfg(feature = "alpha")]
             {
                 let file = std::fs::File::open(&path)
-                    .map_err(|e| format!("打开Parquet文件失败: {}", e))?;
+                    .map_err(|e| format!("打开Parquet文件失败: {e}"))?;
                 let df = JsonReader::new(file)
                     .finish()
-                    .map_err(|e| format!("读取Parquet失败: {}", e))?;
+                    .map_err(|e| format!("读取Parquet失败: {e}"))?;
                 let ticks = Self::dataframe_to_ticks(&df)?;
                 ticks.iter().filter(|t| {
                     t.symbol == symbol && t.exchange == exchange
@@ -800,7 +800,7 @@ impl BaseDatabase for ParquetDatabase {
         };
 
         std::fs::remove_file(&path)
-            .map_err(|e| format!("删除文件失败 {:?}: {}", path, e))?;
+            .map_err(|e| format!("删除文件失败 {path:?}: {e}"))?;
 
         Ok(count)
     }
@@ -813,10 +813,10 @@ impl BaseDatabase for ParquetDatabase {
 
         let mut overviews = Vec::new();
         let entries = std::fs::read_dir(&ticks_dir)
-            .map_err(|e| format!("读取ticks目录失败: {}", e))?;
+            .map_err(|e| format!("读取ticks目录失败: {e}"))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
+            let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
             let path = entry.path();
 
             if path.extension().and_then(|e| e.to_str()) != Some("parquet") {
@@ -888,7 +888,7 @@ impl BaseDatabase for ParquetDatabase {
             let path = self.order_file_path(&gw);
             let mut existing: Vec<OrderData> = Self::load_json(&path)?;
             let existing_keys: std::collections::HashSet<String> = existing.iter()
-                .map(|o| o.vt_orderid())
+                .map(super::object::OrderData::vt_orderid)
                 .collect();
             for order in &new_orders {
                 if !existing_keys.contains(&order.vt_orderid()) {
@@ -918,7 +918,7 @@ impl BaseDatabase for ParquetDatabase {
             let path = self.trade_file_path(&gw);
             let mut existing: Vec<TradeData> = Self::load_json(&path)?;
             let existing_keys: std::collections::HashSet<String> = existing.iter()
-                .map(|t| t.vt_tradeid())
+                .map(super::object::TradeData::vt_tradeid)
                 .collect();
             for trade in &new_trades {
                 if !existing_keys.contains(&trade.vt_tradeid()) {

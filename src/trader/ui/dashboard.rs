@@ -805,7 +805,7 @@ impl DashboardPanel {
                             .color(COLOR_TEXT_PRIMARY),
                     );
                     ui.label(
-                        RichText::new(format!("[{}]", level_text))
+                        RichText::new(format!("[{level_text}]"))
                             .size(11.0)
                             .color(level_color)
                             .strong(),
@@ -823,7 +823,7 @@ impl DashboardPanel {
                     );
                     for (symbol, price) in self.risk_status.liquidation_prices.iter().take(2) {
                         ui.label(
-                            RichText::new(format!("  {}: {:.2}", symbol, price))
+                            RichText::new(format!("  {symbol}: {price:.2}"))
                                 .size(10.0)
                                 .color(COLOR_TEXT_SECONDARY),
                         );
@@ -940,7 +940,7 @@ impl DashboardPanel {
 
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new(format!("合计浮动盈亏: {}{:.2}", pnl_sign, total_pnl))
+                        RichText::new(format!("合计浮动盈亏: {pnl_sign}{total_pnl:.2}"))
                             .size(11.0)
                             .color(pnl_color),
                     );
@@ -1211,12 +1211,12 @@ impl DashboardPanel {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new(format!("最高: {:.2}", max_pnl))
+                            RichText::new(format!("最高: {max_pnl:.2}"))
                                 .size(10.0)
                                 .color(COLOR_POSITIVE),
                         );
                         ui.label(
-                            RichText::new(format!("最低: {:.2}", min_pnl))
+                            RichText::new(format!("最低: {min_pnl:.2}"))
                                 .size(10.0)
                                 .color(COLOR_NEGATIVE),
                         );
@@ -1226,7 +1226,7 @@ impl DashboardPanel {
                             COLOR_NEGATIVE
                         };
                         ui.label(
-                            RichText::new(format!("当前: {:.2}", current_pnl))
+                            RichText::new(format!("当前: {current_pnl:.2}"))
                                 .size(10.0)
                                 .color(current_color),
                         );
