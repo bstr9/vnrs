@@ -434,7 +434,7 @@ impl PyAlphaModel {
     ///     self (for method chaining)
     fn fit(&mut self, x: Vec<Vec<f64>>, y: Vec<f64>) -> PyResult<Self> {
         let dataset = build_dataset_from_arrays(&x, &y)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
         // Create the appropriate Rust model
         let mut model: Box<dyn AlphaModel> = match self.model_type {
@@ -502,7 +502,7 @@ impl PyAlphaModel {
         // Build a dummy dataset with zeros as labels for prediction
         let y_dummy = vec![0.0; x.len()];
         let dataset = build_dataset_from_arrays(&x, &y_dummy)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
         // If we have a stored training dataset, predict on the training segment
         // Otherwise predict on the full dataset (test segment)
