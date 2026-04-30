@@ -19,16 +19,18 @@ pub mod futures_template;
 pub mod grid_template;
 pub mod async_template;
 pub mod async_engine;
+pub mod paper_engine;
 
-pub use template::{StrategyTemplate, StrategyContext};
+pub use template::{StrategyTemplate, StrategyContext, TrailingStopConfig, DailyRiskStats};
 #[cfg(feature = "gui")]
 pub use template::IndicatorRef;
 pub use engine::StrategyEngine;
 pub use engine::TimerEntry;
-pub use base::{StrategyType, StrategyState, StrategySetting, StopOrder, StopOrderStatus, StopOrderRequest, CancelRequestType, StrategyRiskConfig};
+pub use base::{StrategyType, StrategyState, StrategySetting, StopOrder, StopOrderStatus, StopOrderRequest, CancelRequestType, StrategyRiskConfig, ExecutionType, TradingMode};
 pub use volatility::VolatilityStrategy;
 pub use futures_template::{FuturesStrategy, OffsetMode};
 pub use grid_template::{GridStrategy, GridLevel, GridStatus};
+pub use paper_engine::{PaperTradingEngine, PaperPosition, PaperOrder};
 
 // Async strategy re-exports
 pub use async_template::{AsyncStrategy, DecisionRecord, SignalType, StrategyError};

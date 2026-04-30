@@ -19,7 +19,7 @@ use super::websocket_client::{BinanceWebSocketClient, WsMessageHandler};
 use crate::trader::{
     AccountData, BarData, CancelRequest, ContractData, DepthData, Direction, Exchange,
     GatewayEventSender, GatewaySettings, GatewaySettingValue,
-    HistoryRequest, Offset, OrderData, OrderRequest, OrderType,
+    HistoryRequest, Interval, Offset, OrderData, OrderRequest, OrderType,
     PositionData, Product, Status, SubscribeRequest, TickData,
     TradeData,
 };
@@ -64,6 +64,8 @@ pub struct BinanceSpotGateway {
     ticks: Arc<RwLock<HashMap<String, TickData>>>,
     /// Cached positions
     positions: Arc<RwLock<HashMap<String, PositionData>>>,
+    /// Kline interval subscriptions keyed by lowercase symbol
+    kline_subscriptions: Arc<RwLock<HashMap<String, Vec<Interval>>>>,
 }
 
 impl BinanceSpotGateway {
@@ -84,6 +86,7 @@ impl BinanceSpotGateway {
             contracts: Arc::new(RwLock::new(HashMap::new())),
             ticks: Arc::new(RwLock::new(HashMap::new())),
             positions: Arc::new(RwLock::new(HashMap::new())),
+            kline_subscriptions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -821,6 +824,34 @@ impl BaseGateway for BinanceSpotGateway {
                             }
                         }
                     }
+                    s if s.starts_with("kline") => {
+                        // Parse kline data — only emit on_bar when kline is closed (k.x == true)
+                        if let Some(k) = data.get("k") {
+                            let is_closed = k["x"].as_bool().unwrap_or(false);
+                            if is_closed {
+                                let interval_str = k["i"].as_str().unwrap_or("1m");
+                                let interval = INTERVAL_BINANCE2VT.get(interval_str).copied().unwrap_or(Interval::Minute);
+                                let bar = BarData {
+                                    gateway_name: gateway_name.clone(),
+                                    symbol: symbol.to_string(),
+                                    exchange: Exchange::Binance,
+                                    datetime: timestamp_to_datetime(k["t"].as_i64().unwrap_or(0)),
+                                    interval: Some(interval),
+                                    volume: k["v"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    turnover: k["q"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    open_interest: 0.0,
+                                    open_price: k["o"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    high_price: k["h"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    low_price: k["l"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    close_price: k["c"].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                                    extra: None,
+                                };
+                                if let Some(sender) = event_sender.read().await.as_ref() {
+                                    sender.on_bar(bar);
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
 
@@ -1181,7 +1212,19 @@ impl BaseGateway for BinanceSpotGateway {
         
         // 检查是否已订阅
         if self.ticks.read().await.contains_key(&symbol) {
-            return Ok(()); // 已订阅
+            // Already subscribed to ticker+depth5, but may need to add kline subscription
+            if let Some(interval) = req.interval {
+                let mut kline_subs = self.kline_subscriptions.write().await;
+                let intervals = kline_subs.entry(symbol.clone()).or_default();
+                if !intervals.contains(&interval) {
+                    intervals.push(interval);
+                    let interval_str = INTERVAL_VT2BINANCE.get(&interval).unwrap_or(&"1m");
+                    let channels = vec![format!("{}@kline_{}", symbol, interval_str)];
+                    self.market_ws.subscribe(channels).await?;
+                    self.write_log(&format!("订阅K线: {symbol} @ {interval_str}")).await;
+                }
+            }
+            return Ok(());
         }
 
         // 检查合约是否在已知列表中
@@ -1197,7 +1240,17 @@ impl BaseGateway for BinanceSpotGateway {
         self.ticks.write().await.insert(symbol.clone(), tick);
 
         // 订阅 ticker 和 depth5 数据流
-        let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
+        let mut channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
+
+        // 订阅 kline 数据流（如果指定了 interval）
+        if let Some(interval) = req.interval {
+            let interval_str = INTERVAL_VT2BINANCE.get(&interval).unwrap_or(&"1m");
+            channels.push(format!("{}@kline_{}", symbol, interval_str));
+            let mut kline_subs = self.kline_subscriptions.write().await;
+            kline_subs.entry(symbol.clone()).or_default().push(interval);
+            self.write_log(&format!("订阅K线: {symbol} @ {interval_str}")).await;
+        }
+
         self.market_ws.subscribe(channels).await?;
         self.write_log(&format!("订阅行情: {symbol}")).await;
         Ok(())
@@ -1212,7 +1265,17 @@ impl BaseGateway for BinanceSpotGateway {
         }
 
         // Unsubscribe from WebSocket streams
-        let channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
+        let mut channels = vec![format!("{}@ticker", symbol), format!("{}@depth5@100ms", symbol)];
+
+        // Unsubscribe from kline streams
+        let mut kline_subs = self.kline_subscriptions.write().await;
+        if let Some(intervals) = kline_subs.remove(&symbol) {
+            for interval in intervals {
+                let interval_str = INTERVAL_VT2BINANCE.get(&interval).unwrap_or(&"1m");
+                channels.push(format!("{}@kline_{}", symbol, interval_str));
+            }
+        }
+
         self.market_ws.unsubscribe(channels).await?;
         self.write_log(&format!("退订行情: {symbol}")).await;
         Ok(())

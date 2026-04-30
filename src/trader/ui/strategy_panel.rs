@@ -7,6 +7,7 @@ use egui::{Color32, RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use super::widget::SortState;
+use super::workflow_state::StrategyDeployConfig;
 
 /// A single strategy row for display
 #[derive(Clone)]
@@ -50,6 +51,8 @@ pub struct StrategyPanel {
     pending_start: Option<String>,
     pending_stop: Option<String>,
     pending_remove: Option<String>,
+    /// Deploy config from workflow (backtest → deploy)
+    deploy_config: Option<StrategyDeployConfig>,
 }
 
 impl Default for StrategyPanel {
@@ -68,6 +71,7 @@ impl StrategyPanel {
             pending_start: None,
             pending_stop: None,
             pending_remove: None,
+            deploy_config: None,
         }
     }
 
@@ -101,6 +105,16 @@ impl StrategyPanel {
         self.selected = None;
     }
 
+    /// Set deploy config from workflow (backtest → deploy)
+    pub fn set_deploy_config(&mut self, config: StrategyDeployConfig) {
+        self.deploy_config = Some(config);
+    }
+
+    /// Take and clear the deploy config
+    pub fn take_deploy_config(&mut self) -> Option<StrategyDeployConfig> {
+        self.deploy_config.take()
+    }
+
     /// Sort strategy rows based on current sort state
     fn sort_rows(&self, rows: &mut Vec<&StrategyRow>) {
         let col = match self.sort.column {
@@ -122,6 +136,44 @@ impl StrategyPanel {
 
     /// Render the strategy panel
     pub fn show(&mut self, ui: &mut Ui) {
+        // Show deploy config banner if present
+        if self.deploy_config.is_some() {
+            // Extract config info for display before the closure
+            let config_info = self.deploy_config.as_ref().map(|c| (
+                c.strategy_name.clone(),
+                c.strategy_class.clone(),
+                c.vt_symbol.clone(),
+                c.mode.to_string(),
+                c.capital,
+                c.rate,
+                c.slippage,
+            ));
+            
+            if let Some((name, class, symbol, mode, capital, rate, slippage)) = config_info {
+                egui::Frame::group(ui.style())
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 150, 255)))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("🚀 策略部署配置").color(egui::Color32::from_rgb(80, 150, 255)).strong());
+                        });
+                        ui.label(format!("策略: {} ({})", name, class));
+                        ui.label(format!("品种: {} | 模式: {}", symbol, mode));
+                        ui.label(format!("资金: {:.0} | 手续费: {:.4} | 滑点: {:.4}", capital, rate, slippage));
+                        ui.horizontal(|ui| {
+                            if ui.button("初始化策略").clicked() {
+                                // Select the strategy if it matches
+                                self.selected = Some(name.clone());
+                                self.pending_init = Some(name.clone());
+                            }
+                            if ui.button("清除配置").clicked() {
+                                self.deploy_config = None;
+                            }
+                        });
+                    });
+                ui.separator();
+            }
+        }
+        
         let available_height = ui.available_height();
         let selection_bg = ui.visuals().selection.bg_fill;
 

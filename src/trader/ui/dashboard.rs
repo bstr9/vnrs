@@ -1146,6 +1146,9 @@ impl DashboardPanel {
                     .filter(|p| cutoff.is_none_or(|c| p.time >= c))
                     .collect();
 
+                // Max drawdown (computed for both drawing and stats display)
+                let mut max_dd = 0.0_f64;
+
                 if filtered_curve.len() >= 2 {
                     // Find min/max for scaling
                     let min_pnl = filtered_curve
@@ -1157,6 +1160,23 @@ impl DashboardPanel {
                         .map(|p| p.cumulative_pnl)
                         .fold(f64::NEG_INFINITY, f64::max);
                     let range = (max_pnl - min_pnl).max(1.0);
+
+                    // Compute max drawdown: find the largest peak-to-trough decline
+                    let mut dd_peak = f64::NEG_INFINITY;
+                    let mut dd_peak_idx = 0_usize;
+                    let mut dd_trough_idx = 0_usize;
+
+                    for (i, p) in filtered_curve.iter().enumerate() {
+                        if p.cumulative_pnl > dd_peak {
+                            dd_peak = p.cumulative_pnl;
+                            dd_peak_idx = i;
+                        }
+                        let dd = dd_peak - p.cumulative_pnl;
+                        if dd > max_dd {
+                            max_dd = dd;
+                            dd_trough_idx = i;
+                        }
+                    }
 
                     // Build points
                     let points: Vec<Pos2> = filtered_curve
@@ -1186,6 +1206,68 @@ impl DashboardPanel {
                     // Draw line
                     if points.len() >= 2 {
                         painter.add(egui::Shape::line(points, Stroke::new(1.5, curve_color)));
+                    }
+
+                    // Draw max drawdown shaded area and annotation
+                    if max_dd > 0.0 && dd_peak_idx < dd_trough_idx {
+                        let n = filtered_curve.len().max(1);
+                        let peak_x = curve_rect.left()
+                            + (dd_peak_idx as f32 / (n - 1).max(1) as f32) * curve_rect.width();
+                        let peak_y = curve_rect.bottom()
+                            - (((dd_peak - min_pnl) / range) as f32 * curve_rect.height());
+
+                        // Build polygon: curve from peak_idx to trough_idx, then close along peak level
+                        let mut polygon_points = Vec::new();
+                        for (i, point) in filtered_curve.iter().enumerate().take(dd_trough_idx + 1).skip(dd_peak_idx) {
+                            let x = curve_rect.left()
+                                + (i as f32 / (n - 1).max(1) as f32) * curve_rect.width();
+                            let normalized = (point.cumulative_pnl - min_pnl) / range;
+                            let y = curve_rect.bottom() - (normalized as f32 * curve_rect.height());
+                            polygon_points.push(Pos2::new(x, y));
+                        }
+                        let trough_x = curve_rect.left()
+                            + (dd_trough_idx as f32 / (n - 1).max(1) as f32) * curve_rect.width();
+                        polygon_points.push(Pos2::new(trough_x, peak_y));
+                        polygon_points.push(Pos2::new(peak_x, peak_y));
+
+                        // Draw filled polygon with semi-transparent red
+                        painter.add(egui::Shape::convex_polygon(
+                            polygon_points,
+                            Color32::from_rgba_unmultiplied(231, 76, 60, 35),
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(231, 76, 60, 70)),
+                        ));
+
+                        // Trough marker and label
+                        let tp = &filtered_curve[dd_trough_idx];
+                        let trough_x = curve_rect.left()
+                            + (dd_trough_idx as f32 / (n - 1).max(1) as f32) * curve_rect.width();
+                        let normalized = (tp.cumulative_pnl - min_pnl) / range;
+                        let trough_y =
+                            curve_rect.bottom() - (normalized as f32 * curve_rect.height());
+
+                        painter.circle_filled(
+                            Pos2::new(trough_x, trough_y),
+                            3.0,
+                            Color32::from_rgb(231, 76, 60),
+                        );
+
+                        let dd_pct = if dd_peak > 0.0 {
+                            max_dd / dd_peak * 100.0
+                        } else {
+                            0.0
+                        };
+                        let dd_label = if dd_peak > 0.0 {
+                            format!("↓ {:.1}%", dd_pct)
+                        } else {
+                            format!("↓ {:.2}", max_dd)
+                        };
+                        painter.text(
+                            Pos2::new(trough_x, trough_y + 14.0),
+                            egui::Align2::CENTER_TOP,
+                            dd_label,
+                            egui::FontId::proportional(10.0),
+                            Color32::from_rgb(231, 100, 100),
+                        );
                     }
                 } else {
                     // No data message
@@ -1235,6 +1317,13 @@ impl DashboardPanel {
                                 .size(10.0)
                                 .color(current_color),
                         );
+                        if max_dd > 0.0 {
+                            ui.label(
+                                RichText::new(format!("最大回撤: {max_dd:.2}"))
+                                    .size(10.0)
+                                    .color(COLOR_NEGATIVE),
+                            );
+                        }
                     });
                 }
             });

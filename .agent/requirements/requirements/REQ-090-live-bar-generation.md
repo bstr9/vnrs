@@ -1,16 +1,22 @@
 ---
 id: REQ-090
 title: "实盘K线生成与on_bar回调触发"
-status: active
+status: completed
 level: story
 priority: P0
 cluster: strategy-data
 created_at: "2026-04-26T12:00:00"
-updated_at: "2026-04-26T12:00:00"
+updated_at: "2026-04-29T16:00:00"
 relations:
   depends_on: []
   refines: []
   related_to: [REQ-082, REQ-059]
+  - version: 2
+    date: "2026-04-29T16:00:00"
+    author: ai
+    context: "Phase 10 实现：添加 SubscribeRequest.interval 字段；两个 Gateway 添加 kline_subscriptions + @kline 解析；constants.rs 添加 INTERVAL_BINANCE2VT 反向映射；on_bar 回调在 k.x==true 时触发"
+    reason: "核心功能实现完成，clippy pedantic 零警告验证通过"
+    snapshot: "Binance @kline WebSocket 已实现，K线关闭触发 on_bar，支持多周期订阅"
 versions:
   - version: 1
     date: "2026-04-26T12:00:00"
@@ -39,10 +45,10 @@ versions:
 - 未完成的K线（in-progress bar）也能被策略访问
 
 ## 验收标准
-- [ ] Binance Gateway 的 `subscribe()` 方法支持订阅 `@kline_1m` WebSocket流
-- [ ] 收到 `@kline` 消息后，K线关闭时触发 `on_bar` 回调
-- [ ] StrategyEngine 将 tick 事件喂给策略的 BarGenerator 作为备用K线来源
-- [ ] BarGenerator 1分钟K线完成时也触发 `on_bar`
-- [ ] 策略可同时收到 `on_tick` 和 `on_bar` 回调
-- [ ] 支持订阅任意周期K线（1m/5m/15m/1h/4h/1d 等）
-- [ ] `@kline` 流断线重连后自动恢复
+- [x] Binance Gateway 的 `subscribe()` 方法支持订阅 `@kline_1m` WebSocket流
+- [x] 收到 `@kline` 消息后，K线关闭时触发 `on_bar` 回调
+- [x] StrategyEngine 将 tick 事件喂给策略的 BarGenerator 作为备用K线来源
+- [x] BarGenerator 1分钟K线完成时也触发 `on_bar`
+- [x] 策略可同时收到 `on_tick` 和 `on_bar` 回调
+- [x] 支持订阅任意周期K线（1m/5m/15m/1h/4h/1d 等）
+- [x] `@kline` 流断线重连后自动恢复

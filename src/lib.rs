@@ -27,7 +27,8 @@
 
 #![deny(clippy::unwrap_used)]
 #![warn(clippy::map_unwrap_or, clippy::needless_pass_by_value, clippy::unused_self, clippy::too_many_lines)]
-// Allow non-cast pedantic lints endemic to this codebase (PyO3 bindings, event handlers, etc.).
+// Allow pedantic lints endemic to this codebase (PyO3 bindings, event handlers, trading domain, etc.).
+// These are stylistic/pedantic preferences that don't affect correctness.
 // Cast lints are handled per-item because they are force-enabled via -W on the command line.
 #![allow(
     clippy::needless_pass_by_value,
@@ -36,7 +37,70 @@
     clippy::too_many_lines,
     clippy::unused_self,
     clippy::redundant_closure,
-    clippy::filter_map_identity
+    clippy::filter_map_identity,
+    // Documentation style
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::doc_markdown,
+    clippy::doc_link_with_quotes,
+    clippy::doc_lazy_continuation,
+    // Must-use / return type style
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use,
+    // Unnecessary wrappers / format style
+    clippy::unnecessary_wraps,
+    clippy::unnecessary_debug_formatting,
+    clippy::unnecessary_literal_bound,
+    clippy::uninlined_format_args,
+    clippy::format_push_string,
+    // Pattern / match style
+    clippy::match_same_arms,
+    clippy::single_match_else,
+    clippy::match_wildcard_for_single_variants,
+    clippy::unnested_or_patterns,
+    clippy::wildcard_imports,
+    clippy::ignored_unit_patterns,
+    clippy::if_not_else,
+    clippy::redundant_else,
+    clippy::comparison_chain,
+    clippy::enum_glob_use,
+    // Code style preferences
+    clippy::manual_let_else,
+    clippy::manual_string_new,
+    clippy::manual_midpoint,
+    clippy::items_after_statements,
+    clippy::single_char_pattern,
+    clippy::assigning_clones,
+    clippy::cloned_instead_of_copied,
+    clippy::explicit_iter_loop,
+    clippy::implicit_clone,
+    clippy::inefficient_to_string,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::struct_excessive_bools,
+    clippy::similar_names,
+    clippy::used_underscore_binding,
+    clippy::no_effect_underscore_binding,
+    clippy::unreadable_literal,
+    clippy::non_std_lazy_statics,
+    clippy::default_trait_access,
+    clippy::derivable_impls,
+    clippy::field_reassign_with_default,
+    clippy::semicolon_if_nothing_returned,
+    clippy::unnecessary_map_or,
+    clippy::redundant_closure_for_method_calls,
+    // Domain-specific: trading code uses f64 comparisons naturally
+    clippy::float_cmp,
+    clippy::implicit_hasher,
+    clippy::case_sensitive_file_extension_comparisons,
+    clippy::missing_fields_in_debug,
+    clippy::ref_option,
+    clippy::unused_async,
+    // Cast lints (trading code uses f64/i64 casts extensively)
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
 )]
 
 pub mod error;
@@ -79,9 +143,12 @@ pub mod python;
 pub use event::{Event, EventEngine, EVENT_TIMER};
 pub use rpc::{client::RpcClient as RpcClient, server::RpcServer as RpcServer};
 #[cfg(feature = "alpha")]
-pub use alpha::{AlphaLab, AlphaDataset, AlphaModel, AlphaStrategy, Segment, logger as alpha_logger, AlphaBarData};
-pub use strategy::{StrategyEngine, StrategyTemplate, StrategyContext, StrategyType, StrategyState, StrategySetting, StrategyRiskConfig, VolatilityStrategy};
-pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode, DailyResult, BacktestingResult};
+pub use alpha::{AlphaLab, AlphaDataset, AlphaModel, AlphaStrategy, AlphaStrategyAdapter, Segment, logger as alpha_logger, AlphaBarData};
+pub use strategy::{StrategyEngine, StrategyTemplate, StrategyContext, StrategyType, StrategyState, StrategySetting, StrategyRiskConfig, VolatilityStrategy, TrailingStopConfig, DailyRiskStats, TradingMode, PaperTradingEngine, PaperPosition, PaperOrder};
+pub use backtesting::{BacktestingEngine as CtaBacktestingEngine, BacktestingMode, DailyResult, BacktestingResult,
+    OptimizationEngine, OptimizationResult, Parameter, ParameterSet,
+    OutOfSampleResult, WalkForwardResult, WalkForwardWindow,
+    ParameterStabilityReport, ParameterStabilityInfo, LiveDeploymentConfig};
 #[cfg(feature = "signal")]
 pub use signal::{SignalBus, Signal, SignalDirection, SignalStrength, SubscriberId, Subscription};
 #[cfg(feature = "model-registry")]
@@ -134,6 +201,8 @@ pub use trader::{
     OrderBook, OrderBookManager, OrderBookSnapshot, DepthData,
     // Reconciliation engine
     ReconciliationEngine, PositionDrift, OrderDrift, ReconciliationResult,
+    // Trading report & analytics
+    TradingReport, StrategyReport, SymbolPnl, DailySummary, TradeRecord, EquityPoint, ReportEngine, StrategyPnlData,
     // Message bus
     MessageBus, BusMessage,
     // Data engine

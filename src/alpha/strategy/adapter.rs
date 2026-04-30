@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use crate::alpha::strategy::template::AlphaStrategy;
 use crate::strategy::base::{CancelRequestType, StrategySetting, StrategyState, StrategyType, StopOrderRequest};
-use crate::strategy::template::{BaseStrategy, StrategyContext, StrategyTemplate};
-use crate::trader::{BarData, DepthData, OrderData, OrderRequest, TickData, TradeData};
+use crate::strategy::template::{BaseStrategy, StrategyContext, StrategyTemplate, TrailingStopConfig};
+use crate::trader::{BarData, DepthData, Direction, OrderData, OrderRequest, TickData, TradeData};
 
 /// Adapter that wraps an [`AlphaStrategy`] and implements [`StrategyTemplate`].
 ///
@@ -229,11 +229,38 @@ impl StrategyTemplate for AlphaStrategyAdapter {
         self.inner.set_target(vt_symbol, target);
     }
 
-    fn set_engine_type(&mut self, engine_type: &str) {
-        self.base.set_engine_type(engine_type);
+    fn on_risk_alert(&mut self, reason: &str) {
+        self.base.write_log(&format!("风险警报: {}", reason));
     }
 
-    fn set_parameters(&mut self, params: HashMap<String, String>) {
+    fn set_optimized_parameters(&mut self, parameters: &std::collections::HashMap<String, f64>) {
+        self.base.write_log(&format!("应用优化参数: {}项", parameters.len()));
+    }
+
+    fn reset_daily_risk_stats(&mut self) {
+        self.base.reset_daily_risk_stats();
+    }
+
+    fn get_trailing_stop(&self, vt_symbol: &str) -> Option<TrailingStopConfig> {
+        self.base.get_trailing_stop(vt_symbol)
+    }
+
+    fn cancel_trailing_stop(&mut self, vt_symbol: &str) {
+        self.base.cancel_trailing_stop(vt_symbol);
+    }
+
+    fn set_trailing_stop(
+        &mut self,
+        vt_symbol: &str,
+        direction: Direction,
+        activation_price: f64,
+        trailing_distance: f64,
+        is_percentage: bool,
+    ) {
+        self.base.set_trailing_stop(vt_symbol, direction, activation_price, trailing_distance, is_percentage);
+    }
+
+    fn set_parameters(&mut self, params: &HashMap<String, f64>) {
         self.base.set_parameters(params);
     }
 }
@@ -423,11 +450,4 @@ mod tests {
         assert_eq!(adapter.vt_symbols(), &["BTCUSDT.BINANCE".to_string()]);
     }
 
-    #[test]
-    fn test_alpha_strategy_adapter_set_engine_type() {
-        let alpha = create_test_alpha_strategy();
-        let mut adapter = AlphaStrategyAdapter::new(alpha);
-        adapter.set_engine_type("BACKTESTING");
-        assert_eq!(adapter.base.get_engine_type(), "BACKTESTING");
-    }
 }

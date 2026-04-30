@@ -212,6 +212,21 @@ pub static INTERVAL_VT2BINANCE: Lazy<HashMap<Interval, &'static str>> = Lazy::ne
     m
 });
 
+/// Map Binance interval string back to VT Interval (reverse of INTERVAL_VT2BINANCE)
+pub static INTERVAL_BINANCE2VT: Lazy<HashMap<&'static str, Interval>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    m.insert("1s", Interval::Second);
+    m.insert("1m", Interval::Minute);
+    m.insert("5m", Interval::Minute5);
+    m.insert("15m", Interval::Minute15);
+    m.insert("30m", Interval::Minute30);
+    m.insert("1h", Interval::Hour);
+    m.insert("4h", Interval::Hour4);
+    m.insert("1d", Interval::Daily);
+    m.insert("1w", Interval::Weekly);
+    m
+});
+
 /// Get interval duration in seconds
 pub fn get_interval_seconds(interval: Interval) -> i64 {
     match interval {

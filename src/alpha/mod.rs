@@ -16,5 +16,5 @@ pub use logger::AlphaLogger;
 pub use model::{
     AlphaModel, EnsembleModel, GradientBoostingModel, LinearRegressionModel, RandomForestModel,
 };
-pub use strategy::{AlphaStrategy, BacktestingEngine};
+pub use strategy::{AlphaStrategy, AlphaStrategyAdapter};
 pub use types::AlphaBarData;

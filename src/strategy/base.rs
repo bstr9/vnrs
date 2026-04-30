@@ -6,6 +6,23 @@ use crate::trader::{Direction, Offset, OrderType};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Trading mode for strategy execution
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradingMode {
+    /// Backtesting mode — uses historical data, BacktestingEngine provides data directly
+    Backtest,
+    /// Paper trading mode — intercepts orders, does local fill matching against live market data
+    Paper,
+    /// Live trading mode — orders sent to exchange via MainEngine
+    Live,
+}
+
+impl Default for TradingMode {
+    fn default() -> Self {
+        TradingMode::Live
+    }
+}
+
 /// Strategy type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StrategyType {
@@ -240,6 +257,21 @@ impl StopOrderRequest {
             limit_price: None,
             lock,
         }
+    }
+}
+
+/// How to execute rebalance orders
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExecutionType {
+    /// Market order — immediate execution at market price
+    Market,
+    /// Limit order — use bid price for sells, ask price for buys
+    Limit,
+}
+
+impl Default for ExecutionType {
+    fn default() -> Self {
+        ExecutionType::Market
     }
 }
 

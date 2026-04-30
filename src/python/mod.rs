@@ -46,6 +46,8 @@ pub mod context;
 pub mod instrument;
 #[cfg(all(feature = "python", feature = "alpha"))]
 pub mod alpha_bindings;
+#[cfg(feature = "python")]
+pub mod optimization_bindings;
 
 #[cfg(feature = "python")]
 pub use strategy::{Strategy, PendingOrder, PendingStopOrder, PendingIndicatorRegistration, PendingIndicatorValue};

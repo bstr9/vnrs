@@ -8,7 +8,8 @@
 use egui::{RichText, Ui, Color32};
 use std::sync::{Arc, RwLock};
 
-use super::style::{COLOR_TEXT_SECONDARY};
+use super::style::COLOR_TEXT_SECONDARY;
+use super::workflow_state::{SharedWorkflowState, WorkflowAction};
 
 use crate::alpha::AlphaLab;
 use crate::alpha::AlphaModel;
@@ -17,7 +18,7 @@ use crate::alpha::Segment;
 use crate::alpha::model::{
     LinearRegressionModel, RandomForestModel, GradientBoostingModel,
 };
-use crate::alpha::BacktestingEngine;
+use crate::alpha::strategy::backtesting::BacktestingEngine;
 
 // ---------------------------------------------------------------------------
 // Model types
@@ -202,6 +203,10 @@ pub struct AlphaPanel {
     saved_models: Vec<String>,
     /// Index of selected saved model in `ComboBox`
     selected_saved_model_idx: usize,
+    /// Shared workflow state for cross-panel coordination
+    workflow_state: Option<SharedWorkflowState>,
+    /// Error flag set when training/analysis fails (consumed by MainWindow for toast)
+    error_flag: Option<String>,
 }
 
 impl AlphaPanel {
@@ -234,7 +239,19 @@ impl AlphaPanel {
             model_name: String::new(),
             saved_models: Vec::new(),
             selected_saved_model_idx: 0,
+            workflow_state: None,
+            error_flag: None,
         }
+    }
+
+    /// Set the shared workflow state for cross-panel coordination
+    pub fn set_workflow_state(&mut self, state: SharedWorkflowState) {
+        self.workflow_state = Some(state);
+    }
+
+    /// Take and return any pending error message (for toast notification)
+    pub fn take_error(&mut self) -> Option<String> {
+        self.error_flag.take()
     }
 
     /// Set the `AlphaLab` engine reference
@@ -689,6 +706,17 @@ impl AlphaPanel {
             if ui.button("回测Alpha信号").clicked() {
                 self.backtest_alpha_signal();
             }
+
+            // Send to backtesting panel for further verification
+            let has_backtest = !self.portfolio_state.backtest_status.is_empty()
+                && self.train_result.trained
+                && !self.model_name.is_empty();
+            if ui
+                .add_enabled(has_backtest, egui::Button::new("📤 发送到回测"))
+                .clicked()
+            {
+                self.send_to_backtest();
+            }
         });
 
         if !self.portfolio_state.backtest_status.is_empty() {
@@ -789,6 +817,7 @@ impl AlphaPanel {
                 };
                 self.training = false;
                 self.status_message = "训练失败: AlphaLab 引擎未连接".to_string();
+                self.error_flag = Some("训练失败: AlphaLab 引擎未连接".to_string());
                 return;
             }
         };
@@ -805,6 +834,7 @@ impl AlphaPanel {
             };
             self.training = false;
             self.status_message = "训练失败: 未选择数据集".to_string();
+            self.error_flag = Some("训练失败: 未选择数据集".to_string());
             return;
         } else {
             self.dataset_name.clone()
@@ -825,6 +855,7 @@ impl AlphaPanel {
                 };
                 self.training = false;
                 self.status_message = format!("训练失败: 无法获取 AlphaLab 读锁 — {e}");
+                self.error_flag = Some(format!("训练失败: 无法获取 AlphaLab 读锁 — {e}"));
                 return;
             }
         };
@@ -843,6 +874,7 @@ impl AlphaPanel {
                 };
                 self.training = false;
                 self.status_message = format!("训练失败: 数据集 '{}' 不存在", dataset_name);
+                self.error_flag = Some(format!("训练失败: 数据集 '{}' 不存在", dataset_name));
                 return;
             }
         };
@@ -900,6 +932,7 @@ impl AlphaPanel {
                     };
                     self.training = false;
                     self.status_message = format!("{model_name} 模型训练完成 (无法保存)");
+                    self.error_flag = Some(format!("训练完成但无法保存: 无法获取 AlphaLab 写锁 — {e}"));
                     return;
                 }
             };
@@ -1544,6 +1577,39 @@ impl AlphaPanel {
             None => {
                 self.status_message = format!("加载失败: 模型 '{}' 不存在", model_name);
             }
+        }
+    }
+
+    /// Send the current alpha model/dataset to the backtesting panel via workflow state
+    fn send_to_backtest(&mut self) {
+        let Some(ref ws) = self.workflow_state else {
+            self.status_message = "无法发送到回测: 工作流状态未连接".to_string();
+            return;
+        };
+
+        let model_name = if self.model_name.is_empty() {
+            self.train_result.model_name.clone()
+        } else {
+            self.model_name.clone()
+        };
+
+        let vt_symbol = if self.dataset_name.is_empty() {
+            "BTCUSDT.BINANCE".to_string()
+        } else {
+            format!("{}.BINANCE", self.dataset_name)
+        };
+
+        let action = WorkflowAction::SendToBacktest {
+            model_name,
+            dataset_name: self.dataset_name.clone(),
+            vt_symbol,
+        };
+
+        if let Ok(mut ws_guard) = ws.lock() {
+            ws_guard.push_action(action);
+            self.status_message = "已发送到回测面板".to_string();
+        } else {
+            self.status_message = "无法发送到回测: 工作流状态锁定失败".to_string();
         }
     }
 

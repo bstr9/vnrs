@@ -143,7 +143,7 @@ impl PythonEngine {
                     .map(|(_, e)| e)
                     .unwrap_or(Exchange::Binance);
                 let symbol = vt_symbol.split('.').next().unwrap_or(vt_symbol).to_string();
-                let req = SubscribeRequest { symbol, exchange };
+                let req = SubscribeRequest { symbol, exchange, interval: None };
                 if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
                     let engine = self.main_engine.clone();
                     let gw = gw_name.clone();

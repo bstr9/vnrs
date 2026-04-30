@@ -1,7 +1,7 @@
 ---
 id: REQ-080
 title: "优化模块整合与Python绑定完善"
-status: active
+status: completed
 level: story
 priority: P1
 cluster: strategy-unification
@@ -37,8 +37,8 @@ versions:
 3. 添加优化结果 → 策略参数应用的桥接方法
 
 ## 验收标准
-- [ ] trader/optimize.rs 被标记为 deprecated 或删除
-- [ ] OptimizationEngine 有 Python API
-- [ ] 优化结果可转换为 StrategySetting
-- [ ] 优化示例（Rust + Python）
-- [ ] cargo check/clippy/test 零错误零警告
+- [x] trader/optimize.rs 被标记为 deprecated 或删除
+- [x] OptimizationEngine 有 Python API
+- [x] 优化结果可转换为 StrategySetting
+- [x] 优化示例（Rust + Python）
+- [x] cargo check/clippy/test 零错误零警告

@@ -16,6 +16,7 @@ pub mod bracket_panel;
 pub mod indicator_panel;
 pub mod advanced_orders_panel;
 pub mod rpc_panel;
+pub mod workflow_state;
 #[cfg(feature = "alpha")]
 pub mod alpha_panel;
 
@@ -32,5 +33,9 @@ pub use bracket_panel::BracketOrderPanel;
 pub use indicator_panel::IndicatorPanel;
 pub use advanced_orders_panel::AdvancedOrdersPanel;
 pub use rpc_panel::RpcPanel;
+pub use workflow_state::{
+    WorkflowState, SharedWorkflowState, WorkflowAction,
+    BacktestSummary, StrategyDeployConfig, DeployMode,
+};
 #[cfg(feature = "alpha")]
 pub use alpha_panel::AlphaPanel;

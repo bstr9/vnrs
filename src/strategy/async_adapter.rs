@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use super::async_template::{AsyncStrategy, DecisionRecord};
 use super::base::{CancelRequestType, StopOrderRequest, StrategySetting, StrategyState, StrategyType};
-use super::template::{BaseStrategy, StrategyContext, StrategyTemplate};
+use super::template::{BaseStrategy, StrategyContext, StrategyTemplate, TrailingStopConfig};
 use crate::trader::{
     Direction, OrderData, OrderRequest, TickData, TradeData,
 };
@@ -177,12 +177,47 @@ impl StrategyTemplate for AsyncStrategyAdapter {
             .unwrap_or(0.0)
     }
 
-    fn set_engine_type(&mut self, engine_type: &str) {
-        self.base.set_engine_type(engine_type);
+    fn update_pnl_fields(&mut self, vt_symbol: &str, avg_entry: f64, unrealized: f64, realized: f64, total_realized: f64) {
+        self.base.write_pnl_fields(vt_symbol, avg_entry, unrealized, realized, total_realized);
+    }
+
+    fn on_risk_alert(&mut self, reason: &str) {
+        self.base.write_log(&format!("风险警报: {}", reason));
+    }
+
+    fn reset_daily_risk_stats(&mut self) {
+        self.base.reset_daily_risk_stats();
+    }
+
+    fn get_trailing_stop(&self, vt_symbol: &str) -> Option<TrailingStopConfig> {
+        self.base.get_trailing_stop(vt_symbol)
+    }
+
+    fn cancel_trailing_stop(&mut self, vt_symbol: &str) {
+        self.base.cancel_trailing_stop(vt_symbol);
+    }
+
+    fn set_trailing_stop(
+        &mut self,
+        vt_symbol: &str,
+        direction: Direction,
+        activation_price: f64,
+        trailing_distance: f64,
+        is_percentage: bool,
+    ) {
+        self.base.set_trailing_stop(vt_symbol, direction, activation_price, trailing_distance, is_percentage);
+    }
+
+    fn set_engine_type(&mut self, _engine_type: &str) {
+        // No-op: BaseStrategy does not track engine type internally
     }
 
     fn set_parameters(&mut self, params: HashMap<String, String>) {
-        self.base.set_parameters(params);
+        self.base.set_parameters_from_strings(params);
+    }
+
+    fn set_optimized_parameters(&mut self, parameters: &std::collections::HashMap<String, f64>) {
+        self.base.set_parameters(parameters);
     }
 }
 

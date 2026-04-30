@@ -396,6 +396,31 @@ impl BacktestingEngine {
         ).with_size_multiplier(size);
     }
 
+    /// Generate a [`LiveDeploymentConfig`] from this engine's current settings.
+    ///
+    /// This captures the backtest configuration (symbol, interval, capital, costs, etc.)
+    /// so the same strategy can be deployed to paper or live trading without
+    /// manually re-entering all parameters. Optimal parameters from optimization
+    /// can be attached separately via [`LiveDeploymentConfig::with_parameters`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `vt_symbol` has not been set (empty string).
+    pub fn to_live_config(&self) -> super::base::LiveDeploymentConfig {
+        assert!(!self.vt_symbol.is_empty(), "vt_symbol not set — call set_parameters first");
+        super::base::LiveDeploymentConfig::new(
+            self.strategy.as_ref().map_or_else(|| "Unknown".to_string(), |s| s.strategy_name().to_string()),
+            self.vt_symbol.clone(),
+            self.exchange,
+            self.interval,
+            self.capital,
+        )
+        .with_rate(self.rate)
+        .with_slippage(self.slippage)
+        .with_size(self.size)
+        .with_pricetick(self.pricetick)
+    }
+
     /// Set fill model for order fill simulation
     pub fn set_fill_model(&mut self, model: Box<dyn FillModel>) {
         self.fill_model = model;

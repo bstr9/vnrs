@@ -17,10 +17,10 @@ pub mod simulated_exchange;
 pub mod data_merge;
 
 pub use engine::BacktestingEngine;
-pub use base::{BacktestingMode, DailyResult, BacktestingResult, BacktestingStatistics};
+pub use base::{BacktestingMode, DailyResult, BacktestingResult, BacktestingStatistics, LiveDeploymentConfig};
 pub use statistics::calculate_statistics;
 pub use database::DatabaseLoader;
-pub use optimization::{OptimizationEngine, OptimizationSettings, OptimizationTarget, Parameter, OptimizationResult};
+pub use optimization::{OptimizationEngine, OptimizationSettings, OptimizationTarget, Parameter, ParameterSet, OptimizationResult, OutOfSampleResult, WalkForwardResult, WalkForwardWindow, ParameterStabilityReport, ParameterStabilityInfo};
 pub use portfolio::{PortfolioBacktestingEngine, SymbolConfig, PortfolioStatistics, SymbolStatistics};
 pub use position::Position;
 pub use fill_model::{

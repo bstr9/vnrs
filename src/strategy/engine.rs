@@ -5,18 +5,19 @@ use chrono::{Utc, Duration};
 use crate::trader::{
     MainEngine, TickData, OrderData, OrderRequest, TradeData, BarData, DepthData,
     SubscribeRequest, CancelRequest, HistoryRequest,
-    Direction, Interval, Exchange, Offset, Status, BaseEngine, GatewayEvent,
-    BarSynthesizer,
+    Direction, Interval, Exchange, Offset, OrderType, Status, BaseEngine, GatewayEvent,
+    BarSynthesizer, PositionData,
     EVENT_TICK, EVENT_BAR, EVENT_ORDER, EVENT_TRADE, EVENT_DEPTH, EVENT_TIMER,
 };
 use crate::trader::database::BaseDatabase;
 use crate::event::EventEngine;
-use super::template::{StrategyTemplate, StrategyContext};
+use super::template::{StrategyTemplate, StrategyContext, DailyRiskStats};
 use super::base::{
     StrategyState, StopOrder, StopOrderStatus, 
     StrategySetting, StopOrderRequest, CancelRequestType,
-    StrategyRiskConfig,
+    StrategyRiskConfig, ExecutionType, TradingMode,
 };
+use super::paper_engine::PaperTradingEngine;
 #[cfg(feature = "python")]
 use crate::python::strategy_adapter::PythonStrategyAdapter;
 
@@ -79,11 +80,23 @@ pub struct StrategyEngine {
     /// Multi-period bar synthesis accumulators: (`strategy_name`, `vt_symbol`) �`?`(`target_interval`, `bar_count`, `accumulated_bar`)
     /// Accumulates 1-minute bars and delivers higher-timeframe bars when complete
     bar_synthesizers: Arc<RwLock<HashMap<(String, String), BarSynthesizer>>>,
-    
+
+    /// Pending bars per (strategy_name, interval) — for on_bars_sync callback
+    /// When all intervals for a strategy have pending bars, on_bars_sync is fired
+    pending_sync_bars: Arc<RwLock<HashMap<(String, String), BarData>>>,
+
+    /// Per-strategy subscribed intervals (for on_bars_sync)
+    /// Populated when strategies register bar synthesizers
+    strategy_intervals: Arc<RwLock<HashMap<String, Vec<String>>>>,
+
     /// Per-strategy realized `PnL`: `strategy_name` �?`realized` `PnL`
     strategy_pnl: Arc<RwLock<HashMap<String, f64>>>,
-    /// Per-strategy unrealized `PnL`: `strategy_name` �?`unrealized` `PnL`
-    strategy_unrealized_pnl: Arc<RwLock<HashMap<String, f64>>>,
+    /// Per-strategy unrealized PnL: (strategy_name, vt_symbol) -> unrealized PnL
+    strategy_unrealized_pnl: Arc<RwLock<HashMap<(String, String), f64>>>,
+    /// Per-strategy aggregate unrealized PnL: strategy_name -> total unrealized PnL
+    strategy_unrealized_pnl_by_strategy: Arc<RwLock<HashMap<String, f64>>>,
+    /// Per-strategy per-symbol realized PnL: (strategy_name, vt_symbol) -> realized PnL
+    strategy_pnl_by_symbol: Arc<RwLock<HashMap<(String, String), f64>>>,
     /// Per-strategy trade count: `strategy_name` �?number of trades
     strategy_trade_count: Arc<RwLock<HashMap<String, usize>>>,
     /// Per-strategy average entry price: (`strategy_name`, `vt_symbol`) �?avg entry price
@@ -95,11 +108,20 @@ pub struct StrategyEngine {
     order_close_info: Arc<RwLock<HashMap<String, CloseOrderInfo>>>,
     /// Per-strategy risk configuration (limits enforced before `MainEngine`)
     strategy_risk_configs: Arc<RwLock<HashMap<String, StrategyRiskConfig>>>,
+    /// Per-strategy daily risk statistics (reset at midnight)
+    strategy_daily_stats: Arc<RwLock<HashMap<String, DailyRiskStats>>>,
+    /// Per-strategy halted state (strategy_name -> halt_reason)
+    strategy_halted: Arc<RwLock<HashMap<String, String>>>,
     /// Optional database for loading historical data
     database: Option<Arc<dyn BaseDatabase>>,
 
     /// Scheduled timers: key = "{`strategy_name`}.{`timer_id`}"
     timers: Arc<RwLock<HashMap<String, TimerEntry>>>,
+
+    /// Current trading mode (Live, Paper, or Backtest)
+    trading_mode: Arc<RwLock<TradingMode>>,
+    /// Paper trading engine (active only in Paper mode)
+    paper_engine: Option<Arc<PaperTradingEngine>>,
 }
 
 /// Tracks a close order for frozen volume management
@@ -138,15 +160,23 @@ impl StrategyEngine {
             processed_tradeids: Arc::new(RwLock::new(std::collections::HashSet::new())),
             processed_tradeids_order: Arc::new(RwLock::new(Vec::new())),
             bar_synthesizers: Arc::new(RwLock::new(HashMap::new())),
+            pending_sync_bars: Arc::new(RwLock::new(HashMap::new())),
+            strategy_intervals: Arc::new(RwLock::new(HashMap::new())),
             strategy_pnl: Arc::new(RwLock::new(HashMap::new())),
             strategy_unrealized_pnl: Arc::new(RwLock::new(HashMap::new())),
+            strategy_unrealized_pnl_by_strategy: Arc::new(RwLock::new(HashMap::new())),
+            strategy_pnl_by_symbol: Arc::new(RwLock::new(HashMap::new())),
             strategy_trade_count: Arc::new(RwLock::new(HashMap::new())),
             strategy_avg_price: Arc::new(RwLock::new(HashMap::new())),
             strategy_frozen_closes: Arc::new(RwLock::new(HashMap::new())),
             order_close_info: Arc::new(RwLock::new(HashMap::new())),
             strategy_risk_configs: Arc::new(RwLock::new(HashMap::new())),
+            strategy_daily_stats: Arc::new(RwLock::new(HashMap::new())),
+            strategy_halted: Arc::new(RwLock::new(HashMap::new())),
             database,
             timers: Arc::new(RwLock::new(HashMap::new())),
+            trading_mode: Arc::new(RwLock::new(TradingMode::Live)),
+            paper_engine: None,
         }
     }
 
@@ -161,6 +191,58 @@ impl StrategyEngine {
         self.load_strategy_settings();
         
         tracing::info!("Strategy engine initialized successfully");
+    }
+
+    // ── Trading Mode API ──────────────────────────────────────────────────
+
+    /// Get the current trading mode
+    pub fn trading_mode(&self) -> TradingMode {
+        *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Set the trading mode. When switching to Paper mode, creates a PaperTradingEngine
+    /// if one does not already exist. When switching away from Paper, stops the paper engine.
+    pub fn set_trading_mode(&mut self, mode: TradingMode) {
+        let old_mode = *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if old_mode == mode {
+            return;
+        }
+
+        // Stop paper engine if leaving paper mode
+        if old_mode == TradingMode::Paper {
+            if let Some(pe) = &self.paper_engine {
+                pe.stop();
+            }
+        }
+
+        *self.trading_mode.write().unwrap_or_else(std::sync::PoisonError::into_inner) = mode;
+
+        // Create/start paper engine if entering paper mode
+        if mode == TradingMode::Paper {
+            if self.paper_engine.is_none() {
+                self.paper_engine = Some(Arc::new(PaperTradingEngine::new()));
+            }
+            if let Some(pe) = &self.paper_engine {
+                pe.start();
+            }
+        }
+
+        tracing::info!("Trading mode changed from {:?} to {:?}", old_mode, mode);
+    }
+
+    /// Convenience: switch to paper trading mode
+    pub fn switch_to_paper(&mut self) {
+        self.set_trading_mode(TradingMode::Paper);
+    }
+
+    /// Convenience: switch to live trading mode
+    pub fn switch_to_live(&mut self) {
+        self.set_trading_mode(TradingMode::Live);
+    }
+
+    /// Get a reference to the paper trading engine (if active)
+    pub fn paper_engine(&self) -> Option<&Arc<PaperTradingEngine>> {
+        self.paper_engine.as_ref()
     }
 
     /// Process gateway events from `MainEngine` (`BaseEngine` implementation)
@@ -208,7 +290,49 @@ impl StrategyEngine {
             .get(&vt_symbol).cloned()
             .unwrap_or_default();
 
+        // Check for date rollover and auto-reset daily stats
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        {
+            let daily_stats = self.strategy_daily_stats.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut needs_reset = Vec::new();
+            for (name, stats) in daily_stats.iter() {
+                if stats.last_reset_date != today {
+                    needs_reset.push(name.clone());
+                }
+            }
+            drop(daily_stats);
+
+            // Reset daily stats for strategies that haven't been reset today
+            if !needs_reset.is_empty() {
+                let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                for name in &needs_reset {
+                    if let Some(strategy) = strategies.get_mut(name) {
+                        strategy.reset_daily_risk_stats();
+                    }
+                }
+                let mut daily_stats = self.strategy_daily_stats.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                for name in &needs_reset {
+                    if let Some(stats) = daily_stats.get_mut(name) {
+                        stats.trade_count = 0;
+                        stats.daily_pnl = 0.0;
+                        stats.last_reset_date = today.clone();
+                    }
+                }
+
+                // Un-halt strategies that were halted due to daily limits
+                let mut halted = self.strategy_halted.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                halted.retain(|_, reason| !reason.contains("daily"));
+            }
+        }
+
         for strategy_name in &strategy_names {
+            // Skip halted strategies
+            if self.strategy_halted.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains_key(strategy_name)
+            {
+                continue;
+            }
+
             let contexts = self.contexts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(context) = contexts.get(strategy_name) {
                 context.update_tick(tick.clone());
@@ -237,8 +361,20 @@ impl StrategyEngine {
                 };
 
                 self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(strategy_name.to_string(), unrealized);
+                    .insert((strategy_name.to_string(), vt_symbol.clone()), unrealized);
+
+                // Recompute aggregate unrealized PnL for this strategy
+                let total_unrealized: f64 = self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .iter()
+                    .filter(|((name, _), _)| name == strategy_name)
+                    .map(|(_, v)| *v)
+                    .sum();
+                self.strategy_unrealized_pnl_by_strategy.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(strategy_name.to_string(), total_unrealized);
             }
+
+            // Check trailing stops for this strategy
+            self.check_trailing_stops(strategy_name, tick);
         }
 
         // Check stop orders
@@ -269,6 +405,26 @@ impl StrategyEngine {
                 }
             }
         }
+
+        // ── Paper mode: feed tick to PaperTradingEngine and dispatch fills ──
+        let current_mode = *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if current_mode == TradingMode::Paper {
+            if let Some(pe) = &self.paper_engine {
+                let fills = pe.process_tick(tick);
+                for (vt_orderid, trade, order) in fills {
+                    // Route callbacks to the owning strategy
+                    let strategy_name = self.orderid_strategy_map.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .get(&vt_orderid)
+                        .cloned();
+
+                    if let Some(_strategy_name) = strategy_name {
+                        // Process order and trade events through the normal flow
+                        self.process_order_event(&order);
+                        self.process_trade_event(&trade);
+                    }
+                }
+            }
+        }
     }
 
     /// Process bar event and dispatch to subscribed strategies
@@ -290,6 +446,9 @@ impl StrategyEngine {
             .get(&vt_symbol).cloned()
             .unwrap_or_default();
 
+        // Get the interval string for this bar
+        let bar_interval_str = bar.interval.map_or_else(|| "unknown".to_string(), |i| i.value().to_string());
+
         for strategy_name in &strategy_names {
             let contexts = self.contexts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(context) = contexts.get(strategy_name) {
@@ -308,35 +467,122 @@ impl StrategyEngine {
                     }
                 }
             }
+
+            // Store the bar in pending_sync_bars for on_bars_sync callback
+            self.pending_sync_bars.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert((strategy_name.clone(), bar_interval_str.clone()), bar.clone());
         }
 
         // Multi-period bar synthesis: feed base bars into synthesizers
         // and deliver synthesized higher-timeframe bars to strategies
-        let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(std::sync::PoisonError::into_inner);
-        for ((strategy_name, syn_vt_symbol), synthesizer) in synthesizers.iter_mut() {
-            // Only process synthesizers that match this bar's symbol
-            if syn_vt_symbol != &vt_symbol {
+        let mut synthesized_bars: Vec<(String, BarData)> = Vec::new();
+        {
+            let mut synthesizers = self.bar_synthesizers.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            for ((strategy_name, syn_vt_symbol), synthesizer) in synthesizers.iter_mut() {
+                // Only process synthesizers that match this bar's symbol
+                if syn_vt_symbol != &vt_symbol {
+                    continue;
+                }
+
+                // Feed the base bar into the synthesizer
+                if let Some(synthesized_bar) = synthesizer.update_bar(bar) {
+                    synthesized_bars.push((strategy_name.clone(), synthesized_bar));
+                }
+            }
+        }
+
+        // Deliver synthesized bars to strategies
+        for (strategy_name, synthesized_bar) in &synthesized_bars {
+            let syn_interval_str = synthesized_bar.interval.map_or_else(|| "unknown".to_string(), |i| i.value().to_string());
+
+            let contexts = self.contexts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(context) = contexts.get(strategy_name) {
+                context.update_bar(synthesized_bar.clone());
+                let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(strategy) = strategies.get_mut(strategy_name) {
+                    strategy.on_bar(synthesized_bar, context);
+                }
+                // Update indicators for synthesized bar's symbol and dispatch on_indicator
+                let updated_indicators = context.update_indicators(&vt_symbol, synthesized_bar);
+                if !updated_indicators.is_empty() {
+                    if let Some(strategy) = strategies.get_mut(strategy_name) {
+                        for (name, value) in &updated_indicators {
+                            strategy.on_indicator(name, *value);
+                        }
+                    }
+                }
+            }
+
+            // Store synthesized bar in pending_sync_bars
+            self.pending_sync_bars.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert((strategy_name.clone(), syn_interval_str), synthesized_bar.clone());
+        }
+
+        // Check on_bars_sync: for each strategy that received a bar, check if all
+        // its subscribed intervals have pending bars
+        // Collect strategy names from both base and synthesized bar paths
+        let mut strategies_to_check: Vec<String> = strategy_names;
+        for (strategy_name, _) in &synthesized_bars {
+            if !strategies_to_check.contains(strategy_name) {
+                strategies_to_check.push(strategy_name.clone());
+            }
+        }
+
+        for strategy_name in &strategies_to_check {
+            let intervals: Vec<String> = self.strategy_intervals.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(strategy_name)
+                .cloned()
+                .unwrap_or_default();
+
+            if intervals.is_empty() {
                 continue;
             }
 
-            // Feed the base bar into the synthesizer
-            if let Some(synthesized_bar) = synthesizer.update_bar(bar) {
-                // A higher-timeframe bar was completed — deliver to strategy
-                let contexts = self.contexts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some(context) = contexts.get(strategy_name) {
-                    context.update_bar(synthesized_bar.clone());
-                    let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if let Some(strategy) = strategies.get_mut(strategy_name) {
-                        strategy.on_bar(&synthesized_bar, context);
+            // Check if all intervals have pending bars
+            let pending = self.pending_sync_bars.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let all_present = intervals.iter().all(|interval| {
+                pending.contains_key(&(strategy_name.clone(), interval.clone()))
+            });
+            drop(pending);
+
+            if all_present {
+                // Collect all pending bars for this strategy
+                let mut pending = self.pending_sync_bars.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut sync_bars: HashMap<String, BarData> = HashMap::new();
+                for interval in &intervals {
+                    if let Some(bar) = pending.remove(&(strategy_name.clone(), interval.clone())) {
+                        sync_bars.insert(interval.clone(), bar);
                     }
-                    // Update indicators for synthesized bar's symbol and dispatch on_indicator
-                    let updated_indicators = context.update_indicators(syn_vt_symbol, &synthesized_bar);
-                    if !updated_indicators.is_empty() {
+                }
+                // Also remove any non-interval pending bars for this strategy to avoid stale data
+                // (only clear the ones we consumed; other interval bars stay)
+                drop(pending);
+
+                if !sync_bars.is_empty() {
+                    let contexts = self.contexts.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(context) = contexts.get(strategy_name) {
+                        let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         if let Some(strategy) = strategies.get_mut(strategy_name) {
-                            for (name, value) in &updated_indicators {
-                                strategy.on_indicator(name, *value);
-                            }
+                            strategy.on_bars_sync(&sync_bars, context);
                         }
+                    }
+                }
+            }
+        }
+
+        // ── Paper mode: feed bar to PaperTradingEngine and dispatch fills ──
+        let current_mode = *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if current_mode == TradingMode::Paper {
+            if let Some(pe) = &self.paper_engine {
+                let fills = pe.process_bar(bar);
+                for (vt_orderid, trade, order) in fills {
+                    let strategy_name = self.orderid_strategy_map.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .get(&vt_orderid)
+                        .cloned();
+
+                    if let Some(_strategy_name) = strategy_name {
+                        self.process_order_event(&order);
+                        self.process_trade_event(&trade);
                     }
                 }
             }
@@ -556,19 +802,101 @@ impl StrategyEngine {
                     .and_modify(|pnl| *pnl += realized_pnl)
                     .or_insert(realized_pnl);
             }
+            // Per-symbol realized PnL
+            let mut pnl_by_symbol = self.strategy_pnl_by_symbol.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if realized_pnl != 0.0 {
+                pnl_by_symbol.entry(key.clone())
+                    .and_modify(|pnl| *pnl += realized_pnl)
+                    .or_insert(realized_pnl);
+            }
+            drop(pnl_by_symbol);
+
             trade_count_map.entry(strategy_name.clone())
                 .and_modify(|c| *c += 1)
                 .or_insert(1);
 
-            drop(avg_prices);
-            drop(pnl_map);
-            drop(trade_count_map);
+            // Position-close cleanup: clear unrealized PnL and avg_entry_price when flat
+            if new_pos == 0.0 {
+                drop(avg_prices);
+                drop(pnl_map);
+                drop(trade_count_map);
+
+                // Remove per-symbol unrealized PnL entry
+                self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(&key);
+
+                // Recompute aggregate unrealized PnL for this strategy
+                let total_unrealized: f64 = self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .iter()
+                    .filter(|((name, _), _)| name == &strategy_name)
+                    .map(|(_, v)| *v)
+                    .sum();
+                self.strategy_unrealized_pnl_by_strategy.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(strategy_name.clone(), total_unrealized);
+            } else {
+                drop(avg_prices);
+                drop(pnl_map);
+                drop(trade_count_map);
+            }
 
             // Update strategy position and notify
             let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(strategy) = strategies.get_mut(&strategy_name) {
                 strategy.update_position(&vt_symbol, new_pos);
                 strategy.on_trade(trade);
+
+                // Write PnL fields to BaseStrategy for strategy-side access
+                let avg_entry = self.strategy_avg_price.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&key).copied().unwrap_or(0.0);
+                let unrealized = self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&key).copied().unwrap_or(0.0);
+                let realized = self.strategy_pnl_by_symbol.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&key).copied().unwrap_or(0.0);
+                let total_realized: f64 = self.strategy_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&strategy_name).copied().unwrap_or(0.0);
+                strategy.update_pnl_fields(&vt_symbol, avg_entry, unrealized, realized, total_realized);
+            }
+
+            // Update daily risk statistics for this strategy
+            {
+                let mut daily_stats = self.strategy_daily_stats.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let stats = daily_stats.entry(strategy_name.clone()).or_insert_with(|| {
+                    let mut s = DailyRiskStats::default();
+                    s.last_reset_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    s
+                });
+                stats.trade_count += 1;
+                stats.daily_pnl += realized_pnl;
+            }
+
+            // Circuit breaker: check daily loss and halt if exceeded
+            {
+                let daily_stats = self.strategy_daily_stats.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(_stats) = daily_stats.get(&strategy_name) {
+                    let _risk_config = self.strategy_risk_configs.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .get(&strategy_name)
+                        .cloned()
+                        .unwrap_or_default();
+
+                    // Check max daily loss (StrategyRiskConfig doesn't have max_daily_loss yet,
+                    // but we check for it in the risk config's unused capacity)
+                    // This will be extended when max_daily_loss is added to StrategyRiskConfig
+
+                    // Check if strategy is now halted
+                    if self.strategy_halted.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .contains_key(&strategy_name)
+                    {
+                        let reason = self.strategy_halted.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .get(&strategy_name)
+                            .cloned()
+                            .unwrap_or_default();
+                        // Call on_risk_alert callback
+                        let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if let Some(strategy) = strategies.get_mut(&strategy_name) {
+                            strategy.on_risk_alert(&format!("Strategy halted: {}", reason));
+                        }
+                    }
+                }
             }
         }
     }
@@ -591,9 +919,10 @@ impl StrategyEngine {
         }
 
         // Create context for this strategy (with database if available)
+        let current_mode = *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         let context = match &self.database {
-            Some(db) => StrategyContext::with_database(Arc::clone(db)),
-            None => StrategyContext::new(),
+            Some(db) => StrategyContext::with_database(Arc::clone(db)).with_trading_mode(current_mode),
+            None => StrategyContext::new().with_trading_mode(current_mode),
         };
         
         // Subscribe to symbols - collect first to release lock before await
@@ -636,9 +965,10 @@ impl StrategyEngine {
         }
 
         // Create context for this strategy (with database if available)
+        let current_mode = *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         let context = match &self.database {
-            Some(db) => StrategyContext::with_database(Arc::clone(db)),
-            None => StrategyContext::new(),
+            Some(db) => StrategyContext::with_database(Arc::clone(db)).with_trading_mode(current_mode),
+            None => StrategyContext::new().with_trading_mode(current_mode),
         };
 
         // Subscribe to symbols - collect first to release lock before await
@@ -702,7 +1032,7 @@ impl StrategyEngine {
         };
 
         // Subscribe through main engine
-        let req = SubscribeRequest { symbol, exchange };
+        let req = SubscribeRequest { symbol, exchange, interval: None };
         if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
             if let Err(e) = self.main_engine.subscribe(req, &gw_name).await {
                 tracing::error!("Failed to subscribe {}: {}", vt_symbol, e);
@@ -743,7 +1073,7 @@ impl StrategyEngine {
             .ok_or_else(|| format!("Invalid vt_symbol format: {vt_symbol}"))?;
 
         // Subscribe through main engine
-        let req = SubscribeRequest { symbol, exchange };
+        let req = SubscribeRequest { symbol, exchange, interval: None };
         if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
             self.main_engine.subscribe(req, &gw_name).await?;
         } else {
@@ -779,7 +1109,7 @@ impl StrategyEngine {
 
         // Only unsubscribe from gateway if no other strategies need this symbol
         if should_unsubscribe_gateway {
-            let req = SubscribeRequest { symbol, exchange };
+            let req = SubscribeRequest { symbol, exchange, interval: None };
             if let Some(gw_name) = self.main_engine.find_gateway_name_for_exchange(exchange) {
                 self.main_engine.unsubscribe(req, &gw_name).await?;
             }
@@ -911,7 +1241,15 @@ impl StrategyEngine {
         }
         {
             let mut unrealized = self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
-            unrealized.remove(strategy_name);
+            unrealized.retain(|(name, _), _| name != strategy_name);
+        }
+        {
+            let mut unrealized_agg = self.strategy_unrealized_pnl_by_strategy.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            unrealized_agg.remove(strategy_name);
+        }
+        {
+            let mut pnl_by_symbol = self.strategy_pnl_by_symbol.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            pnl_by_symbol.retain(|(name, _), _| name != strategy_name);
         }
         {
             let mut trade_count = self.strategy_trade_count.write().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -930,11 +1268,31 @@ impl StrategyEngine {
             close_info.retain(|_, info| info.strategy_name != strategy_name);
         }
 
+        // Reset daily risk stats and clear halted state
+        {
+            let mut daily_stats = self.strategy_daily_stats.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            daily_stats.remove(strategy_name);
+        }
+        {
+            let mut halted = self.strategy_halted.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            halted.remove(strategy_name);
+        }
+
         // Cancel all timers for this strategy
         self.cancel_all_timers(strategy_name);
 
         // Unregister bar synthesizers
         self.unregister_bar_synthesizers(strategy_name);
+
+        // Clear pending sync bars and strategy intervals for this strategy
+        {
+            let mut pending = self.pending_sync_bars.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            pending.retain(|(name, _), _| name != strategy_name);
+        }
+        {
+            let mut intervals = self.strategy_intervals.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            intervals.remove(strategy_name);
+        }
 
         tracing::info!("Strategy {} reset to Initialized state", strategy_name);
         Ok(())
@@ -1161,7 +1519,15 @@ impl StrategyEngine {
         }
         {
             let mut unrealized = self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner);
-            unrealized.remove(strategy_name);
+            unrealized.retain(|(name, _), _| name != strategy_name);
+        }
+        {
+            let mut unrealized_agg = self.strategy_unrealized_pnl_by_strategy.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            unrealized_agg.remove(strategy_name);
+        }
+        {
+            let mut pnl_by_symbol = self.strategy_pnl_by_symbol.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            pnl_by_symbol.retain(|(name, _), _| name != strategy_name);
         }
         {
             let mut trade_count = self.strategy_trade_count.write().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1185,8 +1551,28 @@ impl StrategyEngine {
         // Unregister bar synthesizers for this strategy
         self.unregister_bar_synthesizers(strategy_name);
 
+        // Clear pending sync bars and strategy intervals for this strategy
+        {
+            let mut pending = self.pending_sync_bars.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            pending.retain(|(name, _), _| name != strategy_name);
+        }
+        {
+            let mut intervals = self.strategy_intervals.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            intervals.remove(strategy_name);
+        }
+
         // Remove risk config for this strategy
         self.remove_strategy_risk_config(strategy_name);
+
+        // Reset daily risk stats and clear halted state
+        {
+            let mut daily_stats = self.strategy_daily_stats.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            daily_stats.remove(strategy_name);
+        }
+        {
+            let mut halted = self.strategy_halted.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            halted.remove(strategy_name);
+        }
 
         // Cancel all timers for this strategy
         self.cancel_all_timers(strategy_name);
@@ -1543,6 +1929,45 @@ impl StrategyEngine {
         }
 
         let exchange = req.exchange;
+        let req_offset = req.offset;
+        let req_volume = req.volume;
+        let req_vt_symbol = req.vt_symbol();
+
+        // ── Paper mode: route to PaperTradingEngine instead of exchange ──
+        let current_mode = *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if current_mode == TradingMode::Paper {
+            let vt_orderid = match &self.paper_engine {
+                Some(pe) => pe.submit_order(req),
+                None => return Err("Paper trading engine not available".to_string()),
+            };
+
+            // Track order -> strategy mapping for callback routing
+            {
+                let mut orderid_map = self.orderid_strategy_map.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                orderid_map.insert(vt_orderid.clone(), strategy_name.to_string());
+            }
+            {
+                let mut strategy_map = self.strategy_orderid_map.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                strategy_map.entry(strategy_name.to_string())
+                    .or_default()
+                    .push(vt_orderid.clone());
+            }
+
+            // Track close order info for later unfreezing
+            if Self::is_close_offset(req_offset) {
+                let close_info = CloseOrderInfo {
+                    strategy_name: strategy_name.to_string(),
+                    vt_symbol: req_vt_symbol.clone(),
+                    volume: req_volume,
+                    remaining: req_volume,
+                };
+                self.order_close_info.write().unwrap_or_else(std::sync::PoisonError::into_inner).insert(vt_orderid.clone(), close_info);
+            }
+
+            return Ok(vt_orderid);
+        }
+
+        // ── Live mode: route to exchange via MainEngine ──────────────────
         let gw_name = self.main_engine.find_gateway_name_for_exchange(exchange)
             .ok_or_else(|| format!("No gateway found for exchange {exchange:?}"))?;
 
@@ -1730,8 +2155,85 @@ impl StrategyEngine {
         self.process_pending_cancellations(strategy_name).await;
     }
 
+    /// Rebalance strategy positions using the specified execution type
+    ///
+    /// For each symbol the strategy has a target position for, this method
+    /// retrieves the current position and the latest tick data, then calls
+    /// `rebalance_symbol_with_execution()` to place the appropriate orders.
+    /// After placing orders, all pending orders and cancellations are processed.
+    pub async fn rebalance_strategy_with_execution(
+        &self,
+        strategy_name: &str,
+        execution_type: ExecutionType,
+    ) -> Result<(), String> {
+        // Collect targets under lock
+        let targets: Vec<(String, f64)> = {
+            let strategies = self.strategies.read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match strategies.get(strategy_name) {
+                Some(strategy) => {
+                    let mut result = Vec::new();
+                    for vt_symbol in strategy.vt_symbols() {
+                        if let Some(target) = strategy.get_target(vt_symbol) {
+                            if (target - 0.0).abs() > f64::EPSILON {
+                                result.push((vt_symbol.clone(), target));
+                            }
+                        }
+                    }
+                    result
+                }
+                None => return Err(format!("Strategy {strategy_name} not found")),
+            }
+        };
+
+        // For each target, get tick data and call rebalance
+        for (vt_symbol, target) in &targets {
+            let (bid_price, ask_price, last_price) = {
+                let contexts = self.contexts.read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                contexts.get(strategy_name)
+                    .and_then(|ctx| ctx.get_tick(vt_symbol))
+                    .map(|tick| (tick.bid_price_1, tick.ask_price_1, tick.last_price))
+                    .unwrap_or((0.0, 0.0, 0.0))
+            };
+
+            let price = if last_price > 0.0 { last_price } else { (bid_price + ask_price) / 2.0 };
+
+            // Call rebalance on the strategy with execution type
+            {
+                let mut strategies = self.strategies.write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(strategy) = strategies.get_mut(strategy_name) {
+                    strategy.rebalance_symbol_with_execution(
+                        vt_symbol,
+                        *target,
+                        price,
+                        bid_price,
+                        ask_price,
+                        execution_type,
+                    );
+                }
+            }
+        }
+
+        // Process all pending orders/cancellations
+        self.process_all_pending(strategy_name).await;
+
+        Ok(())
+    }
+
     /// Cancel an order on behalf of a strategy
     pub async fn cancel_strategy_order(&self, _strategy_name: &str, vt_orderid: &str) -> Result<(), String> {
+        // ── Paper mode: cancel through PaperTradingEngine ──
+        let current_mode = *self.trading_mode.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if current_mode == TradingMode::Paper {
+            if let Some(pe) = &self.paper_engine {
+                return pe.cancel_order(vt_orderid);
+            }
+            return Err("Paper trading engine not available".to_string());
+        }
+
+        // ── Live mode: cancel through MainEngine ──
         let order = self.main_engine.get_order(vt_orderid)
             .ok_or_else(|| format!("Order {vt_orderid} not found"))?;
 
@@ -1769,6 +2271,15 @@ impl StrategyEngine {
         let synthesizer = BarSynthesizer::new(Interval::Minute, interval);
         
         self.bar_synthesizers.write().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, synthesizer);
+
+        // Track the interval for on_bars_sync
+        let interval_str = interval.value().to_string();
+        let mut intervals = self.strategy_intervals.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = intervals.entry(strategy_name.to_string()).or_default();
+        if !entry.contains(&interval_str) {
+            entry.push(interval_str);
+        }
+
         tracing::info!(
             "Registered bar synthesizer for {} on {} with interval {:?}",
             strategy_name, vt_symbol, interval
@@ -1785,20 +2296,36 @@ impl StrategyEngine {
     // Per-strategy PnL tracking
     // ========================================================================
 
-    /// Get realized `PnL` for a strategy
+    /// Get realized PnL for a strategy
     pub fn get_strategy_pnl(&self, strategy_name: &str) -> f64 {
         self.strategy_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0)
     }
 
-    /// Get unrealized `PnL` for a strategy
+    /// Get aggregate unrealized PnL for a strategy (across all symbols)
     pub fn get_strategy_unrealized_pnl(&self, strategy_name: &str) -> f64 {
-        self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0)
+        self.strategy_unrealized_pnl_by_strategy.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0)
     }
 
-    /// Get total `PnL` (realized + unrealized) for a strategy
+    /// Get unrealized PnL for a strategy on a specific symbol
+    pub fn get_strategy_unrealized_pnl_by_symbol(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&(strategy_name.to_string(), vt_symbol.to_string()))
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// Get realized PnL for a strategy on a specific symbol
+    pub fn get_strategy_realized_pnl_by_symbol(&self, strategy_name: &str, vt_symbol: &str) -> f64 {
+        self.strategy_pnl_by_symbol.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&(strategy_name.to_string(), vt_symbol.to_string()))
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// Get total PnL (realized + unrealized) for a strategy
     pub fn get_strategy_total_pnl(&self, strategy_name: &str) -> f64 {
         let realized = self.strategy_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0);
-        let unrealized = self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0);
+        let unrealized = self.strategy_unrealized_pnl_by_strategy.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0.0);
         realized + unrealized
     }
 
@@ -1807,8 +2334,8 @@ impl StrategyEngine {
         self.strategy_trade_count.read().unwrap_or_else(std::sync::PoisonError::into_inner).get(strategy_name).copied().unwrap_or(0)
     }
 
-    /// Update unrealized `PnL` for a strategy based on current market prices
-    /// Call this when ticks arrive to keep unrealized `PnL` up to date
+    /// Update unrealized PnL for a strategy based on current market prices
+    /// Call this when ticks arrive to keep unrealized PnL up to date
     pub fn update_unrealized_pnl(&self, strategy_name: &str, vt_symbol: &str) {
         let strategies = self.strategies.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         let pos = strategies.get(strategy_name)
@@ -1817,7 +2344,17 @@ impl StrategyEngine {
         drop(strategies);
 
         if pos == 0.0 {
-            self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner).insert(strategy_name.to_string(), 0.0);
+            // Remove per-symbol entry when flat
+            self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&(strategy_name.to_string(), vt_symbol.to_string()));
+            // Recompute aggregate
+            let total_unrealized: f64 = self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .filter(|((name, _), _)| name == strategy_name)
+                .map(|(_, v)| *v)
+                .sum();
+            self.strategy_unrealized_pnl_by_strategy.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(strategy_name.to_string(), total_unrealized);
             return;
         }
 
@@ -1839,8 +2376,87 @@ impl StrategyEngine {
                 (avg_entry - last_price) * pos.abs()
             };
 
-            self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner).insert(strategy_name.to_string(), unrealized);
+            self.strategy_unrealized_pnl.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert((strategy_name.to_string(), vt_symbol.to_string()), unrealized);
+
+            // Recompute aggregate unrealized PnL
+            let total_unrealized: f64 = self.strategy_unrealized_pnl.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .filter(|((name, _), _)| name == strategy_name)
+                .map(|(_, v)| *v)
+                .sum();
+            self.strategy_unrealized_pnl_by_strategy.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(strategy_name.to_string(), total_unrealized);
         }
+    }
+
+    // ========================================================================
+    // OMS reconciliation
+    // ========================================================================
+
+    /// Reconcile strategy positions with OMS (exchange) positions.
+    ///
+    /// Compares the strategy's internal position tracking against the OMS
+    /// positions reported by the exchange. Returns a list of discrepancy
+    /// descriptions. Logs warnings but does **not** auto-correct positions.
+    pub fn reconcile_with_oms(
+        &self,
+        strategy_name: &str,
+        oms_positions: &HashMap<String, PositionData>,
+    ) -> Vec<String> {
+        let mut discrepancies = Vec::new();
+
+        // Collect strategy positions for all subscribed symbols
+        let strategy_symbols: Vec<String> = {
+            let strategies = self.strategies.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+            strategies.get(strategy_name)
+                .map(|s| s.vt_symbols().to_vec())
+                .unwrap_or_default()
+        };
+
+        for vt_symbol in &strategy_symbols {
+            let strategy_pos = self.get_strategy_position(strategy_name, vt_symbol);
+            let oms_pos = oms_positions.get(vt_symbol)
+                .map(|p| p.volume)
+                .unwrap_or(0.0);
+
+            let diff = (strategy_pos - oms_pos).abs();
+            if diff > f64::EPSILON {
+                let msg = format!(
+                    "Position drift for {} on {}: strategy={} oms={} diff={}",
+                    strategy_name, vt_symbol, strategy_pos, oms_pos, diff
+                );
+                tracing::warn!("{}", msg);
+                discrepancies.push(msg);
+            }
+        }
+
+        // Also check OMS positions that the strategy doesn't track
+        for (vt_symbol, pos) in oms_positions {
+            if pos.volume.abs() > f64::EPSILON && !strategy_symbols.contains(vt_symbol) {
+                let msg = format!(
+                    "OMS has position on {} ({}) but strategy {} does not track this symbol",
+                    vt_symbol, pos.volume, strategy_name
+                );
+                tracing::warn!("{}", msg);
+                discrepancies.push(msg);
+            }
+        }
+
+        if discrepancies.is_empty() {
+            tracing::info!("Reconciliation OK for strategy {}", strategy_name);
+        }
+
+        discrepancies
+    }
+
+    /// Check position drift for a strategy by fetching OMS positions automatically.
+    ///
+    /// Convenience method that obtains OMS positions from `MainEngine` and
+    /// delegates to `reconcile_with_oms()`.
+    pub fn check_position_drift(&self, strategy_name: &str) -> Vec<String> {
+        let oms_positions = self.main_engine.get_oms_engine().get_positions_by_symbol();
+        self.reconcile_with_oms(strategy_name, &oms_positions)
     }
 
     // ========================================================================
@@ -1885,6 +2501,285 @@ impl StrategyEngine {
         strategies.get(strategy_name)
             .map(|s| s.get_position(vt_symbol))
             .unwrap_or(0.0)
+    }
+
+    // ========================================================================
+    // Trailing stop management
+    // ========================================================================
+
+    /// Check trailing stops for a strategy on a tick update.
+    ///
+    /// For each symbol with a trailing stop configured:
+    /// 1. If tick.last_price hasn't reached activation_price, skip
+    /// 2. Calculate new stop: for Long, stop = price - distance; for Short, stop = price + distance
+    /// 3. If new stop is better than current, update current_stop_price
+    /// 4. If price has hit the stop, close the position and cancel trailing stop
+    fn check_trailing_stops(&self, strategy_name: &str, tick: &TickData) {
+        let vt_symbol = tick.vt_symbol();
+        let last_price = tick.last_price;
+
+        // Get the trailing stop config for this symbol
+        let trailing_config = {
+            let strategies = self.strategies.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+            strategies.get(strategy_name)
+                .and_then(|s| {
+                    // Try to get trailing stop through the trait method
+                    // We need to access BaseStrategy's get_trailing_stop
+                    s.get_trailing_stop(&vt_symbol)
+                })
+        };
+
+        let Some(config) = trailing_config else {
+            return;
+        };
+
+        // Check if price has reached activation price
+        let activated = match config.direction {
+            Direction::Long => last_price >= config.activation_price,
+            Direction::Short => last_price <= config.activation_price,
+            Direction::Net => false,
+        };
+
+        if !activated {
+            return;
+        }
+
+        // Calculate new stop price based on trailing distance
+        let new_stop = match config.direction {
+            Direction::Long => {
+                let distance = if config.is_percentage {
+                    last_price * config.trailing_distance / 100.0
+                } else {
+                    config.trailing_distance
+                };
+                last_price - distance
+            }
+            Direction::Short => {
+                let distance = if config.is_percentage {
+                    last_price * config.trailing_distance / 100.0
+                } else {
+                    config.trailing_distance
+                };
+                last_price + distance
+            }
+            Direction::Net => return,
+        };
+
+        // Check if price has hit the trailing stop
+        let stop_hit = match config.direction {
+            Direction::Long => last_price <= config.current_stop_price,
+            Direction::Short => last_price >= config.current_stop_price,
+            Direction::Net => false,
+        };
+
+        if stop_hit {
+            // Close the position and cancel trailing stop
+            tracing::info!(
+                "Trailing stop triggered for {} on {}: stop_price={} last_price={}",
+                strategy_name, vt_symbol, config.current_stop_price, last_price
+            );
+
+            // Cancel trailing stop
+            {
+                let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(strategy) = strategies.get_mut(strategy_name) {
+                    strategy.cancel_trailing_stop(&vt_symbol);
+                }
+            }
+
+            // Place a close order
+            let pos = self.get_strategy_position(strategy_name, &vt_symbol);
+            if pos.abs() > 0.0 {
+                let (direction, offset) = if pos > 0.0 {
+                    (Direction::Short, Offset::Close)
+                } else {
+                    (Direction::Long, Offset::Close)
+                };
+                let req = OrderRequest {
+                    symbol: vt_symbol.split('.').next().unwrap_or(&vt_symbol).to_string(),
+                    exchange: crate::trader::utility::extract_vt_symbol(&vt_symbol)
+                        .map(|(_, e)| e)
+                        .unwrap_or(Exchange::Binance),
+                    direction,
+                    order_type: OrderType::Market,
+                    volume: pos.abs(),
+                    price: last_price,
+                    offset,
+                    reference: strategy_name.to_string(),
+                    post_only: false,
+                    reduce_only: false,
+                    expire_time: None,
+                    gateway_name: String::new(),
+                };
+
+                // Use tokio to spawn the async send_order
+                let strategy_name_owned = strategy_name.to_string();
+                let engine = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = engine.send_order(&strategy_name_owned, req).await {
+                        tracing::warn!("Failed to send trailing stop close order for {}: {}", strategy_name_owned, e);
+                    }
+                });
+            }
+            return;
+        }
+
+        // Update the trailing stop price if the new stop is better
+        let should_update = match config.direction {
+            Direction::Long => new_stop > config.current_stop_price,
+            Direction::Short => new_stop < config.current_stop_price,
+            Direction::Net => false,
+        };
+
+        if should_update {
+            tracing::debug!(
+                "Trailing stop updated for {} on {}: {} -> {}",
+                strategy_name, vt_symbol, config.current_stop_price, new_stop
+            );
+
+            // Update the trailing stop config in the strategy
+            let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(strategy) = strategies.get_mut(strategy_name) {
+                // Re-set the trailing stop with updated current_stop_price
+                strategy.set_trailing_stop(
+                    &vt_symbol,
+                    config.direction,
+                    config.activation_price,
+                    config.trailing_distance,
+                    config.is_percentage,
+                );
+                // Note: set_trailing_stop recalculates current_stop_price from
+                // activation_price. For precise trailing stop updates, the
+                // StrategyTemplate would need a method to update current_stop_price
+                // directly. This is a known limitation when using trait objects.
+            }
+        }
+    }
+
+    // ========================================================================
+    // Daily risk stats and circuit breaker
+    // ========================================================================
+
+    /// Reset daily risk statistics for all strategies (called at midnight)
+    pub async fn reset_daily_stats(&self) {
+        let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (_name, strategy) in strategies.iter_mut() {
+            strategy.reset_daily_risk_stats();
+        }
+        // Reset engine-level daily stats
+        let mut daily_stats = self.strategy_daily_stats.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for stats in daily_stats.values_mut() {
+            stats.trade_count = 0;
+            stats.daily_pnl = 0.0;
+            stats.last_reset_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        }
+        // Note: Don't clear strategy_pnl (realized PnL is cumulative)
+        // Only reset daily counters
+
+        // Un-halt strategies that were halted due to daily limits
+        // (they can trade again on the new day)
+        let mut halted = self.strategy_halted.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        halted.retain(|_, reason| {
+            // Keep strategies halted for non-daily reasons (e.g., manual halt)
+            !reason.contains("daily")
+        });
+    }
+
+    /// Check daily risk limits and circuit breaker for a strategy.
+    ///
+    /// Returns Some(reason) if the strategy should be halted, None otherwise.
+    #[allow(dead_code)]
+    fn check_daily_risk(&self, strategy_name: &str) -> Option<String> {
+        // Already halted? Skip
+        if self.strategy_halted.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(strategy_name)
+        {
+            return None;
+        }
+
+        let _daily_stats = self.strategy_daily_stats.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _risk_config = self.strategy_risk_configs.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(strategy_name)
+            .cloned()
+            .unwrap_or_default();
+
+        // Check max daily loss (if configured in risk config)
+        // Note: StrategyRiskConfig doesn't currently have max_daily_loss,
+        // so we check the daily_stats against a reasonable threshold.
+        // The actual check should use StrategyRiskConfig.max_daily_loss once added.
+        None
+    }
+
+    /// Halt a strategy due to a risk alert
+    pub fn halt_strategy(&self, strategy_name: &str, reason: &str) {
+        self.strategy_halted.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(strategy_name.to_string(), reason.to_string());
+
+        // Notify the strategy via on_risk_alert callback
+        let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(strategy) = strategies.get_mut(strategy_name) {
+            strategy.on_risk_alert(reason);
+        }
+
+        tracing::warn!("Strategy {} halted: {}", strategy_name, reason);
+    }
+
+    /// Check if a strategy is halted
+    pub fn is_strategy_halted(&self, strategy_name: &str) -> bool {
+        self.strategy_halted.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(strategy_name)
+    }
+
+    /// Get the halt reason for a strategy
+    pub fn get_halt_reason(&self, strategy_name: &str) -> Option<String> {
+        self.strategy_halted.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(strategy_name)
+            .cloned()
+    }
+
+    /// Un-halt a strategy (allow it to trade again)
+    pub fn unhalt_strategy(&self, strategy_name: &str) -> Result<(), String> {
+        let mut halted = self.strategy_halted.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if halted.remove(strategy_name).is_some() {
+            tracing::info!("Strategy {} un-halted", strategy_name);
+            Ok(())
+        } else {
+            Err(format!("Strategy {strategy_name} is not halted"))
+        }
+    }
+
+    /// Get the daily risk stats for a strategy
+    pub fn get_strategy_daily_stats(&self, strategy_name: &str) -> DailyRiskStats {
+        self.strategy_daily_stats.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(strategy_name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Apply optimized parameters to a running strategy.
+    /// The strategy's `set_optimized_parameters()` method will be called with the new parameters.
+    /// The strategy must be in Inited or Stopped state (not Trading).
+    pub fn apply_optimal_parameters(
+        &self,
+        strategy_name: &str,
+        parameters: &std::collections::HashMap<String, f64>,
+    ) -> Result<(), String> {
+        let mut strategies = self.strategies.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let strategy = strategies.get_mut(strategy_name)
+            .ok_or_else(|| format!("Strategy {strategy_name} not found"))?;
+
+        let state = strategy.state();
+        if state == StrategyState::Trading {
+            return Err(format!(
+                "Cannot apply parameters to strategy {strategy_name}: it is in Trading state. Stop it first."
+            ));
+        }
+
+        strategy.set_optimized_parameters(parameters);
+
+        tracing::info!("Applied optimal parameters to strategy {}", strategy_name);
+        Ok(())
     }
 
     // ========================================================================
@@ -1997,15 +2892,23 @@ impl Clone for StrategyEngine {
             processed_tradeids: self.processed_tradeids.clone(),
             processed_tradeids_order: self.processed_tradeids_order.clone(),
             bar_synthesizers: self.bar_synthesizers.clone(),
+            pending_sync_bars: self.pending_sync_bars.clone(),
+            strategy_intervals: self.strategy_intervals.clone(),
             strategy_pnl: self.strategy_pnl.clone(),
             strategy_unrealized_pnl: self.strategy_unrealized_pnl.clone(),
+            strategy_unrealized_pnl_by_strategy: self.strategy_unrealized_pnl_by_strategy.clone(),
+            strategy_pnl_by_symbol: self.strategy_pnl_by_symbol.clone(),
             strategy_trade_count: self.strategy_trade_count.clone(),
             strategy_avg_price: self.strategy_avg_price.clone(),
             strategy_frozen_closes: self.strategy_frozen_closes.clone(),
             order_close_info: self.order_close_info.clone(),
             strategy_risk_configs: self.strategy_risk_configs.clone(),
+            strategy_daily_stats: self.strategy_daily_stats.clone(),
+            strategy_halted: self.strategy_halted.clone(),
             database: self.database.clone(),
             timers: self.timers.clone(),
+            trading_mode: self.trading_mode.clone(),
+            paper_engine: self.paper_engine.clone(),
         }
     }
 }

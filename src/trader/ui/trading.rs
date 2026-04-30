@@ -282,6 +282,7 @@ impl TradingWidget {
             self.pending_subscribe = Some(SubscribeRequest {
                 symbol: normalized_symbol,
                 exchange,
+                interval: None,
             });
         }
     }
@@ -583,6 +584,7 @@ impl TradingWidget {
                                             self.pending_subscribe = Some(SubscribeRequest {
                                                 symbol: contract.symbol.clone(),
                                                 exchange: contract.exchange,
+                                                interval: None,
                                             });
                                         }
 
@@ -729,7 +731,7 @@ impl TradingWidget {
         let volume: f64 = match self.volume.parse() {
             Ok(v) if v > 0.0 => v,
             _ => {
-                self.last_order_error = Some("数量无效".to_string());
+                self.last_order_error = Some("数量必须大于0".to_string());
                 return;
             }
         };
@@ -807,7 +809,8 @@ impl TradingWidget {
         }
 
         let price: f64 = self.price.parse().unwrap_or(0.0);
-
+        
+        // Validate price for limit orders
         let order_type = match self.order_type_index {
             0 => OrderType::Limit,
             1 => OrderType::Market,
@@ -816,6 +819,11 @@ impl TradingWidget {
             4 => OrderType::Stop,
             _ => OrderType::StopLimit,
         };
+        
+        if matches!(order_type, OrderType::Limit | OrderType::Fak | OrderType::Fok) && price <= 0.0 {
+            self.last_order_error = Some("限价单价格必须大于0".to_string());
+            return;
+        }
 
         self.last_order_error = None;
         self.pending_order = Some(OrderRequest {

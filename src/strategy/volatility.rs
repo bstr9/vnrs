@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use crate::strategy::base::{StrategySetting, StrategyState, StrategyType};
-use crate::strategy::template::{BaseStrategy, StrategyContext, StrategyTemplate};
+use crate::strategy::template::{BaseStrategy, StrategyContext, StrategyTemplate, TrailingStopConfig};
 use crate::trader::{
     ArrayManager, BarData, Direction, OrderData, OrderRequest, TickData, TradeData,
 };
@@ -312,6 +312,45 @@ impl StrategyTemplate for VolatilityStrategy {
             .get(vt_symbol)
             .copied()
             .unwrap_or(0.0)
+    }
+
+    fn update_pnl_fields(&mut self, vt_symbol: &str, avg_entry: f64, unrealized: f64, realized: f64, total_realized: f64) {
+        self.base.write_pnl_fields(vt_symbol, avg_entry, unrealized, realized, total_realized);
+    }
+
+    fn on_risk_alert(&mut self, reason: &str) {
+        self.base.write_log(&format!("风险警报: {}", reason));
+    }
+
+    fn set_optimized_parameters(&mut self, parameters: &std::collections::HashMap<String, f64>) {
+        self.base.write_log(&format!("应用优化参数: {}项", parameters.len()));
+    }
+
+    fn reset_daily_risk_stats(&mut self) {
+        self.base.reset_daily_risk_stats();
+    }
+
+    fn get_trailing_stop(&self, vt_symbol: &str) -> Option<TrailingStopConfig> {
+        self.base.get_trailing_stop(vt_symbol)
+    }
+
+    fn cancel_trailing_stop(&mut self, vt_symbol: &str) {
+        self.base.cancel_trailing_stop(vt_symbol);
+    }
+
+    fn set_trailing_stop(
+        &mut self,
+        vt_symbol: &str,
+        direction: Direction,
+        activation_price: f64,
+        trailing_distance: f64,
+        is_percentage: bool,
+    ) {
+        self.base.set_trailing_stop(vt_symbol, direction, activation_price, trailing_distance, is_percentage);
+    }
+
+    fn set_parameters(&mut self, params: &std::collections::HashMap<String, f64>) {
+        self.base.set_parameters(params);
     }
 }
 

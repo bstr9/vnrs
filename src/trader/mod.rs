@@ -14,7 +14,6 @@
 //! - **database**: Database abstraction for data persistence
 //! - **datafeed**: Datafeed abstraction for market data
 //! - **logger**: Logging utilities
-//! - **optimize**: Parameter optimization utilities
 //! - **app**: Application trait for extending functionality
 //! - **alert**: Alert engine for notifications on critical events
 //! - **ui**: Graphical user interface components (requires "gui" feature)
@@ -39,7 +38,6 @@ pub mod identifier;
 pub mod logger;
 pub mod message_bus;
 pub mod object;
-pub mod optimize;
 pub mod portfolio;
 pub mod recorder;
 pub mod risk;
@@ -51,6 +49,7 @@ pub mod utility;
 pub mod order_emulator;
 pub mod order_book;
 pub mod reconciliation;
+pub mod report;
 pub mod session;
 
 #[cfg(feature = "sqlite")]
@@ -105,7 +104,6 @@ pub use object::{
     AccountData, BarData, CancelRequest, ContractData, DepthData, HistoryRequest, LogData, OrderData,
     OrderRequest, PositionData, QuoteData, QuoteRequest, SubscribeRequest, TickData, TradeData,
 };
-pub use optimize::{check_optimization_setting, run_bf_optimization, run_ga_optimization, OptimizationSetting};
 pub use portfolio::{PortfolioManager, PositionSummary, PortfolioSummary, PortfolioMetrics};
 pub use recorder::{DataRecorder, RecordStatus, RecorderConfig};
 pub use risk::{DailyStats, RiskCheckResult, RiskConfig, RiskManager};
@@ -115,6 +113,10 @@ pub use toast::{Toast, ToastManager};
 pub use order_emulator::{OrderEmulator, EmulatedOrderType, EmulatedOrderStatus, EmulatedOrder, EmulatedOrderRequest, EmulatedOrderId, EmulatorSendOrderCallback, EmulatorCancelOrderCallback};
 pub use order_book::{OrderBook, OrderBookManager, OrderBookSnapshot};
 pub use reconciliation::{PositionDrift, OrderDrift, ReconciliationResult, ReconciliationEngine};
+pub use report::{
+    TradingReport, StrategyReport, SymbolPnl, DailySummary, TradeRecord, EquityPoint,
+    ReportEngine, StrategyPnlData,
+};
 pub use session::{TradingSessionManager, TradingSession};
 pub use sync_bar_generator::{SynchronizedBarGenerator, SynchronizedBars};
 pub use bar_synthesizer::BarSynthesizer;

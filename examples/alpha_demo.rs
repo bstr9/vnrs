@@ -1,3 +1,70 @@
+// Allow pedantic lints (personal project, pragmatic approach)
+#![allow(
+    clippy::needless_pass_by_value,
+    clippy::map_unwrap_or,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::unused_self,
+    clippy::redundant_closure,
+    clippy::filter_map_identity,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::doc_markdown,
+    clippy::must_use_candidate,
+    clippy::return_self_not_must_use,
+    clippy::unnecessary_wraps,
+    clippy::unnecessary_debug_formatting,
+    clippy::uninlined_format_args,
+    clippy::match_same_arms,
+    clippy::single_match_else,
+    clippy::wildcard_imports,
+    clippy::if_not_else,
+    clippy::items_after_statements,
+    clippy::similar_names,
+    clippy::used_underscore_binding,
+    clippy::unreadable_literal,
+    clippy::non_std_lazy_statics,
+    clippy::default_trait_access,
+    clippy::semicolon_if_nothing_returned,
+    clippy::redundant_closure_for_method_calls,
+    clippy::float_cmp,
+    clippy::implicit_hasher,
+    clippy::unused_async,
+    clippy::unnested_or_patterns,
+    clippy::manual_let_else,
+    clippy::single_char_pattern,
+    clippy::assigning_clones,
+    clippy::cloned_instead_of_copied,
+    clippy::explicit_iter_loop,
+    clippy::implicit_clone,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::struct_excessive_bools,
+    clippy::ignored_unit_patterns,
+    clippy::match_wildcard_for_single_variants,
+    clippy::unnecessary_literal_bound,
+    clippy::manual_string_new,
+    clippy::inefficient_to_string,
+    clippy::no_effect_underscore_binding,
+    clippy::doc_link_with_quotes,
+    clippy::doc_lazy_continuation,
+    clippy::format_push_string,
+    clippy::redundant_else,
+    clippy::ref_option,
+    clippy::enum_glob_use,
+    clippy::unnecessary_map_or,
+    clippy::comparison_chain,
+    clippy::case_sensitive_file_extension_comparisons,
+    clippy::missing_fields_in_debug,
+    clippy::field_reassign_with_default,
+    clippy::derivable_impls,
+    clippy::manual_midpoint,
+    // Cast lints (trading code uses f64/i64 casts extensively)
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
+)]
 //! Alpha Demo Example
 //! Demonstrates the usage of the alpha research framework
 
@@ -5,7 +72,7 @@ use chrono::{Duration, Utc};
 use polars::prelude::*;
 use trade_engine::alpha::dataset::{processor::get_all_processors, AlphaDataset};
 use trade_engine::alpha::model::LinearRegressionModel;
-use trade_engine::alpha::strategy::{AlphaStrategy, BacktestingEngine};
+use trade_engine::alpha::strategy::{AlphaStrategy, AlphaStrategyAdapter};
 use trade_engine::alpha::{logger::AlphaLogger, AlphaLab};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -92,20 +159,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Skip fit for now since we don't have real data
     println!("✓ Model created (fit skipped - no data)\n");
 
-    // Test backtesting engine
-    println!("Creating BacktestingEngine...");
-    let _engine = BacktestingEngine::new();
-    println!("✓ BacktestingEngine created\n");
-
-    // Test strategy
-    println!("Creating AlphaStrategy...");
-    let mut strategy = AlphaStrategy::new(
+    // Test strategy + adapter (recommended path: AlphaStrategy → AlphaStrategyAdapter → standard BacktestingEngine)
+    println!("Creating AlphaStrategy + Adapter...");
+    let strategy = AlphaStrategy::new(
         "TestStrategy".to_string(),
         vec!["AAPL".to_string(), "GOOGL".to_string()],
         Default::default(),
     );
-    strategy.on_init();
-    println!("✓ Strategy initialized\n");
+    let _adapter = AlphaStrategyAdapter::new(strategy);
+    println!("✓ Strategy + Adapter created (ready for standard BacktestingEngine)\n");
 
     // Test contract settings
     println!("Loading contract settings...");

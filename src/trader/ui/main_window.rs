@@ -18,6 +18,7 @@ use super::indicator_panel::IndicatorPanel;
 use super::bracket_panel::BracketOrderPanel;
 use super::advanced_orders_panel::AdvancedOrdersPanel;
 use super::rpc_panel::RpcPanel;
+use super::workflow_state::{WorkflowState, SharedWorkflowState, WorkflowAction, BacktestSummary};
 #[cfg(feature = "alpha")]
 use super::alpha_panel::AlphaPanel;
 use std::sync::{Arc, Mutex};
@@ -31,16 +32,25 @@ use chrono::{Utc, Timelike, Duration, Datelike};
 use crate::strategy::{StrategyEngine, StrategyState};
 
 /// Panel visibility state
-#[derive(Default)]
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PanelState {
+    #[serde(default)]
     pub show_trading: bool,
+    #[serde(default)]
     pub show_tick: bool,
+    #[serde(default)]
     pub show_order: bool,
+    #[serde(default)]
     pub show_active_order: bool,
+    #[serde(default)]
     pub show_trade: bool,
+    #[serde(default)]
     pub show_position: bool,
+    #[serde(default)]
     pub show_account: bool,
+    #[serde(default)]
     pub show_log: bool,
+    #[serde(default)]
     pub show_quote: bool,
 }
 
@@ -61,7 +71,7 @@ impl PanelState {
 }
 
 /// Tab selection for the central panel
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum CentralTab {
     #[default]
     Dashboard,
@@ -82,12 +92,130 @@ pub enum CentralTab {
 }
 
 /// Tab selection for the bottom panel
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BottomTab {
     #[default]
     Log,
     Account,
     Position,
+}
+
+/// Persistent UI state that can be saved and restored across sessions.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct UiState {
+    #[serde(default)]
+    pub panels: PanelState,
+    #[serde(default)]
+    pub central_tab: CentralTab,
+    #[serde(default)]
+    pub bottom_tab: BottomTab,
+    #[serde(default = "default_true")]
+    pub dark_mode: bool,
+    #[serde(default = "default_left_panel_width")]
+    pub left_panel_width: f32,
+    #[serde(default = "default_bottom_panel_height")]
+    pub bottom_panel_height: f32,
+    #[serde(default)]
+    pub show_workflow_guide: bool,
+}
+
+fn default_true() -> bool { true }
+fn default_left_panel_width() -> f32 { 300.0 }
+fn default_bottom_panel_height() -> f32 { 200.0 }
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            panels: PanelState::new(),
+            central_tab: CentralTab::default(),
+            bottom_tab: BottomTab::default(),
+            dark_mode: true,
+            left_panel_width: 300.0,
+            bottom_panel_height: 200.0,
+            show_workflow_guide: true,
+        }
+    }
+}
+
+impl UiState {
+    /// Directory for persisting application state
+    fn config_dir() -> std::path::PathBuf {
+        let home = dirs_next();
+        home.join(".rstrader")
+    }
+
+    /// File path for UI state
+    fn state_file_path() -> std::path::PathBuf {
+        Self::config_dir().join("ui_state.json")
+    }
+
+    /// Save the UI state to disk
+    pub fn save(&self) {
+        let dir = Self::config_dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!("创建配置目录失败: {}", e);
+            return;
+        }
+        match serde_json::to_string_pretty(self) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(Self::state_file_path(), json) {
+                    tracing::warn!("保存UI状态失败: {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("序列化UI状态失败: {}", e);
+            }
+        }
+    }
+
+    /// Load the UI state from disk. Returns None if loading fails.
+    pub fn load() -> Option<Self> {
+        let path = Self::state_file_path();
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(state) => Some(state),
+                Err(e) => {
+                    tracing::warn!("解析UI状态失败: {}", e);
+                    None
+                }
+            },
+            Err(_) => None, // File doesn't exist yet, that's fine
+        }
+    }
+}
+
+/// Get the home directory, falling back to current directory
+fn dirs_next() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Workflow progress tracking for the guided workflow bar.
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct WorkflowProgress {
+    /// Step 1: At least one gateway connected
+    #[serde(default)]
+    pub gateway_connected: bool,
+    /// Step 2: At least one tick received
+    #[serde(default)]
+    pub tick_received: bool,
+    /// Step 3: At least one strategy loaded
+    #[serde(default)]
+    pub strategy_loaded: bool,
+    /// Step 4: Backtest results exist
+    #[serde(default)]
+    pub backtest_completed: bool,
+    /// Step 5: Optimization visited after backtest
+    #[serde(default)]
+    pub optimization_done: bool,
+    /// Step 6: Strategy deployed
+    #[serde(default)]
+    pub strategy_deployed: bool,
+    /// Step 7: Monitoring active (always true once deployed)
+    #[serde(default)]
+    pub monitoring_active: bool,
 }
 
 /// Main window state
@@ -166,6 +294,17 @@ pub struct MainWindow {
     // Track last seen toast ID to detect new alerts
     last_alert_id: u64,
     
+    // Workflow state for cross-panel coordination
+    workflow_state: SharedWorkflowState,
+    // Workflow progress tracking
+    workflow_progress: WorkflowProgress,
+    // Whether to show the workflow guide bar
+    show_workflow_guide: bool,
+    // Auto-save frame counter
+    auto_save_counter: u32,
+    // Last saved state hash to avoid unnecessary saves
+    last_saved_hash: u64,
+    
     // Actions pending from UI
     pub pending_connect: Option<(String, std::collections::HashMap<String, serde_json::Value>)>,
     pub pending_cancel_order: Option<String>,
@@ -181,13 +320,29 @@ impl Default for MainWindow {
 
 impl MainWindow {
     pub fn new(title: &str) -> Self {
-        Self {
+        // Load persisted UI state
+        let saved_state = UiState::load();
+        
+        let (panels, central_tab, bottom_tab, dark_mode, show_workflow_guide) = 
+            if let Some(ref state) = saved_state {
+                (
+                    state.panels.clone(),
+                    state.central_tab,
+                    state.bottom_tab,
+                    state.dark_mode,
+                    state.show_workflow_guide,
+                )
+            } else {
+                (PanelState::new(), CentralTab::default(), BottomTab::default(), true, true)
+            };
+        
+        let mut ret = Self {
             main_engine: None,
             title: title.to_string(),
-            panels: PanelState::new(),
-            central_tab: CentralTab::default(),
-            bottom_tab: BottomTab::default(),
-            dark_mode: true,
+            panels,
+            central_tab,
+            bottom_tab,
+            dark_mode,
             focus_symbol_input: false,
             trading: TradingWidget::new(),
             tick_monitor: TickMonitor::new(),
@@ -223,11 +378,24 @@ impl MainWindow {
             dashboard_log_counter: 0,
             alert_history: Vec::new(),
             last_alert_id: 0,
+            workflow_state: Arc::new(Mutex::new(WorkflowState::new())),
+            workflow_progress: WorkflowProgress::default(),
+            show_workflow_guide,
+            auto_save_counter: 0,
+            last_saved_hash: 0,
             pending_connect: None,
             pending_cancel_order: None,
             pending_cancel_quote: None,
             pending_close: false,
-        }
+        };
+        
+        // Wire workflow state to backtesting panel
+        let ws = ret.workflow_state.clone();
+        ret.backtesting_panel.set_workflow_state(ws.clone());
+        #[cfg(feature = "alpha")]
+        ret.alpha_panel.set_workflow_state(ws);
+        
+        ret
     }
     
     /// Set reference to main engine
@@ -781,57 +949,105 @@ impl MainWindow {
     /// Handle keyboard shortcuts
     fn handle_keyboard_shortcuts(&mut self, ctx: &Context) {
         let ctrl = ctx.input(|i| i.modifiers.ctrl);
+        let shift = ctx.input(|i| i.modifiers.shift);
         
         // Ctrl+1 through Ctrl+7: Switch central tabs
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num1)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num1)) {
             self.central_tab = CentralTab::Tick;
         }
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num2)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num2)) {
             self.central_tab = CentralTab::Order;
         }
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num3)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num3)) {
             self.central_tab = CentralTab::ActiveOrder;
         }
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num4)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num4)) {
             self.central_tab = CentralTab::Trade;
         }
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num5)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num5)) {
             self.central_tab = CentralTab::Quote;
         }
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num6)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num6)) {
             self.central_tab = CentralTab::Backtesting;
         }
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num7)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num7)) {
             self.central_tab = CentralTab::Strategy;
         }
         // Ctrl+8: Indicator tab
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num8)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num8)) {
             self.central_tab = CentralTab::Indicator;
         }
         // Ctrl+0: Dashboard tab
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
             self.central_tab = CentralTab::Dashboard;
         }
         // Ctrl+9: Alpha Research tab (only if alpha feature is enabled)
         #[cfg(feature = "alpha")]
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::Num9)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::Num9)) {
             self.central_tab = CentralTab::AlphaResearch;
         }
         
+        // Ctrl+Shift+B: Backtesting tab
+        if ctrl && shift && ctx.input(|i| i.key_pressed(egui::Key::B)) {
+            self.central_tab = CentralTab::Backtesting;
+        }
+        // Ctrl+Shift+S: Strategy tab
+        if ctrl && shift && ctx.input(|i| i.key_pressed(egui::Key::S)) {
+            self.central_tab = CentralTab::Strategy;
+        }
+        // Ctrl+Shift+O: AdvancedOrders tab
+        if ctrl && shift && ctx.input(|i| i.key_pressed(egui::Key::O)) {
+            self.central_tab = CentralTab::AdvancedOrders;
+        }
+        // Ctrl+Shift+R: RpcMonitor tab
+        if ctrl && shift && ctx.input(|i| i.key_pressed(egui::Key::R)) {
+            self.central_tab = CentralTab::RpcMonitor;
+        }
+        // Ctrl+Shift+A: Alert tab
+        if ctrl && shift && ctx.input(|i| i.key_pressed(egui::Key::A)) {
+            self.central_tab = CentralTab::Alert;
+        }
+        // Ctrl+Shift+G: BracketOrder tab
+        if ctrl && shift && ctx.input(|i| i.key_pressed(egui::Key::G)) {
+            self.central_tab = CentralTab::BracketOrder;
+        }
+        
+        // F5: Run backtest (if on Backtesting tab)
+        if ctx.input(|i| i.key_pressed(egui::Key::F5))
+            && matches!(self.central_tab, CentralTab::Backtesting)
+        {
+            self.backtesting_panel.start_backtesting_external();
+            self.toast_manager.add("回测已启动", ToastType::Info);
+        }
+        // F6: Deploy to paper trading (if on Backtesting tab and results exist)
+        if ctx.input(|i| i.key_pressed(egui::Key::F6))
+            && matches!(self.central_tab, CentralTab::Backtesting)
+            && self.backtesting_panel.has_results()
+        {
+            self.backtesting_panel.deploy_to_paper();
+            self.toast_manager.add("正在部署策略到模拟交易...", ToastType::Info);
+        }
+        // Ctrl+S: Save current UI state
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::S)) {
+            let state = self.current_ui_state();
+            state.save();
+            self.toast_manager.add("UI状态已保存", ToastType::Success);
+        }
+        
         // Ctrl+L: Log tab
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::L)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::L)) {
             self.bottom_tab = BottomTab::Log;
         }
         // Ctrl+B: Account tab
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::B)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::B)) {
             self.bottom_tab = BottomTab::Account;
         }
         // Ctrl+P: Position tab
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::P)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::P)) {
             self.bottom_tab = BottomTab::Position;
         }
         // Ctrl+N: Focus symbol input
-        if ctrl && ctx.input(|i| i.key_pressed(egui::Key::N)) {
+        if ctrl && !shift && ctx.input(|i| i.key_pressed(egui::Key::N)) {
             self.focus_symbol_input = true;
         }
         // Escape: Close dialogs
@@ -853,6 +1069,10 @@ impl MainWindow {
         
         // Top menu bar
         self.show_menu_bar(ctx);
+        
+        // Workflow guide bar
+        self.update_workflow_progress();
+        self.show_workflow_guide_bar(ctx);
         
         // Left panel - trading widget (with toast feedback)
         self.show_trading_panel(ctx);
@@ -876,11 +1096,41 @@ impl MainWindow {
         // Chart windows
         self.show_chart_windows(ctx);
         
-        // Process pending actions
+        // Process pending actions (including workflow actions)
         self.process_pending_actions();
+        
+        // Process workflow actions
+        self.process_workflow_actions();
         
         // Show toast notifications (after all other UI)
         self.toast_manager.show(ctx);
+        
+        // Auto-save UI state every ~300 frames (≈5 seconds at 60fps)
+        self.auto_save_counter += 1;
+        if self.auto_save_counter >= 300 {
+            self.auto_save_counter = 0;
+            let state = self.current_ui_state();
+            let json = serde_json::to_string(&state).unwrap_or_default();
+            // Simple change detection using string length + first chars as a cheap hash
+            let hash = compute_simple_hash(&json);
+            if hash != self.last_saved_hash {
+                self.last_saved_hash = hash;
+                state.save();
+            }
+        }
+    }
+    
+    /// Capture current UI state for persistence
+    fn current_ui_state(&self) -> UiState {
+        UiState {
+            panels: self.panels.clone(),
+            central_tab: self.central_tab,
+            bottom_tab: self.bottom_tab,
+            dark_mode: self.dark_mode,
+            left_panel_width: 300.0,
+            bottom_panel_height: 200.0,
+            show_workflow_guide: self.show_workflow_guide,
+        }
     }
     
     fn show_menu_bar(&mut self, ctx: &Context) {
@@ -922,6 +1172,7 @@ impl MainWindow {
                     ui.separator();
                     
                     ui.checkbox(&mut self.dark_mode, "深色主题");
+                    ui.checkbox(&mut self.show_workflow_guide, "工作流引导");
                 });
                 
                 // Settings
@@ -968,6 +1219,18 @@ impl MainWindow {
 
                         ui.separator();
 
+                        ui.label(RichText::new("工作流快捷键").strong());
+                        ui.label("Ctrl+Shift+B  回测面板");
+                        ui.label("Ctrl+Shift+S  策略面板");
+                        ui.label("Ctrl+Shift+O  高级委托");
+                        ui.label("Ctrl+Shift+R  远程监控");
+                        ui.label("Ctrl+Shift+A  告警面板");
+                        ui.label("Ctrl+Shift+G  组合单");
+                        ui.label("F5  运行回测");
+                        ui.label("F6  部署到模拟交易");
+
+                        ui.separator();
+
                         ui.label(RichText::new("底部标签页").strong());
                         ui.label("Ctrl+L  日志");
                         ui.label("Ctrl+B  资金");
@@ -976,6 +1239,7 @@ impl MainWindow {
                         ui.separator();
                         
                         ui.label(RichText::new("其他").strong());
+                        ui.label("Ctrl+S  保存UI状态");
                         ui.label("Ctrl+N  聚焦代码输入");
                         ui.label("Esc     关闭对话框");
                     });
@@ -989,6 +1253,108 @@ impl MainWindow {
                 });
             });
         });
+    }
+    
+    /// Update workflow progress based on current application state
+    fn update_workflow_progress(&mut self) {
+        // Step 1: At least one gateway connected
+        self.workflow_progress.gateway_connected = !self.connect_dialogs.is_empty()
+            && self.main_engine.is_some();
+        
+        // Step 2: At least one tick received
+        self.workflow_progress.tick_received = self.tick_monitor.has_data();
+        
+        // Step 3: At least one strategy loaded
+        if let Ok(cache) = self.strategy_cache.lock() {
+            self.workflow_progress.strategy_loaded = !cache.is_empty();
+        }
+        
+        // Step 4: Backtest results exist
+        self.workflow_progress.backtest_completed = self.backtesting_panel.has_results();
+        
+        // Step 5: Optimization done (simplified — mark as done if backtest exists)
+        self.workflow_progress.optimization_done = self.workflow_progress.backtest_completed;
+        
+        // Step 6: Strategy deployed
+        if let Ok(cache) = self.strategy_cache.lock() {
+            self.workflow_progress.strategy_deployed = cache.iter().any(|(_, state, _)| *state == StrategyState::Trading);
+        }
+        
+        // Step 7: Monitoring active (true once deployed)
+        self.workflow_progress.monitoring_active = self.workflow_progress.strategy_deployed;
+    }
+    
+    /// Show the workflow guide bar at the top of the central panel
+    fn show_workflow_guide_bar(&mut self, ctx: &Context) {
+        if !self.show_workflow_guide {
+            return;
+        }
+        
+        let steps = [
+            ("① 连接网关", CentralTab::Dashboard, self.workflow_progress.gateway_connected),
+            ("② 订阅行情", CentralTab::Tick, self.workflow_progress.tick_received),
+            ("③ 选择策略", CentralTab::Strategy, self.workflow_progress.strategy_loaded),
+            ("④ 回测验证", CentralTab::Backtesting, self.workflow_progress.backtest_completed),
+            ("⑤ 优化参数", CentralTab::Backtesting, self.workflow_progress.optimization_done),
+            ("⑥ 部署交易", CentralTab::Strategy, self.workflow_progress.strategy_deployed),
+            ("⑦ 监控管理", CentralTab::Dashboard, self.workflow_progress.monitoring_active),
+        ];
+        
+        // Find the first incomplete step (current step)
+        let current_step = steps.iter().position(|(_, _, done)| !*done).unwrap_or(steps.len());
+        
+        TopBottomPanel::top("workflow_guide_bar")
+            .exact_height(28.0)
+            .show(ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    for (i, (label, tab, done)) in steps.iter().enumerate() {
+                        let is_current = i == current_step;
+                        let is_completed = *done;
+                        
+                        let text_color = if is_completed {
+                            Color32::from_rgb(80, 200, 80) // Green for completed
+                        } else if is_current {
+                            Color32::from_rgb(80, 150, 255) // Blue for current
+                        } else {
+                            Color32::from_rgb(100, 100, 100) // Gray for pending
+                        };
+                        
+                        let bg_color = if is_completed {
+                            Color32::from_rgba_unmultiplied(80, 200, 80, 30)
+                        } else if is_current {
+                            Color32::from_rgba_unmultiplied(80, 150, 255, 30)
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+                        
+                        let response = ui.add(
+                            egui::Button::new(
+                                RichText::new(*label).color(text_color).size(12.0)
+                            )
+                            .fill(bg_color)
+                            .stroke(egui::Stroke::new(
+                                if is_current { 1.0 } else { 0.0 },
+                                Color32::from_rgb(80, 150, 255),
+                            ))
+                            .min_size(egui::vec2(0.0, 22.0))
+                        );
+                        
+                        if response.clicked() {
+                            self.central_tab = *tab;
+                        }
+                        
+                        if i < steps.len() - 1 {
+                            ui.label(RichText::new("→").color(Color32::from_rgb(80, 80, 80)).size(12.0));
+                        }
+                    }
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(RichText::new("✕").size(12.0)).clicked() {
+                            self.show_workflow_guide = false;
+                        }
+                    });
+                });
+            });
     }
     
     fn show_central_tabs(&mut self, ui: &mut Ui) {
@@ -1110,6 +1476,12 @@ impl MainWindow {
             CentralTab::AlphaResearch => {
                 self.alpha_panel.show(ui);
             }
+        }
+
+        // Check alpha panel for error toasts
+        #[cfg(feature = "alpha")]
+        if let Some(err) = self.alpha_panel.take_error() {
+            self.toast_manager.add(&err, ToastType::Error);
         }
     }
     
@@ -1468,6 +1840,10 @@ impl MainWindow {
                         Err(e) => tracing::error!("策略 {} 初始化失败: {}", n, e),
                     }
                 });
+                // Note: we can't easily get the async result here for toast
+                // The strategy panel's state will reflect the result on next refresh
+            } else {
+                self.toast_manager.add("策略引擎未加载，无法初始化策略", ToastType::Error);
             }
         }
         if let Some(name) = self.strategy_panel.take_start() {
@@ -1480,6 +1856,8 @@ impl MainWindow {
                         Err(e) => tracing::error!("策略 {} 启动失败: {}", n, e),
                     }
                 });
+            } else {
+                self.toast_manager.add("策略引擎未加载，无法启动策略", ToastType::Error);
             }
         }
         if let Some(name) = self.strategy_panel.take_stop() {
@@ -1492,6 +1870,8 @@ impl MainWindow {
                         Err(e) => tracing::error!("策略 {} 停止失败: {}", n, e),
                     }
                 });
+            } else {
+                self.toast_manager.add("策略引擎未加载，无法停止策略", ToastType::Error);
             }
         }
         if let Some(name) = self.strategy_panel.take_remove() {
@@ -1506,6 +1886,9 @@ impl MainWindow {
                         Err(e) => tracing::error!("策略 {} 移除失败: {}", n, e),
                     }
                 });
+            } else {
+                self.toast_manager.add("策略引擎未加载，无法移除策略", ToastType::Error);
+                self.strategy_panel.clear_selection();
             }
         }
 
@@ -1576,6 +1959,56 @@ impl MainWindow {
                         }
                     }
                 }
+            }
+        }
+    }
+    
+    /// Process workflow actions from SharedWorkflowState
+    fn process_workflow_actions(&mut self) {
+        let actions = self.workflow_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .drain_actions();
+        
+        for action in actions {
+            match action {
+                WorkflowAction::DeployToLive(config) => {
+                    self.central_tab = CentralTab::Strategy;
+                    self.strategy_panel.set_deploy_config(config);
+                    self.toast_manager.add("策略配置已就绪，请点击初始化开始模拟交易", ToastType::Info);
+                }
+                WorkflowAction::SendToBacktest { model_name, dataset_name, vt_symbol } => {
+                    let _ = (&model_name, &dataset_name);
+                    self.central_tab = CentralTab::Backtesting;
+                    self.backtesting_panel.set_vt_symbol(&vt_symbol);
+                    self.toast_manager.add("已切换到回测面板", ToastType::Info);
+                }
+                WorkflowAction::OpenChart(symbol) => {
+                    self.open_chart(&symbol);
+                }
+                WorkflowAction::NavigateTo(tab) => {
+                    self.central_tab = tab;
+                }
+            }
+        }
+        
+        // After backtest completes, sync summary to workflow state
+        if self.backtesting_panel.has_results() {
+            if let Some(stats) = self.backtesting_panel.get_results() {
+                let summary = BacktestSummary {
+                    strategy_name: self.backtesting_panel.get_strategy_name().to_string(),
+                    strategy_class: self.backtesting_panel.get_strategy_class().to_string(),
+                    vt_symbol: self.backtesting_panel.get_vt_symbol().to_string(),
+                    interval: self.backtesting_panel.get_interval(),
+                    rate: self.backtesting_panel.get_rate(),
+                    slippage: self.backtesting_panel.get_slippage(),
+                    capital: self.backtesting_panel.get_capital(),
+                    statistics: stats.clone(),
+                };
+                self.workflow_state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .set_backtest_summary(summary);
             }
         }
     }
@@ -2329,6 +2762,16 @@ fn parse_offset(s: &str) -> crate::trader::Offset {
         "closeyesterday" | "平昨" => crate::trader::Offset::CloseYesterday,
         _ => crate::trader::Offset::None,
     }
+}
+
+/// Simple hash for change detection (FNV-1a-like)
+fn compute_simple_hash(s: &str) -> u64 {
+    let mut hash: u64 = 14_695_981_039_346_656_037; // FNV offset basis
+    for byte in s.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(1_099_511_628_211); // FNV prime
+    }
+    hash
 }
 
 /// Create an indicator Box from type string and period

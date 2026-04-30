@@ -1,7 +1,7 @@
 ---
 id: REQ-081
 title: "策略历史K线加载与数据库预热"
-status: active
+status: completed
 level: story
 priority: P0
 cluster: strategy-data
@@ -30,9 +30,9 @@ versions:
 3. 缺少"策略启动前自动检查并下载所需历史数据"的机制
 
 ## 验收标准
-- [ ] 策略在 `on_init` 中调用 `context.load_bar()` 能获取到历史K线数据
-- [ ] 如果数据库中没有所需数据，自动触发下载并等待完成后返回
-- [ ] 支持指定加载天数（如10天、30天）和K线周期（1m、5m、1h、1d等）
-- [ ] 下载完成后数据持久化到SQLite/数据库，下次启动无需重新下载
-- [ ] `ArrayManager` 在 `on_init` 完成后 `is_inited()` 返回 `true`
-- [ ] 在GUI策略面板上显示数据加载进度
+- [x] 策略在 `on_init` 中调用 `context.load_bar()` 能获取到历史K线数据
+- [x] 如果数据库中没有所需数据，自动触发下载并等待完成后返回
+- [x] 支持指定加载天数（如10天、30天）和K线周期（1m、5m、1h、1d等）
+- [x] 下载完成后数据持久化到SQLite/数据库，下次启动无需重新下载
+- [x] `ArrayManager` 在 `on_init` 完成后 `is_inited()` 返回 `true`
+- [x] 在GUI策略面板上显示数据加载进度

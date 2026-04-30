@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 use chrono;
 
 use super::app::BaseApp;
-use super::constant::{Exchange, StpMode};
+use super::constant::{Direction, Exchange, StpMode};
 use super::contract_manager::ContractManager;
 use super::converter::OffsetConverter;
 use super::data_download::DataDownloadManager;
@@ -549,6 +549,46 @@ impl OmsEngine {
             e.into_inner()
         });
         data.logs.clone()
+    }
+
+    /// Get positions grouped by `vt_symbol`, merging long/short into net positions.
+    ///
+    /// Returns a `HashMap<String, PositionData>` where the key is `vt_symbol`
+    /// and the value is the net position (long volume minus short volume).
+    /// If a symbol has only long or only short positions, that entry is returned directly.
+    /// If both directions exist, a synthetic net `PositionData` is created with
+    /// `Direction::Net`, volume = long - short, and pnl = long.pnl + short.pnl.
+    pub fn get_positions_by_symbol(&self) -> HashMap<String, PositionData> {
+        let data = self.data.read().unwrap_or_else(|e| {
+            warn!("OmsEngine lock poisoned, recovering");
+            e.into_inner()
+        });
+
+        let mut result: HashMap<String, PositionData> = HashMap::new();
+        for pos in data.positions.values() {
+            let vt_symbol = pos.vt_symbol();
+            match result.get_mut(&vt_symbol) {
+                Some(existing) => {
+                    let vol_delta = match pos.direction {
+                        Direction::Long => pos.volume,
+                        Direction::Short => -pos.volume,
+                        Direction::Net => pos.volume,
+                    };
+                    existing.volume += vol_delta;
+                    existing.pnl += pos.pnl;
+                    existing.frozen += pos.frozen;
+                    existing.direction = Direction::Net;
+                }
+                None => {
+                    let mut net_pos = pos.clone();
+                    if pos.direction == Direction::Short {
+                        net_pos.volume = -pos.volume;
+                    }
+                    result.insert(vt_symbol, net_pos);
+                }
+            }
+        }
+        result
     }
 }
 
@@ -1698,6 +1738,11 @@ impl MainEngine {
     /// Get bar data
     pub fn get_bar(&self, vt_symbol: &str) -> Option<BarData> {
         self.oms_engine.get_bar(vt_symbol)
+    }
+
+    /// Get a reference to the OMS engine for position/order queries
+    pub fn get_oms_engine(&self) -> &OmsEngine {
+        &self.oms_engine
     }
 
     /// Get order data

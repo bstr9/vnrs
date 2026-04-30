@@ -610,6 +610,32 @@ impl StrategyTemplate for PythonStrategyAdapter {
             .copied()
             .unwrap_or(0.0)
     }
+
+    fn on_risk_alert(&mut self, reason: &str) {
+        // Forward risk alert to Python strategy's on_risk_alert method
+        Python::attach(|py| {
+            if let Err(e) = self.call_py_method_with_str("on_risk_alert", py, reason) {
+                warn!("策略 {} on_risk_alert 错误: {}", self.strategy_name, e);
+            }
+        });
+    }
+
+    fn set_optimized_parameters(&mut self, parameters: &std::collections::HashMap<String, f64>) {
+        // Forward optimized parameters to Python strategy
+        Python::attach(|py| {
+            let dict = pyo3::types::PyDict::new(py);
+            for (k, v) in parameters {
+                if let Err(e) = dict.set_item(k, *v) {
+                    warn!("策略 {} set_optimized_parameters 错误: {}", self.strategy_name, e);
+                    return;
+                }
+            }
+            let strategy = self.py_strategy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Err(e) = strategy.call_method1(py, "set_optimized_parameters", (dict,)) {
+                warn!("策略 {} set_optimized_parameters 错误: {}", self.strategy_name, e);
+            }
+        });
+    }
 }
 
 /// Load multiple strategies from a directory and extract class names

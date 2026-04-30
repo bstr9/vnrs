@@ -1,7 +1,7 @@
 ---
 id: REQ-085
 title: "风控规则实时生效与策略熔断"
-status: active
+status: completed
 level: story
 priority: P0
 cluster: risk
@@ -32,10 +32,10 @@ RiskManager 已有完善的风控检查逻辑（max_order_count, max_daily_loss,
 5. **通知机制** — 风控触发时通知策略（`on_risk_alert`）和用户（GUI告警）
 
 ## 验收标准
-- [ ] GUI 上可实时修改风控参数（最大日亏损、最大持仓、最大单量等）
-- [ ] 修改后立即生效，无需重启
-- [ ] 每个策略有独立的风控配置（通过 `set_strategy_risk_config` 已存在，需完善）
-- [ ] 日亏损超过 `max_daily_loss` 时自动暂停策略（熔断），不再发单
-- [ ] 熔断后 GUI 显示告警，用户可手动恢复
-- [ ] 每日零点自动重置 `DailyStats`（交易次数、日亏损等计数器）
-- [ ] 风控触发时调用策略的 `on_risk_alert(reason)` 回调
+- [x] GUI 上可实时修改风控参数（最大日亏损、最大持仓、最大单量等）
+- [x] 修改后立即生效，无需重启
+- [x] 每个策略有独立的风控配置（通过 `set_strategy_risk_config` 已存在，需完善）
+- [x] 日亏损超过 `max_daily_loss` 时自动暂停策略（熔断），不再发单
+- [x] 熔断后 GUI 显示告警，用户可手动恢复
+- [x] 每日零点自动重置 `DailyStats`（交易次数、日亏损等计数器）
+- [x] 风控触发时调用策略的 `on_risk_alert(reason)` 回调

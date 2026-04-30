@@ -846,12 +846,14 @@ impl BaseData for QuoteData {
 pub struct SubscribeRequest {
     pub symbol: String,
     pub exchange: Exchange,
+    #[serde(default)]
+    pub interval: Option<Interval>,
 }
 
 impl SubscribeRequest {
     /// Create a new `SubscribeRequest`
     pub fn new(symbol: String, exchange: Exchange) -> Self {
-        Self { symbol, exchange }
+        Self { symbol, exchange, interval: None }
     }
 
     /// Get `vt_symbol` (symbol.exchange)

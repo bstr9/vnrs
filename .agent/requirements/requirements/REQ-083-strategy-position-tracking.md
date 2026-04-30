@@ -1,7 +1,7 @@
 ---
 id: REQ-083
 title: "策略仓位与盈亏实时跟踪"
-status: active
+status: completed
 level: story
 priority: P0
 cluster: strategy-execution
@@ -38,10 +38,10 @@ versions:
 - 仓位变化时触发 `on_position_update` 回调
 
 ## 验收标准
-- [ ] 策略 `on_trade` 回调后，`get_position(vt_symbol)` 返回准确的持仓数量
-- [ ] 做多：买入增加持仓，卖出减少持仓；做空：卖出增加持仓，买入减少持仓
-- [ ] 支持计算成交均价（加权平均）
-- [ ] 支持实时浮动盈亏计算 `get_unrealized_pnl(vt_symbol)`
-- [ ] 支持已实现盈亏累计 `get_realized_pnl()`
-- [ ] 仓位从非零变零时（平仓完毕），自动重置成交均价
-- [ ] 与 OmsEngine 中的实际持仓数据定期对账，发现偏差时告警
+- [x] 策略 `on_trade` 回调后，`get_position(vt_symbol)` 返回准确的持仓数量
+- [x] 做多：买入增加持仓，卖出减少持仓；做空：卖出增加持仓，买入减少持仓
+- [x] 支持计算成交均价（加权平均）
+- [x] 支持实时浮动盈亏计算 `get_unrealized_pnl(vt_symbol)`
+- [x] 支持已实现盈亏累计 `get_realized_pnl()`
+- [x] 仓位从非零变零时（平仓完毕），自动重置成交均价
+- [x] 与 OmsEngine 中的实际持仓数据定期对账，发现偏差时告警

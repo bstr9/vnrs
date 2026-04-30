@@ -225,6 +225,11 @@ impl TickMonitor {
         self.data.insert(vt_symbol, TickRow::from(tick));
     }
 
+    /// Check if any tick data has been received
+    pub fn has_data(&self) -> bool {
+        !self.data.is_empty()
+    }
+
     /// Sort tick rows based on current sort state
     fn sort_rows(&self, rows: &mut Vec<&TickRow>) {
         let col = match self.sort.column {

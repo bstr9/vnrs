@@ -1,7 +1,7 @@
 ---
 id: REQ-084
 title: "策略止盈止损自动管理"
-status: active
+status: completed
 level: story
 priority: P0
 cluster: strategy-execution
@@ -35,10 +35,10 @@ versions:
 7. 止损触发后自动取消对应的止盈单，反之亦然
 
 ## 验收标准
-- [ ] 策略调用 `buy_with_stop()` 后，开仓成交自动挂止损和止盈单
-- [ ] 止损单触发后，对应的止盈单自动取消
-- [ ] 止盈单触发后，对应的止损单自动取消
-- [ ] 支持移动止损：每次新高/新低时自动修改止损价位
-- [ ] 支持 ATR 动态止损距离
-- [ ] GUI 上能看到策略关联的止盈止损单状态
-- [ ] 策略可通过 `cancel_stop_orders(vt_symbol)` 取消所有关联的止盈止损单
+- [x] 策略调用 `buy_with_stop()` 后，开仓成交自动挂止损和止盈单
+- [x] 止损单触发后，对应的止盈单自动取消
+- [x] 止盈单触发后，对应的止损单自动取消
+- [x] 支持移动止损：每次新高/新低时自动修改止损价位
+- [x] 支持 ATR 动态止损距离
+- [x] GUI 上能看到策略关联的止盈止损单状态
+- [x] 策略可通过 `cancel_stop_orders(vt_symbol)` 取消所有关联的止盈止损单

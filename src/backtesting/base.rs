@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::trader::TradeData;
+use crate::trader::{Exchange, Interval, TradeData};
 
 /// Backtesting mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,6 +273,108 @@ impl Default for BacktestingStatistics {
             largest_winning_trade: 0.0,
             largest_losing_trade: 0.0,
         }
+    }
+}
+
+/// Configuration for deploying a strategy from backtesting to live/paper trading.
+///
+/// Captures the essential settings from a backtest that are needed to run the same
+/// strategy in a live or paper trading environment. This enables the
+/// backtest → optimize → paper → live pipeline.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use trade_engine::backtesting::LiveDeploymentConfig;
+///
+/// let config = LiveDeploymentConfig {
+///     strategy_name: "DoubleMA".to_string(),
+///     vt_symbol: "BTCUSDT.BINANCE".to_string(),
+///     exchange: trade_engine::trader::Exchange::Binance,
+///     interval: trade_engine::trader::Interval::Minute,
+///     capital: 100_000.0,
+///     rate: 0.0003,
+///     slippage: 0.1,
+///     size: 1.0,
+///     pricetick: 0.01,
+///     optimal_parameters: Default::default(),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveDeploymentConfig {
+    /// Strategy class name (for logging / identification)
+    pub strategy_name: String,
+    /// Instrument identifier (`SYMBOL.EXCHANGE` format, e.g. `BTCUSDT.BINANCE`)
+    pub vt_symbol: String,
+    /// Exchange
+    pub exchange: Exchange,
+    /// Bar interval
+    pub interval: Interval,
+    /// Initial capital
+    pub capital: f64,
+    /// Commission rate
+    pub rate: f64,
+    /// Slippage per unit
+    pub slippage: f64,
+    /// Contract size (1 for spot, varies for futures)
+    pub size: f64,
+    /// Minimum price tick
+    pub pricetick: f64,
+    /// Optimal parameters found during optimization (parameter_name → value)
+    pub optimal_parameters: HashMap<String, f64>,
+}
+
+impl LiveDeploymentConfig {
+    /// Create a new deployment config with required fields and sensible defaults.
+    pub fn new(
+        strategy_name: String,
+        vt_symbol: String,
+        exchange: Exchange,
+        interval: Interval,
+        capital: f64,
+    ) -> Self {
+        Self {
+            strategy_name,
+            vt_symbol,
+            exchange,
+            interval,
+            capital,
+            rate: 0.0003,
+            slippage: 0.0,
+            size: 1.0,
+            pricetick: 0.01,
+            optimal_parameters: HashMap::new(),
+        }
+    }
+
+    /// Set commission rate.
+    pub fn with_rate(mut self, rate: f64) -> Self {
+        self.rate = rate;
+        self
+    }
+
+    /// Set slippage.
+    pub fn with_slippage(mut self, slippage: f64) -> Self {
+        self.slippage = slippage;
+        self
+    }
+
+    /// Set contract size.
+    pub fn with_size(mut self, size: f64) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// Set price tick.
+    pub fn with_pricetick(mut self, pricetick: f64) -> Self {
+        self.pricetick = pricetick;
+        self
+    }
+
+    /// Set optimal parameters from optimization.
+    pub fn with_parameters(mut self, params: HashMap<String, f64>) -> Self {
+        self.optimal_parameters = params;
+        self
     }
 }
 

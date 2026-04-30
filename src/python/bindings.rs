@@ -243,6 +243,9 @@ fn trade_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register order emulator module
     crate::python::order_emulator::register_order_emulator_module(m)?;
 
+    // Register optimization module
+    crate::python::optimization_bindings::register_optimization_module(m)?;
+
     Ok(())
 }
 
